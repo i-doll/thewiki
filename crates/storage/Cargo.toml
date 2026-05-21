@@ -10,6 +10,14 @@ authors.workspace = true
 
 [dependencies]
 thewiki-core = { workspace = true }
+# sqlx is intentionally NOT a runtime dependency at this point — this crate is
+# a shell pending #6, which lands the SQLite adapter and will add sqlx with
+# only the features that adapter actually uses. The dev-dependency below is
+# what the migration integration test needs.
+
+[dev-dependencies]
+sqlx = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true
