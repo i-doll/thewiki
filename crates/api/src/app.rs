@@ -14,9 +14,9 @@ use tower::ServiceBuilder;
 use tower_http::{
     catch_panic::CatchPanicLayer,
     request_id::{MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer},
-    trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
+    trace::{DefaultOnResponse, TraceLayer},
 };
-use tracing::Level;
+use tracing::{Level, field};
 use uuid::Uuid;
 
 /// HTTP header used to carry the per-request correlation ID.
@@ -44,11 +44,25 @@ pub fn build() -> Router {
         ))
         .layer(
             TraceLayer::new_for_http()
-                .make_span_with(
-                    DefaultMakeSpan::new()
-                        .level(Level::INFO)
-                        .include_headers(false),
-                )
+                .make_span_with(|request: &Request<_>| {
+                    // Pull the request ID off the extensions (set by
+                    // SetRequestIdLayer just above) so it's part of every log
+                    // line for the request. Falls back to "-" if missing,
+                    // which only happens before SetRequestIdLayer in tests.
+                    let request_id = request
+                        .extensions()
+                        .get::<RequestId>()
+                        .and_then(|id| id.header_value().to_str().ok())
+                        .unwrap_or("-");
+                    tracing::info_span!(
+                        "request",
+                        method = %request.method(),
+                        uri = %request.uri(),
+                        version = ?request.version(),
+                        request_id = %request_id,
+                        status = field::Empty,
+                    )
+                })
                 .on_response(
                     DefaultOnResponse::new()
                         .level(Level::INFO)
@@ -87,8 +101,15 @@ struct MakeUuidV7RequestId;
 impl MakeRequestId for MakeUuidV7RequestId {
     fn make_request_id<B>(&mut self, _request: &Request<B>) -> Option<RequestId> {
         let id = Uuid::now_v7();
-        // UUID hyphenated form is always ASCII; `HeaderValue::from_str` cannot fail.
-        let value = HeaderValue::from_str(&id.to_string()).ok()?;
+        // UUID hyphenated form is always ASCII; `HeaderValue::from_str` cannot
+        // fail. We use `expect` here so a future regression surfaces loudly
+        // instead of silently dropping the request ID.
+        #[allow(
+            clippy::expect_used,
+            reason = "UUIDv7 hyphenated form is provably valid for HeaderValue"
+        )]
+        let value = HeaderValue::from_str(&id.to_string())
+            .expect("UUIDv7 hyphenated form is always valid ASCII for a header value");
         Some(RequestId::new(value))
     }
 }
