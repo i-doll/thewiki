@@ -38,7 +38,22 @@ Multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR at [`ghcr
 docker run --rm -p 8080:8080 ghcr.io/i-doll/thewiki:edge
 ```
 
-The image is built on `gcr.io/distroless/cc-debian12:nonroot` — non-root by default (uid `65532`), no shell, no package manager. The Rust binary lives at `/usr/local/bin/thewiki` and the built frontend at `/srv/web/dist/` (the latter is staged for [#16](https://github.com/i-doll/thewiki/issues/16), where `rust-embed` will pick it up). The server listens on `0.0.0.0:8080`; probe `GET /healthz` for liveness.
+The image is built on `gcr.io/distroless/cc-debian12:nonroot` — non-root by default (uid `65532`), no shell, no package manager. The Rust binary lives at `/usr/local/bin/thewiki` and bakes the SPA bundle directly into the executable via [`rust-embed`](https://docs.rs/rust-embed) — no separate static-file mount needed. The server listens on `0.0.0.0:8080`; probe `GET /healthz` for liveness.
+
+### Frontend dev workflow
+
+For local frontend work you usually don't want the Rust binary serving a stale embedded bundle. Run the two halves side by side:
+
+```sh
+# Terminal 1 — Rust API only, SPA fallback disabled.
+# (Copy `thewiki.example.toml` to `dev.toml` and set `server.serve_frontend = false`.)
+cargo run -p thewiki-api -- serve --config dev.toml --insecure-cookie
+
+# Terminal 2 — Vite dev server with hot reload. Proxies `/api/*` to :8080.
+cd web && pnpm dev
+```
+
+The Vite config in `web/vite.config.ts` already proxies `/api/*` to `http://localhost:8080`, so the SPA running on `:5173` talks to the live backend without CORS gymnastics. Unmatched routes on the Rust side return `404`, which Vite handles by serving its own dev `index.html`.
 
 ## Configuration
 
