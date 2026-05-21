@@ -68,30 +68,47 @@ function buildWrapKeymap(prefix: string, suffix: string): Command {
 
 /**
  * Inserts a Markdown link around the current selection: `[text](url)`. If the
- * selection is empty, places the cursor inside the empty link text.
+ * selection is empty, places the cursor inside the empty link text. Otherwise
+ * selects the `url` placeholder so the user can type the URL straight away.
  */
 const insertLink: Command = (view) => {
 	const { state } = view;
 	const changes = state.changeByRange((range) => {
 		const selected = state.sliceDoc(range.from, range.to);
 		const replacement = `[${selected}](url)`;
-		// Place the cursor inside the URL placeholder so the user can type it.
-		const urlStart = range.from + 1 + selected.length + 2; // after `[selected](`
+		// Position layout: `[selected](url)`
+		//                   ^         ^   ^
+		//                   from      |   end of replacement
+		//                             urlStart (selects the literal "url")
+		const urlStart = range.from + 1 + selected.length + 2;
 		const cursor = range.empty ? range.from + 1 : urlStart;
+		const head = range.empty ? cursor : urlStart + 3; // select exactly "url"
 		return {
 			changes: { from: range.from, to: range.to, insert: replacement },
-			range: { anchor: cursor, head: cursor + (range.empty ? 0 : 3) } as never,
+			range: { anchor: cursor, head } as never,
 		};
 	});
 	view.dispatch(state.update(changes, { scrollIntoView: true, userEvent: "input" }));
 	return true;
 };
 
-const markdownKeymap: KeyBinding[] = [
-	{ key: "Mod-b", run: buildWrapKeymap("**", "**") },
-	{ key: "Mod-i", run: buildWrapKeymap("*", "*") },
-	{ key: "Mod-k", run: insertLink },
-];
+function buildMarkdownKeymap(onToggleMode: () => void): KeyBinding[] {
+	return [
+		{ key: "Mod-b", run: buildWrapKeymap("**", "**") },
+		{ key: "Mod-i", run: buildWrapKeymap("*", "*") },
+		{ key: "Mod-k", run: insertLink },
+		// Higher precedence than CodeMirror's default comment-toggle binding so
+		// the global "switch editor mode" shortcut wins inside source mode.
+		{
+			key: "Mod-/",
+			preventDefault: true,
+			run: () => {
+				onToggleMode();
+				return true;
+			},
+		},
+	];
+}
 
 interface TiptapEditorProps {
 	markdown: string;
@@ -137,6 +154,10 @@ function TiptapEditor({ markdown: markdownValue, onChange }: TiptapEditorProps) 
 	const lastEmittedRef = useRef<string>(markdownValue);
 
 	const editor = useEditor({
+		// React 19 + StrictMode can render before the editor instance is ready;
+		// `immediatelyRender: false` tells Tiptap to wait for the first effect
+		// pass and avoids hydration-mismatch warnings.
+		immediatelyRender: false,
 		extensions: [
 			StarterKit,
 			LinkShortcut,
@@ -189,10 +210,18 @@ function TiptapEditor({ markdown: markdownValue, onChange }: TiptapEditorProps) 
 interface SourceEditorProps {
 	value: string;
 	onChange: (next: string) => void;
+	onToggleMode: () => void;
 }
 
-function SourceEditor({ value, onChange }: SourceEditorProps) {
-	const extensions = useMemo(() => [markdown(), keymap.of(markdownKeymap)], []);
+function SourceEditor({ value, onChange, onToggleMode }: SourceEditorProps) {
+	// The keymap closes over `onToggleMode`, so rebuild it whenever the toggle
+	// identity changes. Prepended via `Prec.highest`-style ordering: by passing
+	// our keymap *after* the language extension, CodeMirror gives our bindings
+	// priority over any defaults a future extension might register.
+	const extensions = useMemo(
+		() => [markdown(), keymap.of(buildMarkdownKeymap(onToggleMode))],
+		[onToggleMode],
+	);
 
 	return (
 		<CodeMirror
@@ -291,7 +320,7 @@ export function Editor({ value, onChange, initialMode = "wysiwyg" }: EditorProps
 			{mode === "wysiwyg" ? (
 				<TiptapEditor markdown={value} onChange={onChange} />
 			) : (
-				<SourceEditor value={value} onChange={onChange} />
+				<SourceEditor value={value} onChange={onChange} onToggleMode={toggleMode} />
 			)}
 		</div>
 	);
