@@ -2,8 +2,23 @@
 //!
 //! The shape of every trait is the same: async methods returning
 //! [`Result<T, StorageError>`](crate::StorageError). Backends implement these;
-//! the API crate consumes them through `Arc<dyn …>` and stays backend-agnostic
-//! at the call site.
+//! the API crate consumes them generically (`fn handler<R: PageRepository>`)
+//! and stays backend-agnostic at the call site.
+//!
+//! ## A note on `async fn` in trait and `dyn`-compatibility
+//!
+//! These traits use native `async fn` (stable on Rust 1.92). That keeps the
+//! definitions clean, but `async_fn_in_trait` is **not** object-safe in stable
+//! Rust today — `Box<dyn PageRepository>` or `Arc<dyn PageRepository>` will
+//! not compile. The intentional path is therefore monomorphisation via
+//! generics, which the API layer adopts when wiring handlers.
+//!
+//! If a future revision needs trait objects (e.g. a runtime-pluggable
+//! storage backend), we will introduce a `Send`-bounded variant via
+//! [`trait_variant`](https://crates.io/crates/trait-variant) (`#[trait_variant::make(SendXxx: Send)]`)
+//! or rewrite the return position as `impl Future<Output = …> + Send + '_`.
+//! Both are mechanical changes; the current decision is to stay minimal until
+//! the API integration in #9 forces our hand.
 //!
 //! Pagination is **cursor-based** — list endpoints accept a [`Cursor`] and a
 //! `limit`, and return a slice plus an opaque next-cursor token. Offset

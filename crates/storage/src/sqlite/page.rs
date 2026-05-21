@@ -144,6 +144,13 @@ impl PageRepository for SqlitePageRepository<'_> {
         // Cursor encodes the last `(created_at, id)` we returned. We fetch
         // `limit + 1` rows so the presence of an N+1th tells us another page
         // is available; we then drop it and emit it as the next cursor.
+        //
+        // Note on row-value comparison `(created_at, id) > (?2, ?3)`:
+        // SQLite evaluates row-value comparisons element-by-element by column
+        // affinity. `created_at` is TEXT (RFC3339 lexicographically sortable),
+        // `id` is BLOB(16) (compared bytewise). Both halves are total orders
+        // and binding matches column affinity, so the predicate is stable even
+        // when two pages share a timestamp.
         let take = i64::from(limit) + 1;
 
         let rows: Vec<PageRow> = if let Some(cursor) = cursor {
