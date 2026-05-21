@@ -12,8 +12,37 @@ authors.workspace = true
 name = "thewiki"
 path = "src/main.rs"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
-# Real dependencies (axum, tokio, tower, …) land in a follow-up issue.
+# Sibling crates. `thewiki-core` will provide domain types in #4; for now we
+# only pull it in as a path dependency so the wiring is in place.
+thewiki-core = { workspace = true }
+
+# HTTP stack.
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# Observability.
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# CLI.
+clap = { workspace = true }
+
+# Binary error handling.
+anyhow = { workspace = true }
+
+# Request IDs.
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tower = { workspace = true }
+http-body-util = { workspace = true }
 
 [lints]
 workspace = true
