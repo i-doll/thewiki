@@ -159,6 +159,10 @@ fn decode_cursor(c: &Cursor) -> Result<(String, String), StorageError> {
     let (ts, id_hex) = c.0.split_once('|').ok_or_else(|| {
         StorageError::invalid_input("recent-changes cursor must be `<timestamp>|<hex-id>`")
     })?;
+    // Validate the timestamp half so a malformed cursor surfaces as
+    // `InvalidInput` rather than silently degrading to TEXT comparison and
+    // producing wrong results.
+    parse_ts(ts)?;
     Ok((ts.to_string(), id_hex.to_string()))
 }
 

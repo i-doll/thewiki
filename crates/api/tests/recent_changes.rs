@@ -444,6 +444,65 @@ async fn unknown_namespace_filter_returns_404() {
 }
 
 #[tokio::test]
+async fn filter_by_actor_excludes_other_authors() {
+    let (router, alice_id, storage) = fresh_app().await;
+
+    let bob = User {
+        id: UserId::new(),
+        username: Username::new("bob").expect("valid username"),
+        email: None,
+        display_name: None,
+        created_at: OffsetDateTime::now_utc(),
+        last_login_at: None,
+    };
+    storage.users().create(&bob, None).await.expect("seed bob");
+
+    create_page(
+        router.clone(),
+        alice_id,
+        "Main",
+        "alice-page",
+        "Alice",
+        "by Alice",
+    )
+    .await;
+    create_page(router.clone(), bob.id, "Main", "bob-page", "Bob", "by Bob").await;
+
+    let (status, body) = json_request(
+        router,
+        "GET",
+        "/api/v1/recent-changes?actor=bob",
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(
+        items.len(),
+        1,
+        "expected one bob-authored change: {items:?}"
+    );
+    assert_eq!(items[0]["author_username"], "bob");
+    assert_eq!(items[0]["page_slug"], "bob-page");
+}
+
+#[tokio::test]
+async fn unknown_actor_filter_returns_404() {
+    let (router, _, _) = fresh_app().await;
+    let (status, body) = json_request(
+        router,
+        "GET",
+        "/api/v1/recent-changes?actor=ghost",
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
+    assert_eq!(body["code"], "not_found");
+}
+
+#[tokio::test]
 async fn openapi_includes_recent_changes_path() {
     let (router, _, _) = fresh_app().await;
     let (status, body) = json_request(router, "GET", "/api/openapi.json", None, None).await;
