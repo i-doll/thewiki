@@ -30,6 +30,16 @@ A self-hosted, single-binary wiki for public reference use. Aims to be **simpler
 
 For the full picture — crate layout, the `Renderer` trait, the database story, the frontend split, and how it all fits together — see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
+## Container image
+
+Multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR at [`ghcr.io/i-doll/thewiki`](https://github.com/i-doll/thewiki/pkgs/container/thewiki). The `:edge` tag tracks `main`; release tags (`v0.1.0`, etc.) follow semver and additionally publish `:latest`.
+
+```sh
+docker run --rm -p 8080:8080 ghcr.io/i-doll/thewiki:edge
+```
+
+The image is built on `gcr.io/distroless/cc-debian12:nonroot` — non-root by default (uid `65532`), no shell, no package manager. The Rust binary lives at `/usr/local/bin/thewiki` and the built frontend at `/srv/web/dist/` (the latter is staged for [#16](https://github.com/i-doll/thewiki/issues/16), where `rust-embed` will pick it up). The server listens on `0.0.0.0:8080`; probe `GET /healthz` for liveness.
+
 ## Roadmap
 
 - **M0 — Walking skeleton**: single binary boots, SQLite backend, Markdown CRUD with history/diff/revert.

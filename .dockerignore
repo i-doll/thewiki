@@ -1,0 +1,77 @@
+# Keep the build context small and reproducible.
+#
+# Anything matched here is *not* sent to the daemon, so the builder can't
+# accidentally see local state (target/, node_modules/, .env, etc.) that
+# would either bloat the context or leak into the image.
+
+# VCS
+.git/
+.gitignore
+.gitattributes
+
+# CI/automation we don't need at build time
+.github/
+.claude/
+tasks/
+
+# Rust build artefacts
+target/
+**/target/
+Cargo.lock.bak
+*.rs.bk
+*.pdb
+
+# Node / pnpm artefacts
+node_modules/
+**/node_modules/
+web/dist/
+web/.vite/
+**/*.tsbuildinfo
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# Secrets / env (defence in depth — the daemon would refuse most of these
+# anyway, but the rule makes the intent explicit).
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs / coverage / test output
+*.log
+npm-debug.log*
+pnpm-debug.log*
+coverage/
+*.lcov
+.nyc_output/
+playwright-report/
+test-results/
+/.tantivy-*
+
+# Local SQLite dev DBs
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
+
+# Markdown docs that don't influence the build. README stays in the context
+# in case future build stages want to copy it into the image.
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+SECURITY.md
+docs/
+
+# Note: We deliberately do *not* exclude Dockerfile/.dockerignore from the
+# context. Docker reads them out of band, and keeping them in the context
+# avoids surprises with tooling that introspects the build inputs.
