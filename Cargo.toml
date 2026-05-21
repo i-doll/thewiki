@@ -64,8 +64,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"]
 # CLI surface for the `thewiki` binary.
 clap = { version = "4", features = ["derive", "env"] }
 
+# Layered configuration loader (#8): built-in defaults < `thewiki.toml` < env.
+figment = { version = "0.10", features = ["toml", "env"] }
+
 # Binary-only error handling. Library crates use `thiserror`.
 anyhow = "1"
+
+# Serialising `Config` back to TOML for the `config print` debug aid (#8).
+toml = "0.8"
 
 # Test helpers (collecting axum response bodies in integration tests).
 http-body-util = "0.1"

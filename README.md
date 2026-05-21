@@ -40,6 +40,23 @@ docker run --rm -p 8080:8080 ghcr.io/i-doll/thewiki:edge
 
 The image is built on `gcr.io/distroless/cc-debian12:nonroot` — non-root by default (uid `65532`), no shell, no package manager. The Rust binary lives at `/usr/local/bin/thewiki` and the built frontend at `/srv/web/dist/` (the latter is staged for [#16](https://github.com/i-doll/thewiki/issues/16), where `rust-embed` will pick it up). The server listens on `0.0.0.0:8080`; probe `GET /healthz` for liveness.
 
+## Configuration
+
+Configuration loads from three layered sources (later layers override earlier ones):
+
+1. **Built-in defaults** baked into the binary — every key has a sensible default, so a fresh deploy boots without any config file.
+2. **TOML file**, opt-in via `thewiki serve --config thewiki.toml` (or `THEWIKI_CONFIG_PATH`). A documented starting point lives at [`thewiki.example.toml`](./thewiki.example.toml) — copy it, edit, and point the binary at it.
+3. **Environment variables** prefixed `THEWIKI_`. Nested keys use a *double underscore* as separator: `THEWIKI_SERVER__BIND=127.0.0.1:8080`, `THEWIKI_AUTH__ARGON2__MEMORY_KIB=98304`.
+
+Validate a file without booting the server:
+
+```sh
+thewiki config check --file thewiki.toml
+thewiki config print --file thewiki.toml     # also accepts --json
+```
+
+The set of available keys is documented inline in [`thewiki.example.toml`](./thewiki.example.toml).
+
 ## Roadmap
 
 - **M0 — Walking skeleton**: single binary boots, SQLite backend, Markdown CRUD with history/diff/revert.
