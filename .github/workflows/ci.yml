@@ -1,9 +1,15 @@
 name: CI
 
+# CI is intentionally disabled for now — pre-alpha development, gating on it
+# would slow down M0. To re-enable, restore the push/pull_request triggers
+# below. Until then, the pipeline can be exercised manually via the Actions
+# tab ("Run workflow") which uses workflow_dispatch.
+#
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 concurrency:
