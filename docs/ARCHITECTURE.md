@@ -20,12 +20,13 @@ Everything else in this document follows from those two goals. When in doubt, op
 ```
 thewiki/
 ├── crates/
-│   ├── api/          # Axum HTTP server, REST + GraphQL handlers, middleware
-│   ├── core/         # Domain model + traits (Renderer, Repository, ...)
-│   ├── render/       # Renderer implementations (Markdown at M0)
-│   ├── search/       # Tantivy index + query layer (M1)
-│   └── storage/      # sqlx-based persistence + object_store glue
-├── web/              # TanStack Start SPA (React + Vite), builds to dist/
+│   ├── api/          # `thewiki-api` — Axum HTTP server, REST + GraphQL handlers, middleware (binary)
+│   ├── core/         # `thewiki-core` — Domain model + traits (Renderer, Repository, ...)
+│   ├── render/       # `thewiki-render` — Renderer implementations (Markdown at M0)
+│   ├── search/       # `thewiki-search` — Tantivy index + query layer (M1)
+│   └── storage/      # `thewiki-storage` — sqlx-based persistence + object_store glue
+├── xtask/            # Repo-local automation (`cargo xtask <command>`); not published
+├── web/              # React SPA: TanStack Router + TanStack Query + Vite, builds to dist/
 ├── migrations/       # sqlx migrations (per-backend subdirs as needed)
 ├── docs/
 │   ├── ARCHITECTURE.md
@@ -41,19 +42,22 @@ thewiki/
 └── LICENSE           # AGPL-3.0
 ```
 
+Crate packages on disk are prefixed `thewiki-*` (e.g. `crates/api/Cargo.toml` declares `name = "thewiki-api"`) to keep crates.io names unambiguous if we ever publish. The directory names stay short for ergonomics. The `xtask` crate follows the cargo-xtask convention for repo-local automation and is not part of the release artefacts.
+
 The Rust workspace lives at the repo root. The frontend is a sibling tree under `/web` rather than a Cargo member, because its build tooling (pnpm + Vite) is independent and its output (`web/dist/`) is consumed by the Rust binary at compile time via `rust-embed`.
 
 ## 3. Crate responsibilities and dependency direction
 
 The workspace splits along **stable seams**: things that have to be replaceable (renderer, storage backend, search) live behind traits in `core`, and concrete implementations live in dedicated crates that depend on `core`.
 
-| Crate     | Owns                                                              |
-|-----------|-------------------------------------------------------------------|
-| `core`    | Domain types (`Page`, `Revision`, `User`, `Role`, `Namespace`), traits (`Renderer`, `Repository`, `SearchIndex`, `ObjectStore`-wrapper), error types, shared value objects. No I/O. No framework dependencies. |
-| `render`  | `Renderer` implementations. M0: Markdown (the crate chosen by [ADR-0001](./adr/0001-markdown-renderer.md)). Post-v1: AsciiDoc, wikitext, reST. |
-| `storage` | sqlx connection pools, `Repository` implementations per backend (SQLite at M0; libsql, Postgres at M1), migration runner, `object_store` integration. |
-| `search`  | Tantivy index management, async indexing hook fired on revision commit, query DSL. M1. |
-| `api`     | Axum app construction, REST handlers (utoipa-annotated), GraphQL schema (async-graphql, M1), auth middleware, session handling, `rust-embed` mounting of the SPA. Wires everything together. The binary's `main` lives here. |
+| Crate              | Owns                                                              |
+|--------------------|-------------------------------------------------------------------|
+| `thewiki-core`     | Domain types (`Page`, `Revision`, `User`, `Role`, `Namespace`), traits (`Renderer`, `Repository`, `SearchIndex`, `ObjectStore`-wrapper), error types, shared value objects. No I/O. No framework dependencies. |
+| `thewiki-render`   | `Renderer` implementations. M0: Markdown (the crate chosen by [ADR-0001](./adr/0001-markdown-renderer.md)). Post-v1: AsciiDoc, wikitext, reST. |
+| `thewiki-storage`  | sqlx connection pools, `Repository` implementations per backend (SQLite at M0; libsql, Postgres at M1), migration runner, `object_store` integration. |
+| `thewiki-search`   | Tantivy index management, async indexing hook fired on revision commit, query DSL. M1. |
+| `thewiki-api`      | Axum app construction, REST handlers (utoipa-annotated), GraphQL schema (async-graphql, M1), auth middleware, session handling, `rust-embed` mounting of the SPA. Wires everything together. The binary's `main` lives here. |
+| `xtask`            | Repo-local automation (migrations, codegen, release tasks). Invoked as `cargo xtask <command>`. Not published. |
 
 ### Dependency direction
 
@@ -167,7 +171,7 @@ The active backend is chosen by config. `storage` owns the integration; `api` de
 
 ## 8. Frontend split
 
-The frontend is a **separate TanStack Start SPA** under `/web`:
+The frontend is a **separate React SPA** under `/web` (TanStack Router for type-safe file-based routing, TanStack Query for API data, Vite for build, Tailwind v4 for styling):
 
 - React + Vite + TypeScript.
 - TanStack Router for type-safe routes, TanStack Query for server state.
@@ -204,7 +208,7 @@ OAuth, OIDC, SAML, and LDAP are explicitly post-M2.
 
 ## 10. Configuration
 
-Configuration loads via [`figment`](https://docs.rs/figment/) (or `config-rs` — open in issue #8) with two layered sources:
+Configuration loads via [`figment`](https://docs.rs/figment/) with two layered sources:
 
 1. A TOML file at `thewiki.toml` (path overridable via `--config` or `THEWIKI_CONFIG`).
 2. Environment variables prefixed `THEWIKI_` (e.g. `THEWIKI_DATABASE_URL`, `THEWIKI_AUTH_ALLOW_ANONYMOUS`).
