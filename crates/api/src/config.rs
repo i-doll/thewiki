@@ -276,10 +276,23 @@ impl Config {
         let mut figment = Figment::from(Serialized::defaults(Self::defaults()));
 
         if let Some(path) = file_path {
-            if !path.exists() {
-                return Err(ConfigError::NotFound(path.to_path_buf()));
-            }
-            figment = figment.merge(Toml::file(path));
+            // Read the file ourselves rather than probing existence with
+            // `exists()` followed by `Toml::file(path)` — the latter is a
+            // TOCTOU race (the file can vanish between calls, especially
+            // with mounted secrets in containers).
+            let body = match std::fs::read_to_string(path) {
+                Ok(b) => b,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(ConfigError::NotFound(path.to_path_buf()));
+                }
+                Err(e) => {
+                    return Err(ConfigError::Invalid(format!(
+                        "could not read config file {}: {e}",
+                        path.display()
+                    )));
+                }
+            };
+            figment = figment.merge(Toml::string(&body));
         }
 
         // Double-underscore separator: `THEWIKI_SERVER__BIND` -> `server.bind`.
