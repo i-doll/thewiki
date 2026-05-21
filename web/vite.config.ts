@@ -1,3 +1,4 @@
+import tailwindcss from "@tailwindcss/vite";
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -13,6 +14,7 @@ export default defineConfig({
 			generatedRouteTree: "./src/routeTree.gen.ts",
 		}),
 		react(),
+		tailwindcss(),
 	],
 	server: {
 		port: 5173,
@@ -27,6 +29,8 @@ export default defineConfig({
 	build: {
 		outDir: "dist",
 		emptyOutDir: true,
-		sourcemap: true,
+		// No source maps in production — dist/ gets baked into the Rust
+		// binary via rust-embed; debug info would bloat the release artefact.
+		sourcemap: false,
 	},
 });
