@@ -1,0 +1,19 @@
+[package]
+name = "thewiki-api"
+description = "thewiki HTTP API binary (Axum handlers, server entrypoint)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "thewiki"
+path = "src/main.rs"
+
+[dependencies]
+# Real dependencies (axum, tokio, tower, …) land in a follow-up issue.
+
+[lints]
+workspace = true
