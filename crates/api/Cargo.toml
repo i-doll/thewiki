@@ -63,6 +63,9 @@ utoipa = { workspace = true }
 utoipa-axum = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
 
+# Revision diff endpoint (#10) — unified diff text + structured hunks.
+similar = { workspace = true }
+
 # Binary error handling.
 anyhow = { workspace = true }
 
