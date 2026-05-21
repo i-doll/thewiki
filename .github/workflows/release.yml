@@ -366,9 +366,14 @@ jobs:
         # Re-invoking the action with `draft: false` against the same tag
         # publishes the existing draft. No new uploads here — every asset
         # is already attached by upstream jobs.
+        #
+        # NOTE: `generate_release_notes: false` here is deliberate. The notes
+        # are already populated by `prepare`; re-generating them at finalize
+        # would issue a redundant API call and could clobber the body if any
+        # PRs merged between the two calls.
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           draft: false
           prerelease: ${{ contains(needs.prepare.outputs.tag, '-') }}
-          generate_release_notes: true
+          generate_release_notes: false
