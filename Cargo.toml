@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/api",
+    "crates/core",
+    "crates/render",
+    "crates/search",
+    "crates/storage",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "AGPL-3.0-only"
+repository = "https://github.com/i-doll/thewiki"
+authors = ["thewiki contributors"]
+
+# Shared dependency versions are declared here. Crates opt in with
+# `foo = { workspace = true }` in their own Cargo.toml. Keep this list
+# minimal — real dependencies (axum, sqlx, tantivy, …) land in follow-up
+# issues, not in the scaffolding PR.
+[workspace.dependencies]
+thewiki-core = { path = "crates/core" }
+thewiki-render = { path = "crates/render" }
+thewiki-search = { path = "crates/search" }
+thewiki-storage = { path = "crates/storage" }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

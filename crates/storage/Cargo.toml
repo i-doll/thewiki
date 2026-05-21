@@ -1,0 +1,15 @@
+[package]
+name = "thewiki-storage"
+description = "Storage abstractions for thewiki (sqlx + object_store)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thewiki-core = { workspace = true }
+
+[lints]
+workspace = true
