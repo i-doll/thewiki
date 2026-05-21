@@ -8,15 +8,21 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+# M0 ships SQLite. M1 will add `postgres` and `libsql` here so the API crate
+# can pick a backend at compile time without dragging the full driver matrix
+# into every build.
+default = ["sqlite"]
+sqlite = []
+
 [dependencies]
 thewiki-core = { workspace = true }
-# sqlx is intentionally NOT a runtime dependency at this point — this crate is
-# a shell pending #6, which lands the SQLite adapter and will add sqlx with
-# only the features that adapter actually uses. The dev-dependency below is
-# what the migration integration test needs.
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
-sqlx = { workspace = true }
 tokio = { workspace = true }
 
 [lints]
