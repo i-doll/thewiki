@@ -1,0 +1,54 @@
+name: Feature
+description: Propose a new capability or enhancement.
+title: "[feat] "
+labels:
+  - "type:feature"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a feature. Please fill in each section — vague proposals get parked.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user need or pain point does this address? Concrete scenario, not abstract framing.
+      placeholder: "When I … I expect … but instead …"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How should we solve it? Sketch the design.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What does "done" look like? Use a checklist.
+      value: |
+        - [ ]
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What this issue deliberately does not include.
+  - type: dropdown
+    id: milestone-hint
+    attributes:
+      label: Target milestone (hint)
+      description: Best guess. Maintainers may reassign.
+      options:
+        - "M0 — Walking skeleton"
+        - "M1 — First publishable"
+        - "M2 — Moderation & power features"
+        - "Post-v1"
+        - "Not sure"
+    validations:
+      required: true

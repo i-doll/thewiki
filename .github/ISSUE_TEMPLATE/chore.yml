@@ -1,0 +1,27 @@
+name: Chore
+description: Internal task with no user-visible behaviour change (refactor, dep bump, CI tweak, docs).
+title: "[chore] "
+labels:
+  - "type:chore"
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: What needs to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: Why now? What does it unblock or improve?
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      value: |
+        - [ ]
+        - [ ]

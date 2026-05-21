@@ -1,0 +1,67 @@
+# Local task tracking (per user CLAUDE.md convention)
+tasks/todo.md
+tasks/lessons.md
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# Rust
+/target/
+**/target/
+Cargo.lock.bak
+*.rs.bk
+*.pdb
+
+# Node / pnpm / bun
+node_modules/
+.pnp.*
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.log
+.yarn/install-state.gz
+dist/
+build/
+.next/
+.nuxt/
+.output/
+.vite/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Coverage
+coverage/
+*.lcov
+.nyc_output/
+
+# Test artefacts
+playwright-report/
+test-results/
+/.tantivy-*
+
+# Local SQLite dev DBs
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
