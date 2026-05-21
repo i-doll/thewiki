@@ -25,9 +25,11 @@
 //! pagination is intentionally avoided so large tables don't degrade and so
 //! the wire form stays stable across sorted-by changes.
 
+use std::time::Duration;
+
 use thewiki_core::{
     Namespace, NamespaceId, NamespaceSlug, Page, PageId, Revision, RevisionId, Role, RoleId,
-    RoleName, User, UserId, Username,
+    RoleName, Session, SessionId, User, UserId, Username,
 };
 
 use crate::error::StorageError;
@@ -337,6 +339,83 @@ pub trait RoleRepository: Send + Sync {
         &self,
         user_id: UserId,
     ) -> impl Future<Output = Result<Vec<Role>, StorageError>> + Send;
+}
+
+/// Persistence operations for the [`Session`] aggregate.
+///
+/// Sessions are the server-side record of an authenticated login (#13). The
+/// trait is intentionally small — the auth layer owns issuance / cookie
+/// formatting; storage just persists rows.
+pub trait SessionRepository: Send + Sync {
+    /// Create a new session that expires in `ttl` from now.
+    ///
+    /// Returns the freshly-minted [`Session`] (so callers don't need a
+    /// follow-up `get_by_id`).
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::Database`] if the user FK doesn't resolve or any
+    ///   lower-level driver failure occurs.
+    fn create(
+        &self,
+        user_id: UserId,
+        ttl: Duration,
+        user_agent: Option<&str>,
+        ip_address: Option<&str>,
+    ) -> impl Future<Output = Result<Session, StorageError>> + Send;
+
+    /// Fetch a session by primary key.
+    ///
+    /// **Expired sessions are reported as [`StorageError::NotFound`]**: callers
+    /// must not have to enforce the TTL themselves. The expired row is left in
+    /// place for [`prune_expired`](Self::prune_expired) to garbage-collect.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if no row matches `id` *or* if the row has
+    /// expired. Other failures propagate as [`StorageError::Database`].
+    fn get_by_id(
+        &self,
+        id: SessionId,
+    ) -> impl Future<Output = Result<Session, StorageError>> + Send;
+
+    /// Update `last_seen_at` to "now". Called per authenticated request.
+    ///
+    /// Does not bump `expires_at` — TTL is fixed at issuance. If a row is
+    /// already expired, this still updates `last_seen_at`; the caller should
+    /// have rejected the request before reaching here.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the row no longer exists.
+    fn touch(&self, id: SessionId) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Delete a single session (logout).
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the row didn't exist.
+    fn delete(&self, id: SessionId) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Delete every session belonging to `user_id` (e.g. on password change or
+    /// account disable). Returns the number of rows removed.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures.
+    fn delete_for_user(
+        &self,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<u64, StorageError>> + Send;
+
+    /// Remove every expired session row. Returns the number of rows pruned.
+    ///
+    /// Cheap because the `expires_at` column is indexed.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures.
+    fn prune_expired(&self) -> impl Future<Output = Result<u64, StorageError>> + Send;
 }
 
 /// Clamp a caller-supplied `limit` to the configured page-size bounds.

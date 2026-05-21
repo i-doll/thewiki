@@ -1,12 +1,20 @@
 //! Axum application wiring: routes and middleware stack.
 //!
-//! The router exposed by [`build_with_state`] is the production wiring used
-//! by both the binary and the page-CRUD integration tests. [`build`] is
-//! a smaller health-only constructor kept for the existing smoke tests that
-//! don't need a storage handle.
+//! - [`build`] — health-only router used by the existing smoke tests.
+//! - [`build_with_state`] — page CRUD + OpenAPI mounted on [`AppState`]. From #9.
+//! - [`build_auth_app`] — auth routes mounted on [`AuthState`]. From #13. Used
+//!   directly by the auth integration tests.
+//! - [`build_full`] — production wiring: both [`AppState`] and [`AuthState`]
+//!   combined behind the cookie + CSRF + tracing stack. Used by the `serve`
+//!   subcommand.
 //!
 //! Keep handler logic out of this module — it should read as a table of
 //! routes plus the middleware layering.
+//!
+//! TODO(#14): collapse `build_with_state` and `build_auth_app` into the single
+//! `build_full` once configurable auth lands and `AppState` carries the
+//! auth context directly. The split exists only because #9 and #13 landed in
+//! the same batch and avoided the larger refactor.
 
 use axum::{
     Router,
@@ -15,6 +23,7 @@ use axum::{
     routing::get,
 };
 use tower::ServiceBuilder;
+use tower_cookies::CookieManagerLayer;
 use tower_http::{
     catch_panic::CatchPanicLayer,
     request_id::{MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer},
@@ -26,6 +35,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
 
+use crate::auth::{self, AuthState, csrf};
 use crate::pages;
 use crate::state::{AppState, AppStorage};
 
@@ -53,6 +63,7 @@ pub const SWAGGER_UI_PATH: &str = "/api/docs";
     ),
     tags(
         (name = "pages", description = "Page CRUD"),
+        (name = "auth", description = "Sessions, login, /me"),
     )
 )]
 pub struct ApiDoc;
@@ -124,28 +135,16 @@ pub fn build() -> Router {
     )
 }
 
-/// Build the full application router mounted on the supplied [`AppState`].
+/// Build the page-CRUD application router mounted on the supplied [`AppState`].
 ///
-/// Routes:
-///
-/// - `/api/v1/pages*` — page CRUD (see [`crate::pages`]).
-/// - [`OPENAPI_JSON_PATH`] — generated OpenAPI document.
-/// - [`SWAGGER_UI_PATH`] — Swagger UI explorer.
-/// - `/healthz`, `/readyz` — liveness / readiness probes.
+/// Used by the page-CRUD integration tests (`tests/pages.rs`). Production
+/// callers want [`build_full`] which adds auth + CSRF on top.
 pub fn build_with_state<S: AppStorage>(state: AppState<S>) -> Router {
-    // Build the API subrouter with utoipa so its handler set populates the
-    // OpenAPI document automatically.
     let api_router: OpenApiRouter<AppState<S>> =
         OpenApiRouter::with_openapi(ApiDoc::openapi()).nest("/api/v1/pages", pages::router::<S>());
 
     let (api_router, api_doc) = api_router.split_for_parts();
-
-    // `SwaggerUi::new(...).url(...)` both serves the Swagger UI assets at
-    // `/api/docs` and exposes the OpenAPI JSON at `/api/openapi.json` — the
-    // url() call registers the JSON route under the hood so we don't add a
-    // second explicit handler for it (axum panics on overlapping routes).
     let swagger = SwaggerUi::new(SWAGGER_UI_PATH).url(OPENAPI_JSON_PATH, api_doc);
-
     let stateful = api_router.with_state(state);
 
     let router = Router::new()
@@ -157,6 +156,50 @@ pub fn build_with_state<S: AppStorage>(state: AppState<S>) -> Router {
     with_middleware(router)
 }
 
+/// Build the auth-only application router mounted on the supplied [`AuthState`].
+///
+/// Used by the auth integration tests (`tests/auth.rs`). Production callers
+/// want [`build_full`] which combines pages + auth.
+pub fn build_auth_app(state: AuthState) -> Router {
+    let auth_router = auth::routes::build_router();
+
+    let router = Router::new()
+        .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
+        .nest("/api/v1/auth", auth_router)
+        .layer(axum::middleware::from_fn(csrf::csrf_layer))
+        .layer(CookieManagerLayer::new())
+        .with_state(state);
+
+    with_middleware(router)
+}
+
+/// Build the full production router: pages + OpenAPI + auth + CSRF + cookies.
+///
+/// This is what the `serve` subcommand calls.
+pub fn build_full<S: AppStorage>(app_state: AppState<S>, auth_state: AuthState) -> Router {
+    // Page CRUD + OpenAPI subrouter.
+    let api_router: OpenApiRouter<AppState<S>> =
+        OpenApiRouter::with_openapi(ApiDoc::openapi()).nest("/api/v1/pages", pages::router::<S>());
+    let (api_router, api_doc) = api_router.split_for_parts();
+    let swagger = SwaggerUi::new(SWAGGER_UI_PATH).url(OPENAPI_JSON_PATH, api_doc);
+    let stateful_api = api_router.with_state(app_state);
+
+    // Auth subrouter.
+    let auth_router = auth::routes::build_router().with_state(auth_state);
+
+    let router = Router::new()
+        .merge(stateful_api)
+        .merge(swagger)
+        .nest("/api/v1/auth", auth_router)
+        .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
+        .layer(axum::middleware::from_fn(csrf::csrf_layer))
+        .layer(CookieManagerLayer::new());
+
+    with_middleware(router)
+}
+
 /// Liveness probe. Returns 200 as soon as the process is accepting requests.
 async fn healthz() -> impl IntoResponse {
     "ok"
@@ -164,9 +207,9 @@ async fn healthz() -> impl IntoResponse {
 
 /// Readiness probe.
 ///
-/// TODO(#7): once #4 lands the storage layer, this should check that the DB
-/// pool is live and that all migrations have been applied. For the skeleton
-/// PR we always return 200 so the route shape is stable.
+/// TODO(#7): once the storage layer is wired, check the DB pool is live and
+/// migrations are applied. For the skeleton PR we always return 200 so the
+/// route shape is stable.
 async fn readyz() -> impl IntoResponse {
     "ok"
 }

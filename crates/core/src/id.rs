@@ -108,6 +108,15 @@ define_id! {
     NamespaceId
 }
 
+define_id! {
+    /// Identifier for a [`crate::session::Session`].
+    ///
+    /// Doubles as the bearer cookie value: clients hand this back to the
+    /// server unchanged. UUIDv7 is used so the ID is unguessable (74 bits of
+    /// entropy) while staying sortable for index locality.
+    SessionId
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, reason = "ergonomic tests")]
 mod tests {

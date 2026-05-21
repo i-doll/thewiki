@@ -98,6 +98,21 @@ sqlx = { version = "0.8", default-features = false, features = [
 # during development. Production deploys use real env vars.
 dotenvy = "0.15"
 
+# Auth scaffold (#13). Argon2id for password hashing, tower-cookies for
+# Set-Cookie machinery in handlers and the CSRF middleware. `password-hash`
+# is the PHC string algorithm trait `argon2` builds on — pinning it here keeps
+# the version compatible with the `argon2` we pick.
+argon2 = "0.5"
+# `getrandom` enables `OsRng` in `password-hash::rand_core` (needed for salt
+# generation + the CSRF token); `alloc` brings in `String` support for PHC
+# round-tripping.
+password-hash = { version = "0.5", features = ["alloc", "getrandom"] }
+tower-cookies = "0.11"
+# Constant-time comparison (used for the CSRF token; `argon2` re-exports this
+# internally on the verify path, but having an explicit dep makes the intent
+# obvious in the auth crate's `Cargo.toml`).
+subtle = "2"
+
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 unwrap_used = "warn"

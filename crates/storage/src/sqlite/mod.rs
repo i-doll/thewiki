@@ -59,12 +59,14 @@ mod namespace;
 mod page;
 mod revision;
 mod role;
+mod session;
 mod user;
 
 pub use namespace::SqliteNamespaceRepository;
 pub use page::SqlitePageRepository;
 pub use revision::SqliteRevisionRepository;
 pub use role::SqliteRoleRepository;
+pub use session::SqliteSessionRepository;
 pub use user::SqliteUserRepository;
 
 /// Migration set baked into the binary at compile time. See `/migrations/`.
@@ -189,6 +191,13 @@ impl SqliteStorage {
     #[must_use]
     pub fn roles(&self) -> SqliteRoleRepository<'_> {
         SqliteRoleRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`SessionRepository`](crate::repo::SessionRepository).
+    #[must_use]
+    pub fn sessions(&self) -> SqliteSessionRepository<'_> {
+        SqliteSessionRepository::new(&self.pool)
     }
 
     /// Apply the embedded migration set to an arbitrary pool.
