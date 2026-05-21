@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-05-21
-- Decision-makers: _TBD_
+- Decision-makers: @i-doll
 
 ## Context
 
@@ -46,8 +46,8 @@ Rationale, ordered by weight against thewiki's constraints:
    `finl_unicode`, `jetscii`, `phf`, `rustc-hash`, `smallvec`, and
    `typed-arena`. For a project whose top-line promise is "single static
    binary," the smaller transitive tree wins.
-2. **Wikilinks are first-class.** Since 0.11, `pulldown-cmark` ships
-   `Options::ENABLE_WIKILINKS` with full Obsidian-style syntax: `[[Page]]`,
+2. **Wikilinks are first-class.** Since 0.13.0 (February 2024), `pulldown-cmark`
+   ships `Options::ENABLE_WIKILINKS` with full Obsidian-style syntax: `[[Page]]`,
    `[[Page/Sub]]`, `[[Page|Label]]`, `![[image.png|alt]]`, and wikilinks as
    autolink replacements. We get M1's wikilink story essentially for free —
    we resolve the destination string in our event handler.
