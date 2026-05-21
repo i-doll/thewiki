@@ -16,9 +16,9 @@ path = "src/main.rs"
 path = "src/lib.rs"
 
 [dependencies]
-# Sibling crates. `thewiki-core` will provide domain types in #4; for now we
-# only pull it in as a path dependency so the wiring is in place.
+# Sibling crates.
 thewiki-core = { workspace = true }
+thewiki-storage = { workspace = true }
 
 # HTTP stack.
 axum = { workspace = true }
@@ -40,6 +40,14 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 
+# OpenAPI generation + axum integration + Swagger UI.
+utoipa = { workspace = true }
+utoipa-axum = { workspace = true }
+utoipa-swagger-ui = { workspace = true }
+
+# Domain types referenced in DTOs.
+time = { workspace = true }
+
 # Binary error handling.
 anyhow = { workspace = true }
 
@@ -53,6 +61,7 @@ http-body-util = { workspace = true }
 # `test` feature pulls in `figment::Jail`, which gives integration tests a
 # sandboxed env + cwd for layered-loader assertions (#8).
 figment = { workspace = true, features = ["test"] }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

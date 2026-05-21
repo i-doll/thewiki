@@ -37,6 +37,8 @@ serde_json = "1"
 thiserror = "2"
 time = { version = "0.3", features = ["serde", "macros", "formatting", "parsing"] }
 utoipa = { version = "5", features = ["time", "uuid"] }
+utoipa-axum = "0.2"
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
 uuid = { version = "1.11", features = ["v7", "serde"] }
 
 # Render layer (#3).
