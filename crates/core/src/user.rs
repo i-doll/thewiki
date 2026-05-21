@@ -94,7 +94,7 @@ impl EmailAddress {
     /// [`ValidationError::InvalidCharacter`] with `'@'` if no at-sign is
     /// present.
     pub fn new(value: impl Into<String>) -> Result<Self, ValidationError> {
-        let value = value.into();
+        let value = value.into().to_lowercase();
         if value.is_empty() {
             return Err(ValidationError::Empty);
         }
@@ -108,6 +108,12 @@ impl EmailAddress {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Consume the wrapper and return the inner `String`.
+    #[must_use]
+    pub fn into_string(self) -> String {
+        self.0
     }
 }
 
@@ -199,6 +205,13 @@ mod tests {
             Err(ValidationError::InvalidCharacter { character: '@' })
         );
         EmailAddress::new("hi@example.com").expect("ok");
+    }
+
+    #[test]
+    fn email_is_lowercased_on_construction() {
+        let email = EmailAddress::new("Alice@Example.COM").expect("ok");
+        assert_eq!(email.as_str(), "alice@example.com");
+        assert_eq!(email.into_string(), "alice@example.com");
     }
 
     #[test]
