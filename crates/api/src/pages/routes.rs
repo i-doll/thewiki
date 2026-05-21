@@ -193,6 +193,16 @@ pub async fn update_page<S: AppStorage>(
     RequireAuth(author_id): RequireAuth,
     Json(req): Json<UpdatePageRequest>,
 ) -> Result<Json<PageView>, ApiError> {
+    // Validate inputs BEFORE any storage writes — otherwise a bad request
+    // would leave a dangling revision row that never becomes the page's
+    // current_revision_id.
+    let new_title = match req.title {
+        Some(title) if title.trim().is_empty() => {
+            return Err(ApiError::InvalidInput("title must not be empty".into()));
+        }
+        other => other,
+    };
+
     let namespace_slug = parse_namespace_slug(None)?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let mut page = state
@@ -210,10 +220,7 @@ pub async fn update_page<S: AppStorage>(
     );
     state.storage.revisions().create(&revision).await?;
 
-    if let Some(title) = req.title {
-        if title.trim().is_empty() {
-            return Err(ApiError::InvalidInput("title must not be empty".into()));
-        }
+    if let Some(title) = new_title {
         page.title = title;
     }
     page.current_revision_id = Some(revision.id);
