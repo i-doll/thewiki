@@ -15,12 +15,13 @@
 //! # Quick start
 //!
 //! ```
-//! use thewiki_core::{ContentFormat, render::{RenderContext, Renderer}};
+//! use thewiki_core::{ContentFormat, id::NamespaceId, render::{RenderContext, Renderer}};
 //! use thewiki_render::MarkdownRenderer;
 //!
 //! let renderer = MarkdownRenderer::new();
+//! let ctx = RenderContext::new(NamespaceId::new(), "");
 //! let doc = renderer
-//!     .render("# Hello\n\nWorld", &RenderContext::default())
+//!     .render("# Hello\n\nWorld", &ctx)
 //!     .expect("render");
 //! assert!(doc.html.contains("<h1"));
 //! assert_eq!(doc.headings[0].anchor, "hello");

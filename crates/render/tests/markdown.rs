@@ -13,12 +13,17 @@
 
 use pretty_assertions::assert_eq;
 use thewiki_core::ContentFormat;
+use thewiki_core::id::NamespaceId;
 use thewiki_core::render::{RenderContext, RenderError, Renderer, RendererRegistry};
 use thewiki_render::{MarkdownRenderer, new_registry_with_defaults};
 
+fn ctx() -> RenderContext {
+    RenderContext::new(NamespaceId::new(), "")
+}
+
 fn render(source: &str) -> thewiki_core::render::RenderedDoc {
     MarkdownRenderer::new()
-        .render(source, &RenderContext::default())
+        .render(source, &ctx())
         .expect("rendering must succeed for this input")
 }
 
@@ -186,12 +191,12 @@ fn outbound_links_are_empty_for_v1() {
 fn empty_input_returns_empty_input_error() {
     let r = MarkdownRenderer::new();
     let err = r
-        .render("", &RenderContext::default())
+        .render("", &ctx())
         .expect_err("empty input must be rejected");
     assert_eq!(err, RenderError::EmptyInput);
     // Whitespace-only is also empty for our purposes.
     let err = r
-        .render("   \n\n  ", &RenderContext::default())
+        .render("   \n\n  ", &ctx())
         .expect_err("whitespace-only must be rejected");
     assert_eq!(err, RenderError::EmptyInput);
 }
@@ -217,9 +222,7 @@ fn default_registry_contains_markdown() {
 fn registry_can_render_through_trait_object() {
     let registry: RendererRegistry = new_registry_with_defaults();
     let r = registry.get(ContentFormat::Markdown).expect("registered");
-    let doc = r
-        .render("# Title\n\nbody", &RenderContext::default())
-        .expect("render");
+    let doc = r.render("# Title\n\nbody", &ctx()).expect("render");
     assert_eq!(doc.headings.len(), 1);
     assert_eq!(doc.headings[0].anchor, "title");
 }

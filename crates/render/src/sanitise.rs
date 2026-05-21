@@ -10,7 +10,7 @@
 //!   figures, super/subscript, and the `s`/`del`/`ins` strikethrough crew.
 //!   No `<style>`, no `<iframe>`, no `<script>`.
 //! - **Attributes**:
-//!   - `a` — `href`, `title`, `target` (`rel` is force-set by `link_rel`)
+//!   - `a` — `href`, `title` (`rel` is force-set by `link_rel`)
 //!   - `img` — `src`, `alt`, `title`, `width`, `height`
 //!   - `code` — `class` (language hints from fenced code blocks)
 //!   - `td`/`th` — `align` (table-column alignment)
@@ -80,7 +80,10 @@ fn build() -> Builder<'static> {
     let mut tag_attributes: HashMap<&'static str, HashSet<&'static str>> = HashMap::new();
     // NB: do **not** allow `rel` here — it's force-applied by `link_rel`
     // below, and ammonia panics if both routes try to manage it.
-    tag_attributes.insert("a", ["href", "title", "target"].into_iter().collect());
+    // We also do not allow `target` — it's unnecessary for a wiki and lets
+    // authors break out of the tab without us getting a say (rel=noopener
+    // would still apply, but the UX surprise is the actual issue).
+    tag_attributes.insert("a", ["href", "title"].into_iter().collect());
     tag_attributes.insert(
         "img",
         ["src", "alt", "title", "width", "height"]

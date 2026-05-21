@@ -99,19 +99,10 @@ impl RenderContext {
     }
 }
 
-impl Default for RenderContext {
-    /// A throwaway context with a freshly minted [`NamespaceId`] and an
-    /// empty slug. Useful for tests and for callers that have not yet
-    /// decided which namespace they belong to; production code paths
-    /// should always go through [`RenderContext::new`].
-    fn default() -> Self {
-        Self {
-            namespace: NamespaceId::new(),
-            page_slug: String::new(),
-            link_resolver: None,
-        }
-    }
-}
+// Note: `RenderContext` deliberately does not implement `Default`. Production
+// code paths must come through `RenderContext::new(namespace, slug)` so the
+// namespace is a deliberate choice rather than a freshly-minted throwaway.
+// Tests construct contexts via `RenderContext::new(NamespaceId::new(), "")`.
 
 /// Decides whether a `[[WikiLink]]` target resolves to an existing page.
 ///
