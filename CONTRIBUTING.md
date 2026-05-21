@@ -13,11 +13,24 @@ Thanks for your interest. thewiki is in pre-alpha — design discussions and iss
 This section will be filled out at the end of M0, when there's a real codebase to contribute to. Expected workflow:
 
 - Fork → branch (`feat/…`, `fix/…`, `chore/…`) → PR against `main`.
-- `cargo fmt` + `cargo clippy` + `cargo test` must pass.
-- Frontend changes need `pnpm build` + `pnpm test` to pass.
 - New features need tests; bug fixes need regression tests.
 - Sign your commits (DCO).
 - One logical change per PR.
+
+### Required CI checks
+
+Every PR must keep these green before merge. Run them locally with the same
+commands the CI runs in `.github/workflows/ci.yml`:
+
+- `cargo fmt --all --check`
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- `cargo test --workspace --all-features`
+- `cargo deny check` (advisories, licenses, bans, sources)
+- For changes under `web/`: `pnpm install --frozen-lockfile`, then `pnpm lint`,
+  `pnpm typecheck`, and `pnpm build`.
+
+A Playwright smoke job runs on PRs labelled `area:frontend`. It is a
+placeholder today; real end-to-end coverage will land later in M0 / M1.
 
 ## Code of Conduct
 
