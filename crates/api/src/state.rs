@@ -17,7 +17,10 @@
 
 use std::sync::Arc;
 
-use thewiki_storage::repo::{NamespaceRepository, PageRepository, RevisionRepository};
+use thewiki_storage::repo::{
+    NamespaceRepository, PageRepository, RecentChangesRepository, RevisionRepository,
+    UserRepository,
+};
 
 /// A cloneable storage facade that hands out per-aggregate repositories.
 ///
@@ -39,6 +42,14 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     type Namespaces<'a>: NamespaceRepository + 'a
     where
         Self: 'a;
+    /// Recent-changes repository borrowed from this handle.
+    type RecentChanges<'a>: RecentChangesRepository + 'a
+    where
+        Self: 'a;
+    /// User repository borrowed from this handle.
+    type Users<'a>: UserRepository + 'a
+    where
+        Self: 'a;
 
     /// Borrow a [`PageRepository`].
     fn pages(&self) -> Self::Pages<'_>;
@@ -46,12 +57,18 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     fn revisions(&self) -> Self::Revisions<'_>;
     /// Borrow a [`NamespaceRepository`].
     fn namespaces(&self) -> Self::Namespaces<'_>;
+    /// Borrow a [`RecentChangesRepository`].
+    fn recent_changes(&self) -> Self::RecentChanges<'_>;
+    /// Borrow a [`UserRepository`].
+    fn users(&self) -> Self::Users<'_>;
 }
 
 impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     type Pages<'a> = thewiki_storage::sqlite::SqlitePageRepository<'a>;
     type Revisions<'a> = thewiki_storage::sqlite::SqliteRevisionRepository<'a>;
     type Namespaces<'a> = thewiki_storage::sqlite::SqliteNamespaceRepository<'a>;
+    type RecentChanges<'a> = thewiki_storage::sqlite::SqliteRecentChangesRepository<'a>;
+    type Users<'a> = thewiki_storage::sqlite::SqliteUserRepository<'a>;
 
     fn pages(&self) -> Self::Pages<'_> {
         Self::pages(self)
@@ -61,6 +78,12 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     }
     fn namespaces(&self) -> Self::Namespaces<'_> {
         Self::namespaces(self)
+    }
+    fn recent_changes(&self) -> Self::RecentChanges<'_> {
+        Self::recent_changes(self)
+    }
+    fn users(&self) -> Self::Users<'_> {
+        Self::users(self)
     }
 }
 

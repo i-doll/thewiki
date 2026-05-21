@@ -12,6 +12,7 @@ pub mod config;
 pub mod error;
 pub mod extractors;
 pub mod pages;
+pub mod recent_changes;
 pub mod state;
 pub mod static_assets;
 pub mod telemetry;
