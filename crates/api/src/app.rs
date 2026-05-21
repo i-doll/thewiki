@@ -37,6 +37,7 @@ use uuid::Uuid;
 
 use crate::auth::{self, AuthState, csrf};
 use crate::pages;
+use crate::recent_changes;
 use crate::state::{AppState, AppStorage};
 use crate::static_assets;
 
@@ -66,6 +67,7 @@ pub const SWAGGER_UI_PATH: &str = "/api/docs";
         (name = "pages", description = "Page CRUD"),
         (name = "revisions", description = "Revision history + diffs"),
         (name = "auth", description = "Sessions, login, /me"),
+        (name = "recent-changes", description = "Wiki-wide chronological edit feed"),
     )
 )]
 pub struct ApiDoc;
@@ -142,8 +144,9 @@ pub fn build() -> Router {
 /// Used by the page-CRUD integration tests (`tests/pages.rs`). Production
 /// callers want [`build_full`] which adds auth + CSRF on top.
 pub fn build_with_state<S: AppStorage>(state: AppState<S>) -> Router {
-    let api_router: OpenApiRouter<AppState<S>> =
-        OpenApiRouter::with_openapi(ApiDoc::openapi()).nest("/api/v1/pages", pages::router::<S>());
+    let api_router: OpenApiRouter<AppState<S>> = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .nest("/api/v1/pages", pages::router::<S>())
+        .nest("/api/v1/recent-changes", recent_changes::router::<S>());
 
     let (api_router, api_doc) = api_router.split_for_parts();
     let swagger = SwaggerUi::new(SWAGGER_UI_PATH).url(OPENAPI_JSON_PATH, api_doc);
@@ -190,9 +193,10 @@ pub fn build_full<S: AppStorage>(
     auth_state: AuthState,
     serve_frontend: bool,
 ) -> Router {
-    // Page CRUD + OpenAPI subrouter.
-    let api_router: OpenApiRouter<AppState<S>> =
-        OpenApiRouter::with_openapi(ApiDoc::openapi()).nest("/api/v1/pages", pages::router::<S>());
+    // Page CRUD + recent-changes + OpenAPI subrouter.
+    let api_router: OpenApiRouter<AppState<S>> = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .nest("/api/v1/pages", pages::router::<S>())
+        .nest("/api/v1/recent-changes", recent_changes::router::<S>());
     let (api_router, api_doc) = api_router.split_for_parts();
     let swagger = SwaggerUi::new(SWAGGER_UI_PATH).url(OPENAPI_JSON_PATH, api_doc);
     let stateful_api = api_router.with_state(app_state);

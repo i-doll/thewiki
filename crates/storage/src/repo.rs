@@ -31,6 +31,7 @@ use thewiki_core::{
     Namespace, NamespaceId, NamespaceSlug, Page, PageId, Revision, RevisionId, Role, RoleId,
     RoleName, Session, SessionId, User, UserId, Username,
 };
+use time::OffsetDateTime;
 
 use crate::error::StorageError;
 
@@ -416,6 +417,75 @@ pub trait SessionRepository: Send + Sync {
     ///
     /// Propagates lower-level driver failures.
     fn prune_expired(&self) -> impl Future<Output = Result<u64, StorageError>> + Send;
+}
+
+/// A flattened row in the recent-changes feed.
+///
+/// Each row stands on its own — `(page_slug, namespace_slug, author_username)`
+/// are joined in so a client can render the feed without follow-up lookups.
+/// Constructed by the [`RecentChangesRepository`] from a single JOIN query
+/// over `revisions`, `pages`, `namespaces`, and `users`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentChange {
+    /// Identifier of the [`Revision`] row this entry refers to.
+    pub revision_id: RevisionId,
+    /// The page that was edited.
+    pub page_id: PageId,
+    /// URL slug of the edited page, joined in for convenience.
+    pub page_slug: String,
+    /// Namespace the edited page lives in.
+    pub namespace_id: NamespaceId,
+    /// Slug of the namespace, joined in for convenience.
+    pub namespace_slug: String,
+    /// User who committed the revision.
+    pub author_id: UserId,
+    /// Username of the author, joined in for convenience.
+    pub author_username: String,
+    /// Optional short note describing the edit.
+    pub edit_summary: Option<String>,
+    /// When the revision was committed.
+    pub created_at: OffsetDateTime,
+}
+
+/// Filter passed to [`RecentChangesRepository::list`].
+///
+/// All fields are optional — a default filter selects every revision in the
+/// database (subject to the cursor and limit).
+#[derive(Debug, Clone, Default)]
+pub struct RecentChangesFilter {
+    /// Only include revisions committed at or after this timestamp.
+    pub since: Option<OffsetDateTime>,
+    /// Only include revisions for pages in this namespace.
+    pub namespace_id: Option<NamespaceId>,
+    /// Only include revisions committed by this user.
+    pub actor_id: Option<UserId>,
+}
+
+/// Persistence operations for the wiki-wide recent-changes feed.
+///
+/// Unlike the per-aggregate repositories, this trait answers questions that
+/// span multiple tables in a single read — primarily "what changed across the
+/// wiki, newest first". The backend implementation is a JOIN over
+/// `revisions × pages × namespaces × users` so the API can hand back a fully
+/// hydrated row without N+1 lookups.
+pub trait RecentChangesRepository: Send + Sync {
+    /// List recent changes, newest first, cursor paginated.
+    ///
+    /// Order is `(created_at DESC, id DESC)`. The cursor encodes the last
+    /// `(created_at, id)` pair returned and the next call resumes strictly
+    /// older than it — so paginating doesn't skip or duplicate when new edits
+    /// land mid-iteration.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::InvalidInput`] if `cursor` is malformed for this
+    /// backend. Lower-level failures propagate as [`StorageError::Database`].
+    fn list(
+        &self,
+        filter: RecentChangesFilter,
+        cursor: Option<Cursor>,
+        limit: u32,
+    ) -> impl Future<Output = Result<PageSlice<RecentChange>, StorageError>> + Send;
 }
 
 /// Clamp a caller-supplied `limit` to the configured page-size bounds.

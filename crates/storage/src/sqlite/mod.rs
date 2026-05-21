@@ -57,6 +57,7 @@ use crate::error::StorageError;
 mod codec;
 mod namespace;
 mod page;
+mod recent_changes;
 mod revision;
 mod role;
 mod session;
@@ -64,6 +65,7 @@ mod user;
 
 pub use namespace::SqliteNamespaceRepository;
 pub use page::SqlitePageRepository;
+pub use recent_changes::SqliteRecentChangesRepository;
 pub use revision::SqliteRevisionRepository;
 pub use role::SqliteRoleRepository;
 pub use session::SqliteSessionRepository;
@@ -198,6 +200,13 @@ impl SqliteStorage {
     #[must_use]
     pub fn sessions(&self) -> SqliteSessionRepository<'_> {
         SqliteSessionRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`RecentChangesRepository`](crate::repo::RecentChangesRepository).
+    #[must_use]
+    pub fn recent_changes(&self) -> SqliteRecentChangesRepository<'_> {
+        SqliteRecentChangesRepository::new(&self.pool)
     }
 
     /// Apply the embedded migration set to an arbitrary pool.
