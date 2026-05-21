@@ -13,6 +13,7 @@ pub mod error;
 pub mod extractors;
 pub mod pages;
 pub mod state;
+pub mod static_assets;
 pub mod telemetry;
 
 pub use app::{build, build_auth_app, build_full, build_with_state};

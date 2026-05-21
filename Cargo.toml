@@ -82,6 +82,16 @@ toml = "0.8"
 # Test helpers (collecting axum response bodies in integration tests).
 http-body-util = "0.1"
 
+# Single-binary deploy (#16): bake the SPA build (`web/dist/`) into the Rust
+# binary in release mode, fall through to it from the on-disk path in debug
+# mode (see the `debug-embed` feature comment in `crates/api/src/static_assets.rs`).
+# The `axum` feature wires in the axum-friendly `IntoResponse` impl as part of
+# rust-embed's public API contract; we use `mime_guess` directly for
+# `Content-Type` sniffing rather than going through the derive's bundled
+# feature, so we depend on it explicitly.
+rust-embed = { version = "8", features = ["axum"] }
+mime_guess = "2"
+
 # Persistence layer (#5+). Database drivers are added per-adapter:
 #   - M0 (this issue) layers `sqlite` on top.
 #   - M1 (#24, #25) layers `postgres` and `libsql` on top of the same workspace

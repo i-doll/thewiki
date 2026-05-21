@@ -61,7 +61,7 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
     let auth_state = AuthState::new(storage.clone(), hasher, session_ttl, secure_cookies);
     let app_state = thewiki_api::state::AppState::new(storage);
 
-    let router = app::build_full(app_state, auth_state);
+    let router = app::build_full(app_state, auth_state, config.server.serve_frontend);
 
     let listener = tokio::net::TcpListener::bind(&config.server.bind)
         .await

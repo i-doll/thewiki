@@ -28,6 +28,14 @@ request_timeout = "30s"
 # which is almost always what you want.
 # worker_threads = 4
 
+# Serve the embedded SPA bundle (`web/dist/`) as a fallback for unmatched
+# routes. The single-binary production deploy expects this. Set to `false`
+# during local frontend development when running `pnpm dev` against
+# `cargo run` — Vite then proxies `/api/*` to the Rust backend and serves
+# the SPA itself, so unmatched routes here should 404 instead of returning
+# a stale embedded `index.html`. Default: true.
+serve_frontend = true
+
 # ---------------------------------------------------------------------------
 # Database.
 # ---------------------------------------------------------------------------

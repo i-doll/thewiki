@@ -20,7 +20,7 @@ use axum::{
     Router,
     http::{HeaderName, HeaderValue, Request},
     response::IntoResponse,
-    routing::get,
+    routing::{any, get},
 };
 use tower::ServiceBuilder;
 use tower_cookies::CookieManagerLayer;
@@ -38,6 +38,7 @@ use uuid::Uuid;
 use crate::auth::{self, AuthState, csrf};
 use crate::pages;
 use crate::state::{AppState, AppStorage};
+use crate::static_assets;
 
 /// HTTP header used to carry the per-request correlation ID.
 const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
@@ -178,7 +179,17 @@ pub fn build_auth_app(state: AuthState) -> Router {
 /// Build the full production router: pages + OpenAPI + auth + CSRF + cookies.
 ///
 /// This is what the `serve` subcommand calls.
-pub fn build_full<S: AppStorage>(app_state: AppState<S>, auth_state: AuthState) -> Router {
+///
+/// When `serve_frontend` is `true`, mounts the embedded SPA bundle as the
+/// fallback service so unmatched routes serve `index.html` (SPA history
+/// routing). Any `/api/...` request that doesn't match a real API route is
+/// caught by the catch-all `/api/{*rest}` route below so the SPA fallback
+/// never eats an API miss — clients see a clean `404`.
+pub fn build_full<S: AppStorage>(
+    app_state: AppState<S>,
+    auth_state: AuthState,
+    serve_frontend: bool,
+) -> Router {
     // Page CRUD + OpenAPI subrouter.
     let api_router: OpenApiRouter<AppState<S>> =
         OpenApiRouter::with_openapi(ApiDoc::openapi()).nest("/api/v1/pages", pages::router::<S>());
@@ -189,16 +200,34 @@ pub fn build_full<S: AppStorage>(app_state: AppState<S>, auth_state: AuthState) 
     // Auth subrouter.
     let auth_router = auth::routes::build_router().with_state(auth_state);
 
-    let router = Router::new()
+    let mut router = Router::new()
         .merge(stateful_api)
         .merge(swagger)
         .nest("/api/v1/auth", auth_router)
         .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
+        .route("/readyz", get(readyz));
+
+    if serve_frontend {
+        // Explicit guard: any `/api/...` path that didn't match a real API
+        // route returns 404 instead of being swallowed by the SPA fallback.
+        // Without this, `GET /api/v1/pages/does-not-exist` would render the
+        // React shell with status 200, which is a confusing API surface.
+        router = router
+            .route("/api/{*rest}", any(api_not_found))
+            .fallback_service(static_assets::static_routes());
+    }
+
+    let router = router
         .layer(axum::middleware::from_fn(csrf::csrf_layer))
         .layer(CookieManagerLayer::new());
 
     with_middleware(router)
+}
+
+/// Catch-all for unmatched `/api/...` paths. Returns a plain 404 so the SPA
+/// fallback service never sees an API miss.
+async fn api_not_found() -> impl IntoResponse {
+    (axum::http::StatusCode::NOT_FOUND, "not found")
 }
 
 /// Liveness probe. Returns 200 as soon as the process is accepting requests.

@@ -72,6 +72,12 @@ anyhow = { workspace = true }
 # Request IDs.
 uuid = { workspace = true }
 
+# SPA asset embedding (#16). `rust-embed` bakes `web/dist/` into the release
+# binary; `mime_guess` resolves the right `Content-Type` from the path
+# extension. See `src/static_assets.rs` for the wiring.
+rust-embed = { workspace = true }
+mime_guess = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true }
 tower = { workspace = true }

@@ -64,6 +64,22 @@ pub struct ServerConfig {
     /// default (one worker per logical CPU).
     #[serde(default)]
     pub worker_threads: Option<usize>,
+
+    /// Serve the embedded SPA bundle (`web/dist/`) as a fallback for any
+    /// request that doesn't match an API route (#16).
+    ///
+    /// Default: `true`. The single-binary production deploy expects this.
+    /// Local frontend developers running `pnpm dev` flip it to `false` so
+    /// unmatched routes return 404 — Vite proxies `/api/*` to the Rust
+    /// backend and serves the SPA itself.
+    #[serde(default = "default_serve_frontend")]
+    pub serve_frontend: bool,
+}
+
+/// `serde` default for [`ServerConfig::serve_frontend`].
+#[must_use]
+fn default_serve_frontend() -> bool {
+    true
 }
 
 /// Persistence layer configuration.
@@ -236,6 +252,7 @@ impl Config {
                 bind: "0.0.0.0:8080".to_string(),
                 request_timeout: Some("30s".to_string()),
                 worker_threads: None,
+                serve_frontend: default_serve_frontend(),
             },
             database: DatabaseConfig {
                 url: "sqlite://data/thewiki.db".to_string(),
