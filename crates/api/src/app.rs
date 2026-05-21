@@ -1,8 +1,12 @@
 //! Axum application wiring: routes and middleware stack.
 //!
-//! The router exposed by [`build`] is the single source of truth used by both
-//! the production binary and integration tests. Keep handler logic out of this
-//! module — it should read as a table of routes plus the middleware layering.
+//! The router exposed by [`build_with_state`] is the production wiring used
+//! by both the binary and the page-CRUD integration tests. [`build`] is
+//! a smaller health-only constructor kept for the existing smoke tests that
+//! don't need a storage handle.
+//!
+//! Keep handler logic out of this module — it should read as a table of
+//! routes plus the middleware layering.
 
 use axum::{
     Router,
@@ -17,12 +21,64 @@ use tower_http::{
     trace::{DefaultOnResponse, TraceLayer},
 };
 use tracing::{Level, field};
+use utoipa::OpenApi;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
+
+use crate::pages;
+use crate::state::{AppState, AppStorage};
 
 /// HTTP header used to carry the per-request correlation ID.
 const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 
-/// Build the application router with all middleware applied.
+/// Path that serves the generated OpenAPI document as JSON.
+pub const OPENAPI_JSON_PATH: &str = "/api/openapi.json";
+
+/// Path that serves the Swagger UI explorer.
+pub const SWAGGER_UI_PATH: &str = "/api/docs";
+
+/// Aggregated OpenAPI document.
+///
+/// `utoipa_axum::router::OpenApiRouter` discovers handlers (via the
+/// `routes!(…)` macro) and merges their `#[utoipa::path]` metadata in
+/// automatically, but we still need a top-level `OpenApi` derive so the
+/// title/version/etc. are populated.
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "thewiki API",
+        version = env!("CARGO_PKG_VERSION"),
+        description = "REST endpoints for thewiki — see https://github.com/i-doll/thewiki",
+    ),
+    tags(
+        (name = "pages", description = "Page CRUD"),
+    )
+)]
+pub struct ApiDoc;
+
+/// Span factory used by [`TraceLayer`].
+///
+/// Pulled out of the closure into a `fn` item so both router constructors
+/// share the same callback type and we don't fight inference at the call
+/// site.
+fn request_span(request: &Request<axum::body::Body>) -> tracing::Span {
+    let request_id = request
+        .extensions()
+        .get::<RequestId>()
+        .and_then(|id| id.header_value().to_str().ok())
+        .unwrap_or("-");
+    tracing::info_span!(
+        "request",
+        method = %request.method(),
+        uri = %request.uri(),
+        version = ?request.version(),
+        request_id = %request_id,
+        status = field::Empty,
+    )
+}
+
+/// Apply the shared middleware stack to `router`.
 ///
 /// Layers, outermost first (i.e. first to see the request, last to see the
 /// response):
@@ -35,46 +91,70 @@ const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 ///    and the request ID (which is on the request extensions by this point).
 /// 4. [`PropagateRequestIdLayer`] — copies the request ID onto the outgoing
 ///    response so clients can correlate.
-pub fn build() -> Router {
-    let middleware = ServiceBuilder::new()
+fn with_middleware(router: Router) -> Router {
+    let trace_layer = TraceLayer::new_for_http()
+        .make_span_with(request_span as fn(&Request<axum::body::Body>) -> tracing::Span)
+        .on_response(
+            DefaultOnResponse::new()
+                .level(Level::INFO)
+                .latency_unit(tower_http::LatencyUnit::Millis),
+        );
+
+    let stack = ServiceBuilder::new()
         .layer(CatchPanicLayer::new())
         .layer(SetRequestIdLayer::new(
             REQUEST_ID_HEADER.clone(),
             MakeUuidV7RequestId,
         ))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|request: &Request<_>| {
-                    // Pull the request ID off the extensions (set by
-                    // SetRequestIdLayer just above) so it's part of every log
-                    // line for the request. Falls back to "-" if missing,
-                    // which only happens before SetRequestIdLayer in tests.
-                    let request_id = request
-                        .extensions()
-                        .get::<RequestId>()
-                        .and_then(|id| id.header_value().to_str().ok())
-                        .unwrap_or("-");
-                    tracing::info_span!(
-                        "request",
-                        method = %request.method(),
-                        uri = %request.uri(),
-                        version = ?request.version(),
-                        request_id = %request_id,
-                        status = field::Empty,
-                    )
-                })
-                .on_response(
-                    DefaultOnResponse::new()
-                        .level(Level::INFO)
-                        .latency_unit(tower_http::LatencyUnit::Millis),
-                ),
-        )
+        .layer(trace_layer)
         .layer(PropagateRequestIdLayer::new(REQUEST_ID_HEADER.clone()));
 
-    Router::new()
+    router.layer(stack)
+}
+
+/// Build the health-only application router.
+///
+/// Convenience for callers (the existing `cargo test -p thewiki-api --test
+/// health` suite, smoke tests that don't need a storage handle).
+pub fn build() -> Router {
+    with_middleware(
+        Router::new()
+            .route("/healthz", get(healthz))
+            .route("/readyz", get(readyz)),
+    )
+}
+
+/// Build the full application router mounted on the supplied [`AppState`].
+///
+/// Routes:
+///
+/// - `/api/v1/pages*` — page CRUD (see [`crate::pages`]).
+/// - [`OPENAPI_JSON_PATH`] — generated OpenAPI document.
+/// - [`SWAGGER_UI_PATH`] — Swagger UI explorer.
+/// - `/healthz`, `/readyz` — liveness / readiness probes.
+pub fn build_with_state<S: AppStorage>(state: AppState<S>) -> Router {
+    // Build the API subrouter with utoipa so its handler set populates the
+    // OpenAPI document automatically.
+    let api_router: OpenApiRouter<AppState<S>> =
+        OpenApiRouter::with_openapi(ApiDoc::openapi()).nest("/api/v1/pages", pages::router::<S>());
+
+    let (api_router, api_doc) = api_router.split_for_parts();
+
+    // `SwaggerUi::new(...).url(...)` both serves the Swagger UI assets at
+    // `/api/docs` and exposes the OpenAPI JSON at `/api/openapi.json` — the
+    // url() call registers the JSON route under the hood so we don't add a
+    // second explicit handler for it (axum panics on overlapping routes).
+    let swagger = SwaggerUi::new(SWAGGER_UI_PATH).url(OPENAPI_JSON_PATH, api_doc);
+
+    let stateful = api_router.with_state(state);
+
+    let router = Router::new()
+        .merge(stateful)
+        .merge(swagger)
         .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
-        .layer(middleware)
+        .route("/readyz", get(readyz));
+
+    with_middleware(router)
 }
 
 /// Liveness probe. Returns 200 as soon as the process is accepting requests.
@@ -96,7 +176,7 @@ async fn readyz() -> impl IntoResponse {
 /// UUIDv7 sorts lexicographically by creation time, which makes logs grouped
 /// by request ID easy to follow.
 #[derive(Clone, Copy, Default)]
-struct MakeUuidV7RequestId;
+pub(crate) struct MakeUuidV7RequestId;
 
 impl MakeRequestId for MakeUuidV7RequestId {
     fn make_request_id<B>(&mut self, _request: &Request<B>) -> Option<RequestId> {
