@@ -1,0 +1,41 @@
+{
+	"name": "thewiki-web",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"engines": {
+		"node": ">=22",
+		"pnpm": ">=10"
+	},
+	"scripts": {
+		"dev": "vite",
+		"build": "tsr generate && tsc --noEmit && vite build",
+		"preview": "vite preview",
+		"typecheck": "tsr generate && tsc --noEmit",
+		"routes:generate": "tsr generate",
+		"lint": "biome check .",
+		"format": "biome format --write ."
+	},
+	"dependencies": {
+		"@tanstack/react-query": "^5.100.11",
+		"@tanstack/react-router": "^1.170.6",
+		"react": "^19.2.6",
+		"react-dom": "^19.2.6"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.15",
+		"@tailwindcss/postcss": "^4.3.0",
+		"@tanstack/react-query-devtools": "^5.100.11",
+		"@tanstack/react-router-devtools": "^1.167.0",
+		"@tanstack/router-cli": "^1.167.8",
+		"@tanstack/router-plugin": "^1.168.9",
+		"@types/react": "^19.2.15",
+		"@types/react-dom": "^19.2.3",
+		"@vitejs/plugin-react": "^6.0.2",
+		"autoprefixer": "^10.5.0",
+		"postcss": "^8.5.15",
+		"tailwindcss": "^4.3.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.14"
+	}
+}
