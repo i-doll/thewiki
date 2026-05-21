@@ -64,9 +64,6 @@
 //!
 //! # Not yet here
 //!
-//! - The `Renderer` trait sketch from `docs/ARCHITECTURE.md` is owned by
-//!   issue #3; it will live alongside `RenderContext`, `RenderedHtml`,
-//!   `RenderError`, and `WikiLink` in a future `render` module.
 //! - The repository / search-index / object-store traits are owned by
 //!   later issues (#5+).
 
@@ -79,6 +76,7 @@ pub mod namespace;
 pub mod page;
 pub mod permissions;
 pub mod protection;
+pub mod render;
 pub mod revision;
 pub mod role;
 pub mod user;
@@ -90,6 +88,10 @@ pub use namespace::{NAMESPACE_SLUG_MAX_BYTES, Namespace, NamespaceSlug};
 pub use page::Page;
 pub use permissions::Permissions;
 pub use protection::ProtectionLevel;
+pub use render::{
+    Heading, ImageRef, LinkResolver, RenderContext, RenderError, RenderedDoc, Renderer,
+    RendererRegistry, WikiLink,
+};
 pub use revision::Revision;
 pub use role::{ROLE_NAME_MAX_BYTES, Role, RoleName};
 pub use user::{EmailAddress, USERNAME_MAX_BYTES, User, Username};
