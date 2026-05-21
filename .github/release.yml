@@ -1,0 +1,48 @@
+# Config for GitHub's "Generate release notes" feature, consumed by
+# `softprops/action-gh-release` when `generate_release_notes: true` is set.
+#
+# Categorises merged PRs since the previous tag by label. PRs without a
+# label fall through to "Other changes". `dependabot[bot]` PRs are filtered
+# out — Dependabot already produces its own changelog, and bundling its
+# noise into release notes hurts signal.
+#
+# Labels are taken from the existing PR template / label set. Add new
+# categories here as we introduce new labels.
+
+changelog:
+  exclude:
+    authors:
+      - dependabot
+      - github-actions
+  categories:
+    - title: Breaking changes
+      labels:
+        - breaking-change
+    - title: Features
+      labels:
+        - feat
+        - feature
+        - area:api
+        - area:render
+        - area:storage
+        - area:search
+        - area:frontend
+    - title: Fixes
+      labels:
+        - fix
+        - bug
+    - title: Performance
+      labels:
+        - perf
+    - title: Documentation
+      labels:
+        - docs
+        - documentation
+    - title: Operations & CI
+      labels:
+        - chore
+        - ops
+        - ci
+    - title: Other changes
+      labels:
+        - "*"
