@@ -46,6 +46,10 @@ ammonia = "4"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 pretty_assertions = "1"
 
+# Revision diffing (#10). Used by the `GET /api/v1/pages/{slug}/diff` endpoint
+# to produce both a unified-diff string and structured hunks.
+similar = "2"
+
 # HTTP stack (#7).
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }

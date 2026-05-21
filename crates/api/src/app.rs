@@ -63,6 +63,7 @@ pub const SWAGGER_UI_PATH: &str = "/api/docs";
     ),
     tags(
         (name = "pages", description = "Page CRUD"),
+        (name = "revisions", description = "Revision history + diffs"),
         (name = "auth", description = "Sessions, login, /me"),
     )
 )]
