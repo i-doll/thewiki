@@ -10,6 +10,11 @@ authors.workspace = true
 
 [dependencies]
 thewiki-core = { workspace = true }
+sqlx = { workspace = true }
+
+[dev-dependencies]
+sqlx = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

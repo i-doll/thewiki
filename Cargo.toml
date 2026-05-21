@@ -65,6 +65,26 @@ anyhow = "1"
 # Test helpers (collecting axum response bodies in integration tests).
 http-body-util = "0.1"
 
+# Persistence layer (#5+). Database drivers are added per-adapter:
+#   - M0 (this issue) layers `sqlite` on top.
+#   - M1 (#24, #25) layers `postgres` and `libsql` on top of the same workspace
+#     entry, with any dialect-specific SQL kept under `migrations/postgres/`.
+# Keep the base feature set minimal so members that only need migration
+# plumbing don't pull in a driver they don't use.
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "macros",
+    "migrate",
+    "uuid",
+    "time",
+    "json",
+    "sqlite",
+] }
+
+# Load `DATABASE_URL` (and friends) from a local `.env` for `xtask migrate run`
+# during development. Production deploys use real env vars.
+dotenvy = "0.15"
+
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 unwrap_used = "warn"
