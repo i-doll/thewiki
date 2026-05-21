@@ -39,6 +39,11 @@ time = { version = "0.3", features = ["serde", "macros", "formatting", "parsing"
 utoipa = { version = "5", features = ["time", "uuid"] }
 uuid = { version = "1.11", features = ["v7", "serde"] }
 
+# Render layer (#3).
+ammonia = "4"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+pretty_assertions = "1"
+
 # HTTP stack (#7).
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
