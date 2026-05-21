@@ -26,15 +26,22 @@ use crate::state::{AppState, AppStorage};
 const DEFAULT_NAMESPACE: &str = "Main";
 
 /// Parse a caller-supplied namespace slug, falling back to [`DEFAULT_NAMESPACE`].
-fn parse_namespace_slug(raw: Option<&str>) -> Result<NamespaceSlug, ApiError> {
+pub(super) fn parse_namespace_slug(raw: Option<&str>) -> Result<NamespaceSlug, ApiError> {
     let value = raw.unwrap_or(DEFAULT_NAMESPACE);
     NamespaceSlug::new(value)
         .map_err(|err| ApiError::InvalidInput(format!("namespace_slug: {err}")))
 }
 
+/// Parse the default namespace slug. Convenience wrapper for handlers that
+/// don't take a namespace from the request today (most pages routes — see
+/// the `TODO(#28)` on [`DEFAULT_NAMESPACE`]).
+pub(super) fn parse_default_namespace_slug() -> Result<NamespaceSlug, ApiError> {
+    parse_namespace_slug(None)
+}
+
 /// Look up a namespace, mapping the storage-level "not found" to the API-
 /// level 404 unchanged.
-async fn resolve_namespace<S: AppStorage>(
+pub(super) async fn resolve_namespace<S: AppStorage>(
     state: &AppState<S>,
     slug: &NamespaceSlug,
 ) -> Result<thewiki_core::Namespace, ApiError> {
@@ -48,7 +55,7 @@ async fn resolve_namespace<S: AppStorage>(
 
 /// Build a [`PageView`] for a freshly-loaded page, joining in the namespace
 /// slug and the current revision's body.
-async fn hydrate_page_view<S: AppStorage>(
+pub(super) async fn hydrate_page_view<S: AppStorage>(
     state: &AppState<S>,
     page: Page,
     namespace_slug: String,
