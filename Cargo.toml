@@ -19,8 +19,8 @@ authors = ["thewiki contributors"]
 
 # Shared dependency versions are declared here. Crates opt in with
 # `foo = { workspace = true }` in their own Cargo.toml. Keep this list
-# minimal — real dependencies (axum, sqlx, tantivy, …) land in follow-up
-# issues, not in the scaffolding PR.
+# minimal — real dependencies (sqlx, tantivy, …) land in follow-up
+# issues as the corresponding crates are filled in.
 [workspace.dependencies]
 thewiki-core = { path = "crates/core" }
 thewiki-render = { path = "crates/render" }
@@ -29,6 +29,8 @@ thewiki-storage = { path = "crates/storage" }
 
 # Third-party crates used by workspace members. Only add entries here once a
 # member actually consumes them — keep the surface small.
+
+# Domain layer (#4).
 bitflags = { version = "2.6", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -36,6 +38,32 @@ thiserror = "2"
 time = { version = "0.3", features = ["serde", "macros", "formatting", "parsing"] }
 utoipa = { version = "5", features = ["time", "uuid"] }
 uuid = { version = "1.11", features = ["v7", "serde"] }
+
+# HTTP stack (#7).
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = [
+    "trace",
+    "request-id",
+    "catch-panic",
+    "compression-gzip",
+    "set-header",
+    "timeout",
+] }
+
+# Observability.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+
+# CLI surface for the `thewiki` binary.
+clap = { version = "4", features = ["derive", "env"] }
+
+# Binary-only error handling. Library crates use `thiserror`.
+anyhow = "1"
+
+# Test helpers (collecting axum response bodies in integration tests).
+http-body-util = "0.1"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
