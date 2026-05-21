@@ -1,0 +1,106 @@
+name: Docker
+
+# Container image publish to GHCR.
+#
+# This workflow is intentionally NOT wired to `push: branches: [main]` while
+# the rest of CI is gated (see `ci.yml` for the same stance — pre-alpha, no
+# blocking automation yet). It does fire on tag pushes so that cutting a
+# release (`vX.Y.Z`) publishes the corresponding image without manual steps.
+# To publish an `:edge` build from `main` ahead of a tag, dispatch the
+# workflow manually from the Actions tab; the `edge` tag only attaches when
+# the run is against the default branch (see `metadata-action` config below).
+#
+# To restore auto-publish from `main`, add `push: branches: [main]` to the
+# trigger block below — but please do so in lockstep with re-enabling `ci.yml`.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    name: Build & push multi-arch image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required so the workflow's `GITHUB_TOKEN` can push to GHCR. Scoped at
+      # the job level (not workflow level) per the principle of least authority.
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Log in to GHCR
+        # Skipped on pull-request events so forks can still run the build step
+        # without holding `packages:write`. `pull_request` isn't a configured
+        # trigger today, but this guard keeps the workflow safe if someone
+        # adds it later.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Tag policy:
+          #   - `vX.Y.Z` tags produce `X.Y.Z`, `X.Y`, `X`, plus `latest`.
+          #   - Manually-dispatched runs from the default branch produce `edge`.
+          #   - Anything else (e.g. dispatched from a feature branch) gets the
+          #     short SHA as a tag, which is useful for ad-hoc debugging
+          #     without polluting the well-known tag set.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=edge,enable={{is_default_branch}}
+            type=sha,format=short,enable=${{ github.event_name == 'workflow_dispatch' && github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
+          # OCI labels. `metadata-action` derives `revision`, `version`,
+          # `source`, `url`, and `created` from the git context automatically;
+          # we only override the prose fields here. The Dockerfile bakes in
+          # the same defaults so local builds still ship correctly-labelled
+          # images.
+          labels: |
+            org.opencontainers.image.title=thewiki
+            org.opencontainers.image.description=A self-hosted single-binary wiki for public reference use
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.vendor=thewiki contributors
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/main/README.md
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          # Push on tag pushes and on manual dispatches; skip on PRs (defence
+          # in depth — `pull_request` isn't a trigger today either).
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
