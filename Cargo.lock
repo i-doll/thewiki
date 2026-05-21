@@ -2200,7 +2200,10 @@ version = "0.1.0"
 dependencies = [
  "sqlx",
  "thewiki-core",
+ "thiserror",
+ "time",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

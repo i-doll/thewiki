@@ -1,13 +1,31 @@
-//! Storage layer for `thewiki`.
+//! Storage abstractions for thewiki.
 //!
-//! This crate owns the persistence side of the system: connection pools,
-//! `Repository` trait implementations per backend (SQLite at M0; libsql and
-//! Postgres at M1), the migration runner, and `object_store` glue for blob
-//! storage.
+//! [`repo`] defines a `Repository` trait per domain aggregate
+//! ([`PageRepository`](repo::PageRepository),
+//! [`UserRepository`](repo::UserRepository),
+//! [`RevisionRepository`](repo::RevisionRepository),
+//! [`NamespaceRepository`](repo::NamespaceRepository),
+//! [`RoleRepository`](repo::RoleRepository)). Each one is the entire
+//! persistence surface for its aggregate; the API crate keeps `Arc<dyn …>`
+//! handles in app state and stays backend-agnostic.
 //!
-//! The crate is currently a shell — the SQLite adapter lands in issue #6 and
-//! the migration assets live at the repo root under `/migrations`. This file
-//! exists so `cargo build` keeps working and so downstream crates can already
-//! depend on `thewiki-storage` without conditional compilation.
+//! Concrete backends implement those traits. M0 ships [`sqlite`] (gated
+//! behind the `sqlite` feature, on by default). M1 adds libsql and Postgres
+//! the same way.
 //!
-//! See `docs/ARCHITECTURE.md` § "Database story" for the cross-backend plan.
+//! All trait methods return [`Result<T, StorageError>`](error::StorageError).
+//! See [`docs/ARCHITECTURE.md` § "Database story"][arch] for the cross-backend
+//! plan.
+//!
+//! [arch]: https://github.com/i-doll/thewiki/blob/main/docs/ARCHITECTURE.md
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
+pub mod error;
+pub mod repo;
+
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
+
+pub use error::StorageError;

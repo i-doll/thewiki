@@ -1,0 +1,209 @@
+//! SQLite-backed implementations of the [`Repository`](crate::repo) traits.
+//!
+//! The entry point is [`SqliteStorage`], which owns a [`sqlx::SqlitePool`]
+//! and exposes one repository handle per aggregate via accessor methods.
+//!
+//! ## Pool & options
+//!
+//! Connection pooling is configured through [`SqliteOptions`]:
+//!
+//! ```no_run
+//! # async fn doc() -> Result<(), thewiki_storage::StorageError> {
+//! use thewiki_storage::sqlite::{SqliteOptions, SqliteStorage};
+//! use std::time::Duration;
+//!
+//! let storage = SqliteStorage::new(
+//!     "sqlite::memory:",
+//!     SqliteOptions {
+//!         max_connections: 4,
+//!         acquire_timeout: Duration::from_secs(5),
+//!         foreign_keys: true,
+//!     },
+//! )
+//! .await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Foreign keys
+//!
+//! sqlx's SQLite driver does **not** enable foreign-key enforcement by
+//! default. [`SqliteStorage::new`] turns it on explicitly via
+//! [`SqliteConnectOptions::foreign_keys`](sqlx::sqlite::SqliteConnectOptions::foreign_keys);
+//! the schema relies on it.
+//!
+//! ## Type mappings
+//!
+//! | Domain                 | Column           | Encoding                                 |
+//! |------------------------|------------------|------------------------------------------|
+//! | `*Id` (UUIDv7)         | `BLOB(16)`       | `Uuid::as_bytes()`                       |
+//! | `OffsetDateTime`       | `TEXT`           | RFC 3339                                 |
+//! | `Permissions` (u32)    | `INTEGER`        | `bits() as i64`                          |
+//! | `ContentFormat`        | `TEXT`           | `as_str()`                               |
+//! | `ProtectionLevel`      | `TEXT`           | `as_str()`                               |
+//!
+//! We deliberately use runtime-checked `sqlx::query`/`sqlx::query_as` (rather
+//! than the compile-time-checked macros) so the build doesn't require a live
+//! `DATABASE_URL` or a checked-in `sqlx-data.json`. Migration to offline mode
+//! is tracked as a follow-up.
+
+use std::time::Duration;
+
+use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+use crate::error::StorageError;
+
+mod codec;
+mod namespace;
+mod page;
+mod revision;
+mod role;
+mod user;
+
+pub use namespace::SqliteNamespaceRepository;
+pub use page::SqlitePageRepository;
+pub use revision::SqliteRevisionRepository;
+pub use role::SqliteRoleRepository;
+pub use user::SqliteUserRepository;
+
+/// Migration set baked into the binary at compile time. See `/migrations/`.
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+
+/// Tuning knobs for the [`SqlitePool`] backing [`SqliteStorage`].
+///
+/// All fields are configurable from app config; see [`Self::default`] for the
+/// shipped defaults.
+#[derive(Debug, Clone)]
+pub struct SqliteOptions {
+    /// Maximum number of connections the pool will hold open.
+    pub max_connections: u32,
+    /// How long a caller waits for a free connection before `acquire` errors.
+    pub acquire_timeout: Duration,
+    /// Whether to enable SQLite foreign-key enforcement (`PRAGMA foreign_keys = ON`).
+    ///
+    /// `true` matches the schema's assumptions and the [`SqliteStorage`]
+    /// default. Disable only if you have a very specific reason — the schema
+    /// relies on FK cascades for `revisions` deletion.
+    pub foreign_keys: bool,
+}
+
+impl Default for SqliteOptions {
+    fn default() -> Self {
+        Self {
+            max_connections: 5,
+            acquire_timeout: Duration::from_secs(30),
+            foreign_keys: true,
+        }
+    }
+}
+
+/// SQLite-backed storage facade.
+///
+/// Holds the pool and dispenses per-aggregate repository handles. Clone is
+/// cheap — the inner `SqlitePool` is already an `Arc`.
+#[derive(Debug, Clone)]
+pub struct SqliteStorage {
+    pool: SqlitePool,
+}
+
+impl SqliteStorage {
+    /// Open a pool against `url`, apply migrations, and return a handle.
+    ///
+    /// `url` is parsed as a [`SqliteConnectOptions`] connection string, so
+    /// `sqlite::memory:`, `sqlite://path/to/file.db`, and bare filesystem
+    /// paths are all accepted.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::InvalidInput`] if `url` doesn't parse.
+    /// * [`StorageError::Database`] on pool / driver failures.
+    /// * [`StorageError::Migration`] if the migration set fails to apply.
+    pub async fn new(url: &str, opts: SqliteOptions) -> Result<Self, StorageError> {
+        let connect_opts: SqliteConnectOptions = url
+            .parse()
+            .map_err(|err: sqlx::Error| StorageError::invalid_input(err.to_string()))?;
+        // Foreign keys are off in sqlx by default; the schema relies on FK
+        // cascades, so opt in explicitly.
+        let connect_opts = connect_opts.foreign_keys(opts.foreign_keys);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(opts.max_connections)
+            .acquire_timeout(opts.acquire_timeout)
+            .connect_with(connect_opts)
+            .await?;
+
+        MIGRATOR
+            .run(&pool)
+            .await
+            .map_err(|err| StorageError::Migration(err.to_string()))?;
+
+        Ok(Self { pool })
+    }
+
+    /// Construct a [`SqliteStorage`] around an already-built pool.
+    ///
+    /// Useful for tests that want to share a pool across helpers, or for
+    /// callers that need finer-grained control over [`SqlitePoolOptions`]
+    /// than [`SqliteOptions`] exposes. Migrations are **not** run — the
+    /// caller is responsible for getting the schema into place.
+    #[must_use]
+    pub fn from_pool(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    /// Borrow the underlying pool (for transactional use cases that span
+    /// multiple repositories).
+    #[must_use]
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
+    /// Borrow this handle as a [`PageRepository`](crate::repo::PageRepository).
+    #[must_use]
+    pub fn pages(&self) -> SqlitePageRepository<'_> {
+        SqlitePageRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`RevisionRepository`](crate::repo::RevisionRepository).
+    #[must_use]
+    pub fn revisions(&self) -> SqliteRevisionRepository<'_> {
+        SqliteRevisionRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a [`UserRepository`](crate::repo::UserRepository).
+    #[must_use]
+    pub fn users(&self) -> SqliteUserRepository<'_> {
+        SqliteUserRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`NamespaceRepository`](crate::repo::NamespaceRepository).
+    #[must_use]
+    pub fn namespaces(&self) -> SqliteNamespaceRepository<'_> {
+        SqliteNamespaceRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a [`RoleRepository`](crate::repo::RoleRepository).
+    #[must_use]
+    pub fn roles(&self) -> SqliteRoleRepository<'_> {
+        SqliteRoleRepository::new(&self.pool)
+    }
+
+    /// Apply the embedded migration set to an arbitrary pool.
+    ///
+    /// Exposed for [`from_pool`](Self::from_pool) callers and integration
+    /// tests that build their own pool.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Migration`] if any migration fails.
+    pub async fn migrate(pool: &SqlitePool) -> Result<(), StorageError> {
+        MIGRATOR
+            .run(pool)
+            .await
+            .map_err(|err| StorageError::Migration(err.to_string()))?;
+        Ok(())
+    }
+}
