@@ -1,7 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { Editor } from "../components/Editor";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
 	component: HomeComponent,
@@ -19,15 +17,11 @@ async function fetchHealth(): Promise<HealthResponse> {
 	return (await res.json()) as HealthResponse;
 }
 
-const DEMO_INITIAL = "# Hello\n\nWorld";
-
 function HomeComponent() {
 	const health = useQuery({
 		queryKey: ["healthz"],
 		queryFn: fetchHealth,
 	});
-
-	const [markdown, setMarkdown] = useState<string>(DEMO_INITIAL);
 
 	return (
 		<main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-16">
@@ -51,25 +45,28 @@ function HomeComponent() {
 				</div>
 			</section>
 
-			<section className="flex flex-col gap-3">
-				<div>
-					<h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
-						Hybrid editor demo
-					</h2>
-					<p className="mt-1 text-xs text-neutral-500">
-						Demo only — the real edit page lands in #18. Toggle between WYSIWYG and source mode; the
-						Markdown round-trips between both.
-					</p>
+			<section className="flex flex-col gap-3 rounded-lg border border-neutral-200 bg-white p-4">
+				<h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">Start here</h2>
+				<p className="text-sm text-neutral-700">
+					Browse existing pages or create a new one. The hybrid editor (Tiptap + CodeMirror) is
+					mounted on the edit route.
+				</p>
+				<div className="flex gap-3">
+					<Link
+						to="/wiki"
+						className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-800 hover:bg-neutral-100"
+					>
+						All pages
+					</Link>
+					<Link
+						to="/wiki/$slug/edit"
+						params={{ slug: "home" }}
+						search={{ new: 1 }}
+						className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-800"
+					>
+						Create &ldquo;home&rdquo;
+					</Link>
 				</div>
-				<Editor value={markdown} onChange={setMarkdown} />
-				<details className="rounded-md border border-neutral-200 bg-white">
-					<summary className="cursor-pointer px-3 py-2 text-xs font-medium text-neutral-600">
-						Live Markdown source
-					</summary>
-					<pre className="overflow-x-auto border-t border-neutral-200 bg-neutral-50 px-3 py-2 font-mono text-xs text-neutral-800">
-						{markdown}
-					</pre>
-				</details>
 			</section>
 		</main>
 	);
