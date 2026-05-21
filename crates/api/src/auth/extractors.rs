@@ -89,12 +89,16 @@ where
         // Union the permissions across every role the user holds. Anonymous
         // users would land in a different branch entirely (no session), so the
         // empty set here means "registered user with no roles" — read-only.
+        // A storage error here must surface — silently downgrading to
+        // zero permissions would mask DB failures during authenticated
+        // requests and could let a session-holding user lose access without
+        // any visible diagnostic.
         let roles = auth_state
             .storage
             .roles()
             .list_for_user(user.id)
             .await
-            .unwrap_or_default();
+            .map_err(AuthError::Storage)?;
         let permissions = roles
             .into_iter()
             .fold(Permissions::empty(), |acc, r| acc | r.permissions);

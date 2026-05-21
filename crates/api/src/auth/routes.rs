@@ -23,7 +23,7 @@ use axum::routing::{get, post};
 use axum::{Router, response::Response};
 use serde::{Deserialize, Serialize};
 use thewiki_core::Username;
-use thewiki_core::{Permissions, Role, User};
+use thewiki_core::{Permissions, Role, User, UserId};
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::{RoleRepository, SessionRepository, UserRepository};
 use time::OffsetDateTime;
@@ -124,7 +124,16 @@ pub async fn login(
             let hash = fetch_password_hash(&state, user.id).await?;
             (Some(user), hash)
         }
-        Err(StorageError::NotFound) => (None, None),
+        Err(StorageError::NotFound) => {
+            // Match the wall-clock + DB-roundtrip shape of the found-user
+            // path: we burn the same `fetch_password_hash` round-trip against
+            // a throwaway UUIDv7 (which won't match anything; result is None).
+            // Without this, "user not found" returns one DB RTT faster than
+            // "user found, wrong password", which is enough to enumerate
+            // usernames over a high-latency link.
+            let _ = fetch_password_hash(&state, UserId::new()).await?;
+            (None, None)
+        }
         Err(e) => return Err(AuthError::Storage(e)),
     };
 
@@ -180,7 +189,7 @@ pub async fn login(
         .roles()
         .list_for_user(user.id)
         .await
-        .unwrap_or_default();
+        .map_err(AuthError::Storage)?;
     let permissions = roles
         .iter()
         .fold(Permissions::empty(), |acc, r| acc | r.permissions);
@@ -219,7 +228,7 @@ pub async fn me(
         .roles()
         .list_for_user(auth.user.id)
         .await
-        .unwrap_or_default();
+        .map_err(AuthError::Storage)?;
     Ok(Json(user_payload(&auth.user, &roles, auth.permissions)))
 }
 
