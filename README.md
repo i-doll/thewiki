@@ -28,6 +28,8 @@ A self-hosted, single-binary wiki for public reference use. Aims to be **simpler
 | Editor | Tiptap + CodeMirror 6 |
 | License | [AGPL-3.0](./LICENSE) |
 
+For the full picture — crate layout, the `Renderer` trait, the database story, the frontend split, and how it all fits together — see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+
 ## Roadmap
 
 - **M0 — Walking skeleton**: single binary boots, SQLite backend, Markdown CRUD with history/diff/revert.
