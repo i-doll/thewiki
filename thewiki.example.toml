@@ -1,0 +1,120 @@
+# thewiki — example configuration file.
+#
+# Copy this to `thewiki.toml` and edit, then point the binary at it with either:
+#
+#     thewiki serve --config thewiki.toml
+#     THEWIKI_CONFIG_PATH=thewiki.toml thewiki serve
+#
+# Every key shown here is the built-in default; commenting one out falls back
+# to that default. Environment variables override the file: `THEWIKI_*` with
+# double-underscore separating nested keys (e.g. `THEWIKI_SERVER__BIND`,
+# `THEWIKI_AUTH__ARGON2__MEMORY_KIB`).
+
+# ---------------------------------------------------------------------------
+# HTTP server.
+# ---------------------------------------------------------------------------
+[server]
+# Address the listener binds to (host:port).
+# Use `127.0.0.1:8080` if you are behind a reverse proxy that lives on the
+# same host. Default: `0.0.0.0:8080`.
+bind = "0.0.0.0:8080"
+
+# Per-request timeout, parsed as humantime (e.g. "30s", "2m"). Omit to disable
+# the timeout layer entirely — only sensible behind a proxy that enforces one.
+# Default: "30s".
+request_timeout = "30s"
+
+# Override tokio's worker thread count. Omit to use one worker per logical CPU,
+# which is almost always what you want.
+# worker_threads = 4
+
+# ---------------------------------------------------------------------------
+# Database.
+# ---------------------------------------------------------------------------
+[database]
+# sqlx URL. SQLite is the only M0 backend; `postgres://` and `libsql://` land
+# in M1. Path is resolved relative to the working directory; absolute paths
+# (`sqlite:///var/lib/thewiki/thewiki.db`) are recommended for production.
+# Default: `sqlite://data/thewiki.db`.
+url = "sqlite://data/thewiki.db"
+
+# Maximum number of pooled connections. SQLite tolerates a low value;
+# Postgres deploys typically want this larger. Default: 16.
+max_connections = 16
+
+# Seconds to wait for a free pool connection before failing the request.
+# Default: 10.
+acquire_timeout_secs = 10
+
+# ---------------------------------------------------------------------------
+# Object storage (uploads / attachments).
+# ---------------------------------------------------------------------------
+[storage]
+# Backend selector. One of:
+#   { kind = "db" }                       — store blobs in the primary DB
+#   { kind = "s3", bucket = "...", region = "...", endpoint_url = "..." }
+#                                         — S3-compatible (AWS, R2, MinIO, B2)
+# `endpoint_url` is optional and only needed for non-AWS providers.
+# Default: { kind = "db" }.
+backend = { kind = "db" }
+
+# Example S3 configuration (commented out — uncomment and adjust):
+# [storage.backend]
+# kind = "s3"
+# bucket = "thewiki-media"
+# region = "us-east-1"
+# endpoint_url = "https://s3.example.com"   # optional, e.g. for R2/MinIO
+
+# ---------------------------------------------------------------------------
+# Authentication and authorisation defaults.
+#
+# These are install-time defaults; per-page protection (M1) layers on top of
+# them. Runtime enforcement wiring lands in #14.
+# ---------------------------------------------------------------------------
+[auth]
+# When `true`, anonymous (logged-out) visitors can edit pages.
+# Default: false (anonymous reads only).
+anonymous_edits = false
+
+# Account registration policy. One of:
+#   "open"   — anyone can register
+#   "invite" — registration requires an invite code
+#   "closed" — admins create accounts manually
+# Default: "closed".
+registration = "closed"
+
+# Which classes of edits land in the moderator approval queue (M2). One of:
+#   "none"      — every edit goes live immediately
+#   "anonymous" — anonymous edits require approval
+#   "new-users" — anonymous + new (recently-registered) accounts require approval
+#   "all"       — every edit requires approval
+# Default: "none".
+approval_required_for = "none"
+
+# Session lifetime in hours. Sessions are stored in the DB (no JWT), so this
+# is the right knob to force re-auth. Default: 24.
+session_ttl_hours = 24
+
+# Argon2id password-hashing parameters.
+#
+# OWASP recommends a floor of: memory_kib ≥ 19456 (19 MiB), iterations ≥ 2,
+# parallelism ≥ 1. We default to a stronger production target (64 MiB / 3 / 1);
+# the binary refuses to start with values below the OWASP floor.
+[auth.argon2]
+memory_kib = 65536
+iterations = 3
+parallelism = 1
+
+# ---------------------------------------------------------------------------
+# Observability.
+# ---------------------------------------------------------------------------
+[telemetry]
+# Log output format. One of:
+#   "json"   — structured JSON, one event per line (default; friendly to
+#              log shippers and aggregators)
+#   "pretty" — human-readable colour output (use during local dev)
+log_format = "json"
+
+# `tracing_subscriber` env-filter directive. Mirrors `RUST_LOG` syntax.
+# Default: "info,thewiki=debug".
+log_filter = "info,thewiki=debug"

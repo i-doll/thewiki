@@ -33,6 +33,13 @@ tracing-subscriber = { workspace = true }
 # CLI.
 clap = { workspace = true }
 
+# Configuration loading (defaults < TOML file < THEWIKI_* env). See `config.rs`.
+figment = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+
 # Binary error handling.
 anyhow = { workspace = true }
 
@@ -43,6 +50,9 @@ uuid = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }
 http-body-util = { workspace = true }
+# `test` feature pulls in `figment::Jail`, which gives integration tests a
+# sandboxed env + cwd for layered-loader assertions (#8).
+figment = { workspace = true, features = ["test"] }
 
 [lints]
 workspace = true
