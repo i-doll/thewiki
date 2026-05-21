@@ -1726,10 +1726,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04113cb9355a377d83f06ef1f0a45b8ab8cd7d8b1288160717d66df5c7988d27"
 dependencies = [
  "axum",
- "mime_guess",
  "rust-embed-impl",
  "rust-embed-utils",
- "tokio",
  "walkdir",
 ]
 
