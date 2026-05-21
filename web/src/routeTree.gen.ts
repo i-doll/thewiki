@@ -14,6 +14,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as WikiIndexRouteImport } from './routes/wiki.index'
 import { Route as WikiSlugRouteImport } from './routes/wiki.$slug'
 import { Route as WikiSlugEditRouteImport } from './routes/wiki_.$slug.edit'
+import { Route as WikiSlugHistoryRouteImport } from './routes/wiki.$slug.history'
+import { Route as WikiSlugDiffRouteImport } from './routes/wiki.$slug.diff'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -40,47 +42,79 @@ const WikiSlugEditRoute = WikiSlugEditRouteImport.update({
   path: '/wiki/$slug/edit',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WikiSlugHistoryRoute = WikiSlugHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => WikiSlugRoute,
+} as any)
+const WikiSlugDiffRoute = WikiSlugDiffRouteImport.update({
+  id: '/diff',
+  path: '/diff',
+  getParentRoute: () => WikiSlugRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/wiki/$slug': typeof WikiSlugRoute
+  '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki/': typeof WikiIndexRoute
+  '/wiki/$slug/diff': typeof WikiSlugDiffRoute
+  '/wiki/$slug/history': typeof WikiSlugHistoryRoute
   '/wiki/$slug/edit': typeof WikiSlugEditRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/wiki/$slug': typeof WikiSlugRoute
+  '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki': typeof WikiIndexRoute
+  '/wiki/$slug/diff': typeof WikiSlugDiffRoute
+  '/wiki/$slug/history': typeof WikiSlugHistoryRoute
   '/wiki/$slug/edit': typeof WikiSlugEditRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/wiki/$slug': typeof WikiSlugRoute
+  '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki/': typeof WikiIndexRoute
+  '/wiki/$slug/diff': typeof WikiSlugDiffRoute
+  '/wiki/$slug/history': typeof WikiSlugHistoryRoute
   '/wiki_/$slug/edit': typeof WikiSlugEditRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/wiki/$slug' | '/wiki/' | '/wiki/$slug/edit'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/wiki/$slug'
+    | '/wiki/'
+    | '/wiki/$slug/diff'
+    | '/wiki/$slug/history'
+    | '/wiki/$slug/edit'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/wiki/$slug' | '/wiki' | '/wiki/$slug/edit'
+  to:
+    | '/'
+    | '/login'
+    | '/wiki/$slug'
+    | '/wiki'
+    | '/wiki/$slug/diff'
+    | '/wiki/$slug/history'
+    | '/wiki/$slug/edit'
   id:
     | '__root__'
     | '/'
     | '/login'
     | '/wiki/$slug'
     | '/wiki/'
+    | '/wiki/$slug/diff'
+    | '/wiki/$slug/history'
     | '/wiki_/$slug/edit'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
-  WikiSlugRoute: typeof WikiSlugRoute
+  WikiSlugRoute: typeof WikiSlugRouteWithChildren
   WikiIndexRoute: typeof WikiIndexRoute
   WikiSlugEditRoute: typeof WikiSlugEditRoute
 }
@@ -122,13 +156,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WikiSlugEditRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/wiki/$slug/history': {
+      id: '/wiki/$slug/history'
+      path: '/history'
+      fullPath: '/wiki/$slug/history'
+      preLoaderRoute: typeof WikiSlugHistoryRouteImport
+      parentRoute: typeof WikiSlugRoute
+    }
+    '/wiki/$slug/diff': {
+      id: '/wiki/$slug/diff'
+      path: '/diff'
+      fullPath: '/wiki/$slug/diff'
+      preLoaderRoute: typeof WikiSlugDiffRouteImport
+      parentRoute: typeof WikiSlugRoute
+    }
   }
 }
+
+interface WikiSlugRouteChildren {
+  WikiSlugDiffRoute: typeof WikiSlugDiffRoute
+  WikiSlugHistoryRoute: typeof WikiSlugHistoryRoute
+}
+
+const WikiSlugRouteChildren: WikiSlugRouteChildren = {
+  WikiSlugDiffRoute: WikiSlugDiffRoute,
+  WikiSlugHistoryRoute: WikiSlugHistoryRoute,
+}
+
+const WikiSlugRouteWithChildren = WikiSlugRoute._addFileChildren(
+  WikiSlugRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
-  WikiSlugRoute: WikiSlugRoute,
+  WikiSlugRoute: WikiSlugRouteWithChildren,
   WikiIndexRoute: WikiIndexRoute,
   WikiSlugEditRoute: WikiSlugEditRoute,
 }
