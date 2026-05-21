@@ -47,6 +47,13 @@ pub struct ServeArgs {
     /// any `THEWIKI_*` environment variables.
     #[arg(short = 'c', long = "config", env = "THEWIKI_CONFIG_PATH")]
     pub config: Option<PathBuf>,
+
+    /// Allow auth cookies without the `Secure` flag. **Local development
+    /// only** — without TLS, an attacker on the same network can sniff the
+    /// session cookie. The default (omitting this flag) emits `Secure`
+    /// cookies, which browsers will discard over plain HTTP.
+    #[arg(long = "insecure-cookie", env = "THEWIKI_INSECURE_COOKIE")]
+    pub insecure_cookie: bool,
 }
 
 /// `config` subcommands. These are debug/operator aids — they never bind a

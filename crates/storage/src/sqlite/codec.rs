@@ -12,7 +12,8 @@
 
 use thewiki_core::{
     ContentFormat, Namespace, NamespaceId, NamespaceSlug, Page, PageId, Permissions,
-    ProtectionLevel, Revision, RevisionId, Role, RoleId, RoleName, User, UserId, Username,
+    ProtectionLevel, Revision, RevisionId, Role, RoleId, RoleName, Session, SessionId, User,
+    UserId, Username,
 };
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -191,6 +192,28 @@ pub fn namespace_from_row(
         id: NamespaceId::from_uuid(decode_uuid(&id)?),
         slug,
         display_name,
+    })
+}
+
+/// Convert a raw `sessions` row into a [`Session`].
+#[allow(clippy::too_many_arguments)]
+pub fn session_from_row(
+    id: Vec<u8>,
+    user_id: Vec<u8>,
+    created_at: String,
+    expires_at: String,
+    last_seen_at: String,
+    user_agent: Option<String>,
+    ip_address: Option<String>,
+) -> Result<Session, StorageError> {
+    Ok(Session {
+        id: SessionId::from_uuid(decode_uuid(&id)?),
+        user_id: UserId::from_uuid(decode_uuid(&user_id)?),
+        created_at: parse_ts(&created_at)?,
+        expires_at: parse_ts(&expires_at)?,
+        last_seen_at: parse_ts(&last_seen_at)?,
+        user_agent,
+        ip_address,
     })
 }
 

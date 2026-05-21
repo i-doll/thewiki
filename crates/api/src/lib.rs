@@ -6,6 +6,7 @@
 //! directly via [`app::build_with_state`] without spinning up a real listener.
 
 pub mod app;
+pub mod auth;
 pub mod cli;
 pub mod config;
 pub mod error;
@@ -14,7 +15,7 @@ pub mod pages;
 pub mod state;
 pub mod telemetry;
 
-pub use app::{build, build_with_state};
+pub use app::{build, build_auth_app, build_full, build_with_state};
 pub use config::Config;
 pub use error::ApiError;
 pub use state::{AppState, AppStorage, RouteConfig};
