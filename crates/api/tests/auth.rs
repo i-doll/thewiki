@@ -85,6 +85,7 @@ async fn setup() -> (AuthState, UserId) {
         hasher,
         Duration::from_secs(60 * 60), // 1 hour
         false,                        // `Secure` off for tests over plain HTTP
+        thewiki_api::config::Config::defaults().auth,
     );
     (state, user.id)
 }

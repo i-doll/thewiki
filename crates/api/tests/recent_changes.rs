@@ -6,6 +6,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -15,15 +16,19 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use thewiki_api::AppState;
 use thewiki_api::app;
+use thewiki_api::auth::password::Argon2Hasher;
+use thewiki_api::auth::state::AuthState;
+use thewiki_api::config::Argon2Config;
 use thewiki_core::{EmailAddress, Namespace, NamespaceId, NamespaceSlug, User, UserId, Username};
-use thewiki_storage::repo::{NamespaceRepository, UserRepository};
+use thewiki_storage::repo::{NamespaceRepository, SessionRepository, UserRepository};
 use thewiki_storage::sqlite::{SqliteOptions, SqliteStorage};
 use time::OffsetDateTime;
 use tower::ServiceExt;
 
 /// Build a fresh router backed by a brand-new in-memory SQLite, with `Main`
-/// pre-seeded and a known user (`X-User-Id` below) ready to author edits.
-async fn fresh_app() -> (Router, UserId, SqliteStorage) {
+/// pre-seeded and a known user ("tester") plus an active session cookie
+/// ready to author edits.
+async fn fresh_app() -> (Router, UserId, String, SqliteStorage) {
     let storage = SqliteStorage::new(
         "sqlite::memory:",
         SqliteOptions {
@@ -60,9 +65,42 @@ async fn fresh_app() -> (Router, UserId, SqliteStorage) {
         .await
         .expect("seed test user");
 
-    let state = AppState::new(storage.clone());
+    // Recent-changes tests check `author_username` on the feed rows, so we
+    // wire up real session auth: anonymous edits stay disabled, and each
+    // `json_request` call hands back a session cookie pre-seeded in storage
+    // (see [`seed_session`]).
+    let auth_cfg = thewiki_api::config::Config::defaults().auth;
+    let hasher = Arc::new(
+        Argon2Hasher::new(Argon2Config {
+            memory_kib: 19_456,
+            iterations: 2,
+            parallelism: 1,
+        })
+        .expect("hasher"),
+    );
+    let auth_state = AuthState::new(
+        storage.clone(),
+        hasher,
+        Duration::from_secs(60 * 60),
+        false,
+        auth_cfg.clone(),
+    );
+    let state = AppState::new(storage.clone(), auth_cfg).with_auth_state(auth_state);
     let router = app::build_with_state(state);
-    (router, user.id, storage)
+    let session = seed_session(&storage, user.id).await;
+    (router, user.id, session, storage)
+}
+
+/// Pre-create a session row for `user_id` and return the cookie value the
+/// test should send on subsequent requests. Bypasses the login handler so
+/// tests don't have to hash a password.
+async fn seed_session(storage: &SqliteStorage, user_id: UserId) -> String {
+    let session = storage
+        .sessions()
+        .create(user_id, Duration::from_secs(60 * 60), None, None)
+        .await
+        .expect("seed session");
+    session.id.into_uuid().to_string()
 }
 
 /// Seed an additional namespace, returning its slug for later use in URLs.
@@ -80,16 +118,20 @@ async fn add_namespace(storage: &SqliteStorage, slug: &str) {
 }
 
 /// Send a JSON request and parse the response body.
+///
+/// `session_cookie` carries the `thewiki_session` value to attach to the
+/// request — typically obtained from [`seed_session`]. `None` sends the
+/// request anonymously.
 async fn json_request(
     router: Router,
     method: &str,
     uri: &str,
-    user_id: Option<UserId>,
+    session_cookie: Option<&str>,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
     let mut builder = Request::builder().method(method).uri(uri);
-    if let Some(uid) = user_id {
-        builder = builder.header("x-user-id", uid.to_string());
+    if let Some(cookie) = session_cookie {
+        builder = builder.header(header::COOKIE, format!("thewiki_session={cookie}"));
     }
     let request = if let Some(body) = body {
         builder
@@ -121,7 +163,7 @@ async fn json_request(
 /// committing the initial revision for us.
 async fn create_page(
     router: Router,
-    user_id: UserId,
+    session: &str,
     namespace_slug: &str,
     slug: &str,
     title: &str,
@@ -131,7 +173,7 @@ async fn create_page(
         router,
         "POST",
         "/api/v1/pages",
-        Some(user_id),
+        Some(session),
         Some(json!({
             "namespace_slug": namespace_slug,
             "slug": slug,
@@ -146,7 +188,7 @@ async fn create_page(
 
 #[tokio::test]
 async fn empty_feed_returns_empty_items_and_null_cursor() {
-    let (router, _, _) = fresh_app().await;
+    let (router, _, _, _) = fresh_app().await;
     let (status, body) = json_request(router, "GET", "/api/v1/recent-changes", None, None).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["items"].as_array().expect("items").len(), 0);
@@ -155,8 +197,8 @@ async fn empty_feed_returns_empty_items_and_null_cursor() {
 
 #[tokio::test]
 async fn single_edit_appears_in_feed() {
-    let (router, user_id, _) = fresh_app().await;
-    create_page(router.clone(), user_id, "Main", "home", "Home", "# Hello").await;
+    let (router, _user_id, session, _) = fresh_app().await;
+    create_page(router.clone(), &session, "Main", "home", "Home", "# Hello").await;
 
     let (status, body) = json_request(router, "GET", "/api/v1/recent-changes", None, None).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
@@ -172,7 +214,7 @@ async fn single_edit_appears_in_feed() {
 
 #[tokio::test]
 async fn multi_page_feed_is_newest_first() {
-    let (router, user_id, storage) = fresh_app().await;
+    let (router, _user_id, session, storage) = fresh_app().await;
     add_namespace(&storage, "Help").await;
 
     // Create 5 pages across the two namespaces. UUIDv7 + sequential awaits
@@ -186,7 +228,7 @@ async fn multi_page_feed_is_newest_first() {
         ("Main", "e", "E"),
     ];
     for (ns, slug, title) in pages {
-        create_page(router.clone(), user_id, ns, slug, title, "body").await;
+        create_page(router.clone(), &session, ns, slug, title, "body").await;
     }
 
     let (status, body) = json_request(router, "GET", "/api/v1/recent-changes", None, None).await;
@@ -202,12 +244,12 @@ async fn multi_page_feed_is_newest_first() {
 
 #[tokio::test]
 async fn filter_by_namespace_excludes_other_namespaces() {
-    let (router, user_id, storage) = fresh_app().await;
+    let (router, _user_id, session, storage) = fresh_app().await;
     add_namespace(&storage, "Help").await;
 
-    create_page(router.clone(), user_id, "Main", "m1", "M1", "x").await;
-    create_page(router.clone(), user_id, "Help", "h1", "H1", "y").await;
-    create_page(router.clone(), user_id, "Main", "m2", "M2", "z").await;
+    create_page(router.clone(), &session, "Main", "m1", "M1", "x").await;
+    create_page(router.clone(), &session, "Help", "h1", "H1", "y").await;
+    create_page(router.clone(), &session, "Main", "m2", "M2", "z").await;
 
     let (status, body) = json_request(
         router,
@@ -226,9 +268,9 @@ async fn filter_by_namespace_excludes_other_namespaces() {
 
 #[tokio::test]
 async fn since_filter_excludes_future_and_includes_past() {
-    let (router, user_id, _) = fresh_app().await;
-    create_page(router.clone(), user_id, "Main", "p1", "P1", "x").await;
-    create_page(router.clone(), user_id, "Main", "p2", "P2", "y").await;
+    let (router, _user_id, session, _) = fresh_app().await;
+    create_page(router.clone(), &session, "Main", "p1", "P1", "x").await;
+    create_page(router.clone(), &session, "Main", "p2", "P2", "y").await;
 
     // `since` set to the far future yields nothing.
     let (status, body) = json_request(
@@ -257,11 +299,11 @@ async fn since_filter_excludes_future_and_includes_past() {
 
 #[tokio::test]
 async fn pagination_walks_via_cursor() {
-    let (router, user_id, _) = fresh_app().await;
+    let (router, _user_id, session, _) = fresh_app().await;
     for i in 0..5 {
         create_page(
             router.clone(),
-            user_id,
+            &session,
             "Main",
             &format!("p-{i}"),
             &format!("P{i}"),
@@ -345,11 +387,11 @@ async fn pagination_walks_via_cursor() {
 
 #[tokio::test]
 async fn cursor_is_stable_across_new_edits() {
-    let (router, user_id, _) = fresh_app().await;
+    let (router, _user_id, session, _) = fresh_app().await;
     for i in 0..3 {
         create_page(
             router.clone(),
-            user_id,
+            &session,
             "Main",
             &format!("p-{i}"),
             &format!("P{i}"),
@@ -384,7 +426,7 @@ async fn cursor_is_stable_across_new_edits() {
         .to_string();
 
     // New edit lands after we captured the cursor.
-    create_page(router.clone(), user_id, "Main", "p-late", "Late", "fresh").await;
+    create_page(router.clone(), &session, "Main", "p-late", "Late", "fresh").await;
 
     // Following the cursor must NOT show the newly inserted entry — it is
     // newer than the cursor boundary. We expect to walk the older pages
@@ -430,7 +472,7 @@ async fn cursor_is_stable_across_new_edits() {
 
 #[tokio::test]
 async fn unknown_namespace_filter_returns_404() {
-    let (router, _, _) = fresh_app().await;
+    let (router, _, _, _) = fresh_app().await;
     let (status, body) = json_request(
         router,
         "GET",
@@ -445,7 +487,7 @@ async fn unknown_namespace_filter_returns_404() {
 
 #[tokio::test]
 async fn filter_by_actor_excludes_other_authors() {
-    let (router, alice_id, storage) = fresh_app().await;
+    let (router, _alice_id, alice_session, storage) = fresh_app().await;
 
     let bob = User {
         id: UserId::new(),
@@ -456,17 +498,26 @@ async fn filter_by_actor_excludes_other_authors() {
         last_login_at: None,
     };
     storage.users().create(&bob, None).await.expect("seed bob");
+    let bob_session = seed_session(&storage, bob.id).await;
 
     create_page(
         router.clone(),
-        alice_id,
+        &alice_session,
         "Main",
         "alice-page",
         "Alice",
         "by Alice",
     )
     .await;
-    create_page(router.clone(), bob.id, "Main", "bob-page", "Bob", "by Bob").await;
+    create_page(
+        router.clone(),
+        &bob_session,
+        "Main",
+        "bob-page",
+        "Bob",
+        "by Bob",
+    )
+    .await;
 
     let (status, body) = json_request(
         router,
@@ -489,7 +540,7 @@ async fn filter_by_actor_excludes_other_authors() {
 
 #[tokio::test]
 async fn unknown_actor_filter_returns_404() {
-    let (router, _, _) = fresh_app().await;
+    let (router, _, _, _) = fresh_app().await;
     let (status, body) = json_request(
         router,
         "GET",
@@ -504,7 +555,7 @@ async fn unknown_actor_filter_returns_404() {
 
 #[tokio::test]
 async fn openapi_includes_recent_changes_path() {
-    let (router, _, _) = fresh_app().await;
+    let (router, _, _, _) = fresh_app().await;
     let (status, body) = json_request(router, "GET", "/api/openapi.json", None, None).await;
     assert_eq!(status, StatusCode::OK);
     let paths = body["paths"].as_object().expect("paths object");

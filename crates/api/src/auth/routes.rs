@@ -37,6 +37,7 @@ use crate::auth::session::{
     fresh_csrf_token,
 };
 use crate::auth::state::AuthState;
+use crate::config::RegistrationPolicy;
 
 /// JSON body for [`login`].
 #[derive(Debug, Clone, Deserialize)]
@@ -232,12 +233,57 @@ pub async fn me(
     Ok(Json(user_payload(&auth.user, &roles, auth.permissions)))
 }
 
+/// Wire shape of `GET /api/v1/auth/policy`.
+///
+/// The SPA reads this on boot to decide whether to render the "Sign up" CTA
+/// (open / invite) and whether to surface an "Edit anonymously" affordance.
+/// Kept narrow on purpose — operators tune fifteen knobs in `thewiki.toml`,
+/// but only these two affect what the SPA shows the user *before* they have
+/// a session.
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthPolicyPayload {
+    /// Account registration policy: `"open"`, `"invite"`, or `"closed"`.
+    pub registration: &'static str,
+    /// Whether anonymous (logged-out) callers can submit edits.
+    pub anonymous_edits: bool,
+    /// Whether edits land in a moderator approval queue. The exact scope
+    /// (`"none"`, `"anonymous"`, `"new-users"`, `"all"`) is exposed so the
+    /// SPA can show a "your edit will be reviewed" hint before the user
+    /// clicks save.
+    pub approval_required_for: &'static str,
+}
+
+/// `GET /api/v1/auth/policy` — publish the operator-configured auth shape
+/// so the SPA can render the right affordances.
+///
+/// Always available (no auth required) — by design, since the answer is what
+/// the UI needs *before* the user has a session.
+pub async fn policy(State(state): State<AuthState>) -> Json<AuthPolicyPayload> {
+    let registration = match state.config.registration {
+        RegistrationPolicy::Open => "open",
+        RegistrationPolicy::Invite => "invite",
+        RegistrationPolicy::Closed => "closed",
+    };
+    let approval = match state.config.approval_required_for {
+        crate::config::ApprovalScope::None => "none",
+        crate::config::ApprovalScope::Anonymous => "anonymous",
+        crate::config::ApprovalScope::NewUsers => "new-users",
+        crate::config::ApprovalScope::All => "all",
+    };
+    Json(AuthPolicyPayload {
+        registration,
+        anonymous_edits: state.config.anonymous_edits,
+        approval_required_for: approval,
+    })
+}
+
 /// Build the auth router. Mounted under `/api/v1/auth` by [`crate::app::build_with_state`].
 pub fn build_router() -> Router<AuthState> {
     Router::new()
         .route("/login", post(login))
         .route("/logout", post(logout))
         .route("/me", get(me))
+        .route("/policy", get(policy))
 }
 
 /// Look up a user's stored PHC password hash. `None` means the user exists

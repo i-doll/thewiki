@@ -58,8 +58,15 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
              local dev only, do not use over plain HTTP in production"
         );
     }
-    let auth_state = AuthState::new(storage.clone(), hasher, session_ttl, secure_cookies);
-    let app_state = thewiki_api::state::AppState::new(storage);
+    let auth_state = AuthState::new(
+        storage.clone(),
+        hasher,
+        session_ttl,
+        secure_cookies,
+        config.auth.clone(),
+    );
+    let app_state = thewiki_api::state::AppState::new(storage, config.auth.clone())
+        .with_auth_state(auth_state.clone());
 
     let router = app::build_full(app_state, auth_state, config.server.serve_frontend);
 

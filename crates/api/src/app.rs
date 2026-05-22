@@ -142,7 +142,10 @@ pub fn build() -> Router {
 /// Build the page-CRUD application router mounted on the supplied [`AppState`].
 ///
 /// Used by the page-CRUD integration tests (`tests/pages.rs`). Production
-/// callers want [`build_full`] which adds auth + CSRF on top.
+/// callers want [`build_full`] which adds the CSRF layer on top. The cookie
+/// manager layer is mounted here unconditionally so the configurable-auth
+/// extractor (#14) can resolve session cookies in tests that wire up
+/// [`AppState::with_auth_state`].
 pub fn build_with_state<S: AppStorage>(state: AppState<S>) -> Router {
     let api_router: OpenApiRouter<AppState<S>> = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api/v1/pages", pages::router::<S>())
@@ -156,7 +159,8 @@ pub fn build_with_state<S: AppStorage>(state: AppState<S>) -> Router {
         .merge(stateful)
         .merge(swagger)
         .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz));
+        .route("/readyz", get(readyz))
+        .layer(CookieManagerLayer::new());
 
     with_middleware(router)
 }

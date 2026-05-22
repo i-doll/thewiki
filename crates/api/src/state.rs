@@ -17,10 +17,14 @@
 
 use std::sync::Arc;
 
+use axum::extract::FromRef;
 use thewiki_storage::repo::{
     NamespaceRepository, PageRepository, RecentChangesRepository, RevisionRepository,
     UserRepository,
 };
+
+use crate::auth::AuthState;
+use crate::config::AuthConfig;
 
 /// A cloneable storage facade that hands out per-aggregate repositories.
 ///
@@ -111,21 +115,59 @@ impl Default for RouteConfig {
 ///
 /// `S` is the storage facade (typically
 /// [`thewiki_storage::sqlite::SqliteStorage`]); see [`AppStorage`].
+///
+/// The `auth_config` snapshot is the wired runtime view of
+/// [`crate::config::AuthConfig`] — handlers consult it to decide whether to
+/// require a session, whether to gate edits into the (M2) approval queue, and
+/// what registration policy to advertise via `GET /api/v1/auth/policy`.
+///
+/// `auth_state` is optional because some integration tests boot just the
+/// pages router without standing up the auth stack. When `None`, the
+/// configurable-auth extractors fall back to "no session was supplied" — i.e.
+/// every caller is treated as anonymous. Production (`build_full`) always
+/// supplies one.
 pub struct AppState<S: AppStorage> {
     /// Shared storage handle.
     pub storage: Arc<S>,
     /// Per-route configuration knobs.
     pub route_config: RouteConfig,
+    /// Snapshot of `Config::auth` — the configurable-auth wiring point (#14).
+    pub auth_config: AuthConfig,
+    /// Auth state shared with the auth router (cookies, hasher, session TTL).
+    /// `None` in test fixtures that don't exercise the auth stack.
+    pub auth_state: Option<AuthState>,
 }
 
 impl<S: AppStorage> AppState<S> {
-    /// Build a new [`AppState`] from a storage handle and default route config.
+    /// Build a new [`AppState`] from a storage handle and the configured auth
+    /// snapshot. The default route config is applied; the auth state is
+    /// initialised to `None` (suitable for tests that don't stand up the auth
+    /// stack — production wiring uses [`Self::with_auth_state`]).
     #[must_use]
-    pub fn new(storage: S) -> Self {
+    pub fn new(storage: S, auth_config: AuthConfig) -> Self {
         Self {
             storage: Arc::new(storage),
             route_config: RouteConfig::default(),
+            auth_config,
+            auth_state: None,
         }
+    }
+
+    /// Convenience for tests: build a state with the built-in default
+    /// [`AuthConfig`] (closed registration, no anonymous edits, no approval
+    /// queue). Production wiring uses [`Self::new`] with the operator-supplied
+    /// config.
+    #[must_use]
+    pub fn new_with_defaults(storage: S) -> Self {
+        Self::new(storage, crate::config::Config::defaults().auth)
+    }
+
+    /// Attach an [`AuthState`] so the configurable-auth extractors can resolve
+    /// session cookies against the auth stack.
+    #[must_use]
+    pub fn with_auth_state(mut self, auth: AuthState) -> Self {
+        self.auth_state = Some(auth);
+        self
     }
 
     /// Override the default page size used by list endpoints.
@@ -141,6 +183,30 @@ impl<S: AppStorage> Clone for AppState<S> {
         Self {
             storage: Arc::clone(&self.storage),
             route_config: self.route_config,
+            auth_config: self.auth_config.clone(),
+            auth_state: self.auth_state.clone(),
         }
+    }
+}
+
+/// Expose the optional [`AuthState`] for axum's `State<AuthState>` extractor.
+///
+/// Panics if no auth state has been wired — that's a configuration bug at
+/// router-construction time, not a per-request failure. Pages handlers go
+/// through the configurable-auth extractors (see
+/// [`crate::extractors::EditorExtractor`]) which handle the missing-auth case
+/// gracefully and treat it as "anonymous caller".
+impl<S: AppStorage> FromRef<AppState<S>> for AuthState {
+    fn from_ref(input: &AppState<S>) -> Self {
+        #[allow(
+            clippy::expect_used,
+            reason = "router wiring guarantees auth_state is present whenever an auth-state \
+                      extractor is reachable; missing it here is a misconfiguration the dev \
+                      should see loudly"
+        )]
+        input
+            .auth_state
+            .clone()
+            .expect("AppState was constructed without an AuthState but a handler requires it")
     }
 }

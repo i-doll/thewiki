@@ -66,7 +66,12 @@ async fn fresh_app() -> (Router, UserId) {
         .await
         .expect("seed test user");
 
-    let state = AppState::new(storage);
+    // Revisions tests seed page edits through the page handlers; opt into
+    // anonymous edits so the existing assertions keep working without
+    // building a session flow per test.
+    let mut auth_cfg = thewiki_api::config::Config::defaults().auth;
+    auth_cfg.anonymous_edits = true;
+    let state = AppState::new(storage, auth_cfg);
     let router = app::build_with_state(state);
     (router, user.id)
 }
