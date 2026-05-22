@@ -17,7 +17,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use thewiki_core::{Revision, RevisionId};
+use thewiki_core::{NamespaceSlug, Revision, RevisionId};
 use thewiki_search::PageDoc;
 use thewiki_storage::repo::{PageAuditMutation, PageRepository, RevisionRepository};
 use time::OffsetDateTime;
@@ -87,6 +87,18 @@ pub async fn revert_page<S: AppStorage>(
     Json(req): Json<RevertRequest>,
 ) -> Result<Json<PageView>, ApiError> {
     let namespace_slug = parse_default_namespace_slug()?;
+    revert_page_in_namespace(state, namespace_slug, slug, author, req).await
+}
+
+/// Shared body for `POST /api/v1/pages/{slug}/revert` and
+/// `POST /api/v1/wiki/{namespace}/{slug}/revert`.
+pub(crate) async fn revert_page_in_namespace<S: AppStorage>(
+    state: AppState<S>,
+    namespace_slug: NamespaceSlug,
+    slug: String,
+    author: RequireAuth,
+    req: RevertRequest,
+) -> Result<Json<PageView>, ApiError> {
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();
     let mut page = state

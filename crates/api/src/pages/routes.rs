@@ -44,9 +44,11 @@ fn editor_context(editor: &EditorExtractor) -> EditorContext {
 
 /// Default namespace slug used when a request doesn't carry one.
 ///
-/// TODO(#28): once namespace prefix routing lands, the namespace will be
-/// part of the path. Until then, every request resolves against this slug.
-const DEFAULT_NAMESPACE: &str = "Main";
+/// Namespace-aware URLs (`/api/v1/wiki/{namespace}/...`, #28) carry the
+/// namespace in the path and bypass this constant. The legacy
+/// `/api/v1/pages/...` routes are kept for backwards compatibility and
+/// continue to resolve against this slug.
+pub(super) const DEFAULT_NAMESPACE: &str = "Main";
 
 /// Window (in seconds) during which a freshly-registered account is treated
 /// as "new" for [`ApprovalScope::NewUsers`] gating. 24h matches the spec in
@@ -301,6 +303,21 @@ pub async fn create_page<S: AppStorage>(
     editor: EditorExtractor,
     Json(req): Json<CreatePageRequest>,
 ) -> Result<(StatusCode, Json<PageView>), ApiError> {
+    let namespace_slug = parse_namespace_slug(req.namespace_slug.as_deref())?;
+    create_page_in_namespace(state, editor, namespace_slug, req).await
+}
+
+/// Shared body for `POST /api/v1/pages` and `POST /api/v1/wiki/{namespace}`.
+///
+/// The two routes differ only in where the namespace comes from — the
+/// request DTO (legacy) or the path segment (namespace-aware, #28). Once
+/// the namespace is resolved, the create logic is identical.
+pub(crate) async fn create_page_in_namespace<S: AppStorage>(
+    state: AppState<S>,
+    editor: EditorExtractor,
+    namespace_slug: NamespaceSlug,
+    req: CreatePageRequest,
+) -> Result<(StatusCode, Json<PageView>), ApiError> {
     if req.slug.trim().is_empty() {
         return Err(ApiError::InvalidInput("slug must not be empty".into()));
     }
@@ -308,7 +325,6 @@ pub async fn create_page<S: AppStorage>(
         return Err(ApiError::InvalidInput("title must not be empty".into()));
     }
 
-    let namespace_slug = parse_namespace_slug(Some(&req.namespace_slug))?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();
 
@@ -413,11 +429,21 @@ pub async fn get_page<S: AppStorage>(
     Path(slug): Path<String>,
 ) -> Result<Json<PageView>, ApiError> {
     let namespace_slug = parse_namespace_slug(None)?;
+    get_page_in_namespace(state, namespace_slug, slug).await
+}
+
+/// Shared body for `GET /api/v1/pages/{slug}` and
+/// `GET /api/v1/wiki/{namespace}/{slug}`.
+pub(crate) async fn get_page_in_namespace<S: AppStorage>(
+    state: AppState<S>,
+    namespace_slug: NamespaceSlug,
+    page_slug: String,
+) -> Result<Json<PageView>, ApiError> {
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let page = state
         .storage
         .pages()
-        .get_by_namespace_and_slug(namespace.id, &slug)
+        .get_by_namespace_and_slug(namespace.id, &page_slug)
         .await?;
     let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
     Ok(Json(view))
@@ -454,6 +480,19 @@ pub async fn update_page<S: AppStorage>(
     editor: EditorExtractor,
     Json(req): Json<UpdatePageRequest>,
 ) -> Result<(StatusCode, Json<PageView>), ApiError> {
+    let namespace_slug = parse_namespace_slug(None)?;
+    update_page_in_namespace(state, namespace_slug, slug, editor, req).await
+}
+
+/// Shared body for `PUT /api/v1/pages/{slug}` and
+/// `PUT /api/v1/wiki/{namespace}/{slug}`.
+pub(crate) async fn update_page_in_namespace<S: AppStorage>(
+    state: AppState<S>,
+    namespace_slug: NamespaceSlug,
+    slug: String,
+    editor: EditorExtractor,
+    req: UpdatePageRequest,
+) -> Result<(StatusCode, Json<PageView>), ApiError> {
     // Validate inputs BEFORE any storage writes — otherwise a bad request
     // would leave a dangling revision row that never becomes the page's
     // current_revision_id.
@@ -463,7 +502,6 @@ pub async fn update_page<S: AppStorage>(
         }
         other => other,
     };
-    let namespace_slug = parse_namespace_slug(None)?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();
     let mut page = state
@@ -586,6 +624,17 @@ pub async fn delete_page<S: AppStorage>(
     editor: EditorExtractor,
 ) -> Result<StatusCode, ApiError> {
     let namespace_slug = parse_namespace_slug(None)?;
+    delete_page_in_namespace(state, namespace_slug, slug, editor).await
+}
+
+/// Shared body for `DELETE /api/v1/pages/{slug}` and
+/// `DELETE /api/v1/wiki/{namespace}/{slug}`.
+pub(crate) async fn delete_page_in_namespace<S: AppStorage>(
+    state: AppState<S>,
+    namespace_slug: NamespaceSlug,
+    slug: String,
+    editor: EditorExtractor,
+) -> Result<StatusCode, ApiError> {
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();
     let page = state
@@ -697,6 +746,17 @@ pub async fn list_backlinks<S: AppStorage>(
     Query(query): Query<ListBacklinksQuery>,
 ) -> Result<Json<BacklinkListResponse>, ApiError> {
     let namespace_slug = parse_namespace_slug(None)?;
+    list_backlinks_in_namespace(state, namespace_slug, slug, query).await
+}
+
+/// Shared body for `GET /api/v1/pages/{slug}/backlinks` and
+/// `GET /api/v1/wiki/{namespace}/{slug}/backlinks`.
+pub(crate) async fn list_backlinks_in_namespace<S: AppStorage>(
+    state: AppState<S>,
+    namespace_slug: NamespaceSlug,
+    slug: String,
+    query: ListBacklinksQuery,
+) -> Result<Json<BacklinkListResponse>, ApiError> {
     // 404 on missing namespace, but not on missing target — see doc comment.
     let _ns = resolve_namespace(&state, &namespace_slug).await?;
 

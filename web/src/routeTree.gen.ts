@@ -17,6 +17,10 @@ import { Route as WikiSlugRouteImport } from './routes/wiki.$slug'
 import { Route as WikiSlugEditRouteImport } from './routes/wiki_.$slug.edit'
 import { Route as WikiSlugHistoryRouteImport } from './routes/wiki.$slug.history'
 import { Route as WikiSlugDiffRouteImport } from './routes/wiki.$slug.diff'
+import { Route as WikiNamespaceSlugRouteImport } from './routes/wiki.$namespace.$slug'
+import { Route as WikiNamespaceSlugEditRouteImport } from './routes/wiki_.$namespace.$slug.edit'
+import { Route as WikiNamespaceSlugHistoryRouteImport } from './routes/wiki.$namespace.$slug.history'
+import { Route as WikiNamespaceSlugDiffRouteImport } from './routes/wiki.$namespace.$slug.diff'
 
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
@@ -58,6 +62,27 @@ const WikiSlugDiffRoute = WikiSlugDiffRouteImport.update({
   path: '/diff',
   getParentRoute: () => WikiSlugRoute,
 } as any)
+const WikiNamespaceSlugRoute = WikiNamespaceSlugRouteImport.update({
+  id: '/wiki/$namespace/$slug',
+  path: '/wiki/$namespace/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WikiNamespaceSlugEditRoute = WikiNamespaceSlugEditRouteImport.update({
+  id: '/wiki_/$namespace/$slug/edit',
+  path: '/wiki/$namespace/$slug/edit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WikiNamespaceSlugHistoryRoute =
+  WikiNamespaceSlugHistoryRouteImport.update({
+    id: '/history',
+    path: '/history',
+    getParentRoute: () => WikiNamespaceSlugRoute,
+  } as any)
+const WikiNamespaceSlugDiffRoute = WikiNamespaceSlugDiffRouteImport.update({
+  id: '/diff',
+  path: '/diff',
+  getParentRoute: () => WikiNamespaceSlugRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -65,9 +90,13 @@ export interface FileRoutesByFullPath {
   '/search': typeof SearchRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki/': typeof WikiIndexRoute
+  '/wiki/$namespace/$slug': typeof WikiNamespaceSlugRouteWithChildren
   '/wiki/$slug/diff': typeof WikiSlugDiffRoute
   '/wiki/$slug/history': typeof WikiSlugHistoryRoute
   '/wiki/$slug/edit': typeof WikiSlugEditRoute
+  '/wiki/$namespace/$slug/diff': typeof WikiNamespaceSlugDiffRoute
+  '/wiki/$namespace/$slug/history': typeof WikiNamespaceSlugHistoryRoute
+  '/wiki/$namespace/$slug/edit': typeof WikiNamespaceSlugEditRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -75,9 +104,13 @@ export interface FileRoutesByTo {
   '/search': typeof SearchRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki': typeof WikiIndexRoute
+  '/wiki/$namespace/$slug': typeof WikiNamespaceSlugRouteWithChildren
   '/wiki/$slug/diff': typeof WikiSlugDiffRoute
   '/wiki/$slug/history': typeof WikiSlugHistoryRoute
   '/wiki/$slug/edit': typeof WikiSlugEditRoute
+  '/wiki/$namespace/$slug/diff': typeof WikiNamespaceSlugDiffRoute
+  '/wiki/$namespace/$slug/history': typeof WikiNamespaceSlugHistoryRoute
+  '/wiki/$namespace/$slug/edit': typeof WikiNamespaceSlugEditRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -86,9 +119,13 @@ export interface FileRoutesById {
   '/search': typeof SearchRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki/': typeof WikiIndexRoute
+  '/wiki/$namespace/$slug': typeof WikiNamespaceSlugRouteWithChildren
   '/wiki/$slug/diff': typeof WikiSlugDiffRoute
   '/wiki/$slug/history': typeof WikiSlugHistoryRoute
   '/wiki_/$slug/edit': typeof WikiSlugEditRoute
+  '/wiki/$namespace/$slug/diff': typeof WikiNamespaceSlugDiffRoute
+  '/wiki/$namespace/$slug/history': typeof WikiNamespaceSlugHistoryRoute
+  '/wiki_/$namespace/$slug/edit': typeof WikiNamespaceSlugEditRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -98,9 +135,13 @@ export interface FileRouteTypes {
     | '/search'
     | '/wiki/$slug'
     | '/wiki/'
+    | '/wiki/$namespace/$slug'
     | '/wiki/$slug/diff'
     | '/wiki/$slug/history'
     | '/wiki/$slug/edit'
+    | '/wiki/$namespace/$slug/diff'
+    | '/wiki/$namespace/$slug/history'
+    | '/wiki/$namespace/$slug/edit'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -108,9 +149,13 @@ export interface FileRouteTypes {
     | '/search'
     | '/wiki/$slug'
     | '/wiki'
+    | '/wiki/$namespace/$slug'
     | '/wiki/$slug/diff'
     | '/wiki/$slug/history'
     | '/wiki/$slug/edit'
+    | '/wiki/$namespace/$slug/diff'
+    | '/wiki/$namespace/$slug/history'
+    | '/wiki/$namespace/$slug/edit'
   id:
     | '__root__'
     | '/'
@@ -118,9 +163,13 @@ export interface FileRouteTypes {
     | '/search'
     | '/wiki/$slug'
     | '/wiki/'
+    | '/wiki/$namespace/$slug'
     | '/wiki/$slug/diff'
     | '/wiki/$slug/history'
     | '/wiki_/$slug/edit'
+    | '/wiki/$namespace/$slug/diff'
+    | '/wiki/$namespace/$slug/history'
+    | '/wiki_/$namespace/$slug/edit'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -129,7 +178,9 @@ export interface RootRouteChildren {
   SearchRoute: typeof SearchRoute
   WikiSlugRoute: typeof WikiSlugRouteWithChildren
   WikiIndexRoute: typeof WikiIndexRoute
+  WikiNamespaceSlugRoute: typeof WikiNamespaceSlugRouteWithChildren
   WikiSlugEditRoute: typeof WikiSlugEditRoute
+  WikiNamespaceSlugEditRoute: typeof WikiNamespaceSlugEditRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -190,6 +241,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WikiSlugDiffRouteImport
       parentRoute: typeof WikiSlugRoute
     }
+    '/wiki/$namespace/$slug': {
+      id: '/wiki/$namespace/$slug'
+      path: '/wiki/$namespace/$slug'
+      fullPath: '/wiki/$namespace/$slug'
+      preLoaderRoute: typeof WikiNamespaceSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/wiki_/$namespace/$slug/edit': {
+      id: '/wiki_/$namespace/$slug/edit'
+      path: '/wiki/$namespace/$slug/edit'
+      fullPath: '/wiki/$namespace/$slug/edit'
+      preLoaderRoute: typeof WikiNamespaceSlugEditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/wiki/$namespace/$slug/history': {
+      id: '/wiki/$namespace/$slug/history'
+      path: '/history'
+      fullPath: '/wiki/$namespace/$slug/history'
+      preLoaderRoute: typeof WikiNamespaceSlugHistoryRouteImport
+      parentRoute: typeof WikiNamespaceSlugRoute
+    }
+    '/wiki/$namespace/$slug/diff': {
+      id: '/wiki/$namespace/$slug/diff'
+      path: '/diff'
+      fullPath: '/wiki/$namespace/$slug/diff'
+      preLoaderRoute: typeof WikiNamespaceSlugDiffRouteImport
+      parentRoute: typeof WikiNamespaceSlugRoute
+    }
   }
 }
 
@@ -207,13 +286,28 @@ const WikiSlugRouteWithChildren = WikiSlugRoute._addFileChildren(
   WikiSlugRouteChildren,
 )
 
+interface WikiNamespaceSlugRouteChildren {
+  WikiNamespaceSlugDiffRoute: typeof WikiNamespaceSlugDiffRoute
+  WikiNamespaceSlugHistoryRoute: typeof WikiNamespaceSlugHistoryRoute
+}
+
+const WikiNamespaceSlugRouteChildren: WikiNamespaceSlugRouteChildren = {
+  WikiNamespaceSlugDiffRoute: WikiNamespaceSlugDiffRoute,
+  WikiNamespaceSlugHistoryRoute: WikiNamespaceSlugHistoryRoute,
+}
+
+const WikiNamespaceSlugRouteWithChildren =
+  WikiNamespaceSlugRoute._addFileChildren(WikiNamespaceSlugRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   SearchRoute: SearchRoute,
   WikiSlugRoute: WikiSlugRouteWithChildren,
   WikiIndexRoute: WikiIndexRoute,
+  WikiNamespaceSlugRoute: WikiNamespaceSlugRouteWithChildren,
   WikiSlugEditRoute: WikiSlugEditRoute,
+  WikiNamespaceSlugEditRoute: WikiNamespaceSlugEditRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -46,12 +46,14 @@ use crate::auth::{self, AuthState, csrf};
 use crate::config::{Config, GraphQLConfig, RateLimitConfig};
 use crate::graphql::{self, GraphQLState};
 use crate::media;
+use crate::namespaces;
 use crate::pages;
 use crate::rate_limit::{self, RateLimitState};
 use crate::recent_changes;
 use crate::search;
 use crate::state::{AppState, AppStorage};
 use crate::static_assets;
+use crate::wiki;
 
 /// HTTP header used to carry the per-request correlation ID.
 const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
@@ -79,7 +81,9 @@ const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
         description = "REST endpoints for thewiki — see https://github.com/i-doll/thewiki",
     ),
     tags(
-        (name = "pages", description = "Page CRUD"),
+        (name = "pages", description = "Page CRUD (legacy `/api/v1/pages/...`, defaults to the `Main` namespace; clients should migrate to `wiki` per #28)"),
+        (name = "wiki", description = "Namespace-aware page CRUD (`/api/v1/wiki/{namespace}/...`)"),
+        (name = "namespaces", description = "Namespace metadata + admin CRUD"),
         (name = "revisions", description = "Revision history + diffs"),
         (name = "auth", description = "Sessions, login, /me"),
         (name = "recent-changes", description = "Wiki-wide chronological edit feed"),
@@ -94,6 +98,8 @@ pub struct ApiDoc;
 fn api_router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
     OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api/v1/pages", pages::router::<S>())
+        .nest("/api/v1/wiki", wiki::router::<S>())
+        .nest("/api/v1/namespaces", namespaces::router::<S>())
         .nest("/api/v1/recent-changes", recent_changes::router::<S>())
         .nest("/api/v1/audit-log", audit_log::router::<S>())
         .nest("/api/v1/media", media::router::<S>())
@@ -209,6 +215,60 @@ fn add_operation_security(api_doc: &mut OpenApiDoc) {
         api_doc,
         "/api/v1/media/{id}",
         HttpMethod::Delete,
+        vec![session_and_csrf_requirement()],
+    );
+    // Namespace CRUD (#28). Mutations require MANAGE_NAMESPACES on the
+    // calling session; the handler enforces the bit and returns 403 if it's
+    // missing. Reads are open.
+    set_operation_security(
+        api_doc,
+        "/api/v1/namespaces",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/namespaces/{slug}",
+        HttpMethod::Patch,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/namespaces/{slug}",
+        HttpMethod::Delete,
+        vec![session_and_csrf_requirement()],
+    );
+    // Namespace-aware wiki routes (#28). Mirror the legacy /api/v1/pages
+    // security shape — authenticated edits, optional anonymous when the
+    // operator flag allows.
+    set_operation_security(
+        api_doc,
+        "/api/v1/wiki/{namespace}",
+        HttpMethod::Post,
+        optional_session_and_csrf_requirement(),
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/wiki/{namespace}/{slug}",
+        HttpMethod::Put,
+        optional_session_and_csrf_requirement(),
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/wiki/{namespace}/{slug}",
+        HttpMethod::Delete,
+        optional_session_and_csrf_requirement(),
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/wiki/{namespace}/{slug}/revert",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/wiki/{namespace}/{slug}/protect",
+        HttpMethod::Post,
         vec![session_and_csrf_requirement()],
     );
 }

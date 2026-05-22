@@ -14,6 +14,7 @@ pub mod error;
 pub mod extractors;
 pub mod graphql;
 pub mod media;
+pub mod namespaces;
 pub mod pages;
 pub mod rate_limit;
 pub mod recent_changes;
@@ -22,6 +23,7 @@ pub mod search;
 pub mod state;
 pub mod static_assets;
 pub mod telemetry;
+pub mod wiki;
 
 pub use app::{
     build, build_auth_app, build_auth_app_with_rate_limit, build_full,

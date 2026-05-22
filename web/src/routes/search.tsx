@@ -123,13 +123,18 @@ function SearchResultsComponent() {
 						>
 							<div className="flex items-center justify-between gap-3">
 								<Link
-									to="/wiki/$slug"
-									params={{ slug: hit.slug }}
+									to="/wiki/$namespace/$slug"
+									params={{ namespace: hit.namespace_slug, slug: hit.slug }}
 									className="text-base font-semibold text-neutral-900 hover:underline"
 								>
 									{hit.title}
 								</Link>
-								<span className="font-mono text-xs text-neutral-500">{hit.namespace_slug}</span>
+								<span
+									className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs text-neutral-600"
+									title={`Namespace: ${hit.namespace_slug}`}
+								>
+									{hit.namespace_slug}
+								</span>
 							</div>
 							{hit.snippet.length > 0 && (
 								<p

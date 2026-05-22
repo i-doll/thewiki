@@ -202,16 +202,17 @@ fn parse_default_namespace_slug() -> Result<NamespaceSlug, ApiError> {
         .map_err(|err| ApiError::InvalidInput(format!("namespace_slug: {err}")))
 }
 
-/// Resolve a page by URL slug in the default namespace.
-async fn resolve_page<S: AppStorage>(
+/// Resolve a page by `(namespace_slug, page_slug)`. Used by the
+/// namespace-aware routes added in #28.
+pub(crate) async fn resolve_page_in_namespace<S: AppStorage>(
     state: &AppState<S>,
+    namespace_slug: &NamespaceSlug,
     slug: &str,
 ) -> Result<thewiki_core::Page, ApiError> {
-    let namespace_slug = parse_default_namespace_slug()?;
     let namespace = state
         .storage
         .namespaces()
-        .get_by_slug(&namespace_slug)
+        .get_by_slug(namespace_slug)
         .await?;
     let page = state
         .storage
@@ -245,7 +246,19 @@ pub async fn list_revisions<S: AppStorage>(
     Path(slug): Path<String>,
     Query(query): Query<ListRevisionsQuery>,
 ) -> Result<Json<RevisionListResponse>, ApiError> {
-    let page = resolve_page(&state, &slug).await?;
+    let namespace_slug = parse_default_namespace_slug()?;
+    list_revisions_in_namespace(state, namespace_slug, slug, query).await
+}
+
+/// Shared body for `GET /api/v1/pages/{slug}/revisions` and
+/// `GET /api/v1/wiki/{namespace}/{slug}/revisions`.
+pub(crate) async fn list_revisions_in_namespace<S: AppStorage>(
+    state: AppState<S>,
+    namespace_slug: NamespaceSlug,
+    slug: String,
+    query: ListRevisionsQuery,
+) -> Result<Json<RevisionListResponse>, ApiError> {
+    let page = resolve_page_in_namespace(&state, &namespace_slug, &slug).await?;
 
     let limit = match query.limit {
         Some(0) | None => state.route_config.default_page_size,
@@ -295,7 +308,19 @@ pub async fn diff_revisions<S: AppStorage>(
     Path(slug): Path<String>,
     Query(query): Query<DiffQuery>,
 ) -> Result<Json<DiffResponse>, ApiError> {
-    let page = resolve_page(&state, &slug).await?;
+    let namespace_slug = parse_default_namespace_slug()?;
+    diff_revisions_in_namespace(state, namespace_slug, slug, query).await
+}
+
+/// Shared body for `GET /api/v1/pages/{slug}/diff` and
+/// `GET /api/v1/wiki/{namespace}/{slug}/diff`.
+pub(crate) async fn diff_revisions_in_namespace<S: AppStorage>(
+    state: AppState<S>,
+    namespace_slug: NamespaceSlug,
+    slug: String,
+    query: DiffQuery,
+) -> Result<Json<DiffResponse>, ApiError> {
+    let page = resolve_page_in_namespace(&state, &namespace_slug, &slug).await?;
 
     let from = state.storage.revisions().get_by_id(query.from).await?;
     let to = state.storage.revisions().get_by_id(query.to).await?;
