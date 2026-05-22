@@ -380,7 +380,7 @@ async fn revert_with_revision_from_other_page_returns_404() {
 }
 
 #[tokio::test]
-async fn revert_without_user_id_returns_401() {
+async fn revert_without_session_returns_401() {
     let (router, session, _storage) = fresh_app().await;
     let (rev_a, _rev_b, _rev_c) = seed_three_revisions(&router, &session).await;
 
