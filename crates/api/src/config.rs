@@ -397,8 +397,20 @@ impl Default for SearchConfig {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditLogConfig {
+    /// Master switch. When `false`, the API still serves the read endpoints
+    /// (so operators can inspect historical rows) but the background pruner
+    /// is skipped and the `audit-log-prune` xtask will refuse to run. Default
+    /// is `true`.
+    #[serde(default = "default_audit_log_enabled")]
+    pub enabled: bool,
     /// Number of days to retain audit rows. Defaults to 365.
     pub retention_days: u32,
+}
+
+/// `serde` default for [`AuditLogConfig::enabled`].
+#[must_use]
+fn default_audit_log_enabled() -> bool {
+    true
 }
 
 /// Observability configuration consumed by [`crate::telemetry`].
@@ -525,6 +537,7 @@ impl Config {
                 backend: RateLimitBackendConfig::InMemory,
             },
             audit_log: AuditLogConfig {
+                enabled: true,
                 retention_days: 365,
             },
             telemetry: TelemetryConfig {

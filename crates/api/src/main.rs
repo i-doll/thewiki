@@ -67,13 +67,17 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
     .await
     .with_context(|| format!("opening storage at {}", config.database.url))?;
 
-    let pruned = prune_expired_audit_log(&storage, config.audit_log.retention_days)
-        .await
-        .context("pruning expired audit log rows")?;
-    if pruned > 0 {
-        info!(rows = pruned, "pruned expired audit log rows");
+    if config.audit_log.enabled {
+        let pruned = prune_expired_audit_log(&storage, config.audit_log.retention_days)
+            .await
+            .context("pruning expired audit log rows")?;
+        if pruned > 0 {
+            info!(rows = pruned, "pruned expired audit log rows");
+        }
+        spawn_audit_log_pruner(storage.clone(), config.audit_log.retention_days);
+    } else {
+        info!("audit_log.enabled = false: skipping background pruner");
     }
-    spawn_audit_log_pruner(storage.clone(), config.audit_log.retention_days);
 
     let hasher = Arc::new(Argon2Hasher::new(config.auth.argon2).context("building argon2 hasher")?);
     let session_ttl = Duration::from_secs(u64::from(config.auth.session_ttl_hours) * 3600);
