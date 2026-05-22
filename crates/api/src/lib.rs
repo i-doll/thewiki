@@ -12,12 +12,15 @@ pub mod config;
 pub mod error;
 pub mod extractors;
 pub mod pages;
+pub mod rate_limit;
 pub mod recent_changes;
 pub mod state;
 pub mod static_assets;
 pub mod telemetry;
 
-pub use app::{build, build_auth_app, build_full, build_with_state};
+pub use app::{
+    build, build_auth_app, build_auth_app_with_rate_limit, build_full, build_with_state,
+};
 pub use config::Config;
 pub use error::ApiError;
 pub use state::{AppState, AppStorage, RouteConfig};

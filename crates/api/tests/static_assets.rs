@@ -121,7 +121,12 @@ async fn fresh_app_with_frontend(serve_frontend: bool) -> Router {
     );
     let app_state = AppState::new(storage, auth_cfg).with_auth_state(auth_state.clone());
 
-    app::build_full(app_state, auth_state, serve_frontend)
+    app::build_full(
+        app_state,
+        auth_state,
+        serve_frontend,
+        thewiki_api::config::Config::defaults().rate_limit,
+    )
 }
 
 async fn get(router: &Router, uri: &str) -> axum::http::Response<Body> {

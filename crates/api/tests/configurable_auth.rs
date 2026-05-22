@@ -41,6 +41,12 @@ use tower::ServiceExt;
 
 // ─── Fixture ──────────────────────────────────────────────────────────────
 
+fn disabled_rate_limit() -> thewiki_api::config::RateLimitConfig {
+    let mut cfg = Config::defaults().rate_limit;
+    cfg.enabled = false;
+    cfg
+}
+
 /// Test-friendly Argon2 parameters at the OWASP floor so test startup stays
 /// fast. The hasher is instantiated but never actually used (sessions are
 /// pre-seeded directly), so the cost is paid only once at construction.
@@ -106,7 +112,7 @@ async fn app_with_auth(auth_cfg: AuthConfig) -> (Router, UserId, SqliteStorage) 
     // We need both the pages router (for the configurable-auth tests) and the
     // auth router (for the /policy endpoint). `build_full` mounts everything
     // behind the production stack, which is what we want here.
-    let router = app::build_full(state, auth_state, false);
+    let router = app::build_full(state, auth_state, false, disabled_rate_limit());
 
     (router, user.id, storage)
 }
