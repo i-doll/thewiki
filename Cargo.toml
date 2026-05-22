@@ -150,6 +150,19 @@ tempfile = "3"
 object_store = { version = "0.13", features = ["aws"] }
 sha2 = "0.10"
 bytes = "1"
+# Rate limiting (#35). The in-memory backend uses `dashmap` for sharded
+# concurrent maps so request-time bucket checks don't contend on a single
+# mutex. `async-trait` is needed for the pluggable `RateLimitStore` trait —
+# the Redis backend is async, and the in-memory one trivially resolves.
+# `redis` is the optional backend, gated behind the `redis` cargo feature on
+# `thewiki-api`.
+dashmap = "6"
+async-trait = "0.1"
+redis = { version = "0.27", default-features = false, features = [
+    "tokio-comp",
+    "connection-manager",
+    "script",
+] }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

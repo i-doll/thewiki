@@ -185,22 +185,40 @@ enabled = true
 # trusted_proxies = ["127.0.0.1", "::1"]
 
 [rate_limit.read]
-# Safe methods (`GET`, `HEAD`, `OPTIONS`). Defaults allow a burst of 120 reads
-# and refill 120 tokens per minute.
+# Safe methods (`GET`, `HEAD`, `OPTIONS`) for *anonymous* requests. Defaults
+# allow a burst of 60 reads and refill 60 tokens per minute — opinionated
+# defaults that operators will likely tune.
+capacity = 60
+refill_tokens = 60
+refill_interval_secs = 60
+
+[rate_limit.write]
+# Mutating methods (`POST`, `PUT`, `PATCH`, `DELETE`, ...) for *anonymous*
+# requests. Defaults allow a burst of 10 writes and refill 10 tokens per
+# minute.
+capacity = 10
+refill_tokens = 10
+refill_interval_secs = 60
+
+# Authenticated users get their own (typically larger) buckets. Omit to share
+# the anonymous limits above. Defaults: 600 reads/min, 120 writes/min.
+[rate_limit.authenticated_read]
+capacity = 600
+refill_tokens = 600
+refill_interval_secs = 60
+
+[rate_limit.authenticated_write]
 capacity = 120
 refill_tokens = 120
 refill_interval_secs = 60
 
-[rate_limit.write]
-# Mutating methods (`POST`, `PUT`, `PATCH`, `DELETE`, ...). Defaults allow a
-# burst of 30 writes and refill 30 tokens per minute.
-capacity = 30
-refill_tokens = 30
-refill_interval_secs = 60
-
 [rate_limit.backend]
-# Per-process bucket store. Default: "in-memory".
+# Per-process bucket store. Default: "in-memory". Set to "redis" (with a `url`
+# field) when running multiple replicas; requires building with
+# `--features thewiki-api/redis`.
 kind = "in-memory"
+# kind = "redis"
+# url = "redis://127.0.0.1:6379/0"
 
 # ---------------------------------------------------------------------------
 # Full-text search (#26).

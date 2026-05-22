@@ -2255,14 +2255,14 @@
       },
       "RateLimitErrorBody": {
         "type": "object",
-        "description": "Wire form returned when a request exceeds its configured rate limit.",
+        "description": "Wire form for a 429 response body.",
         "required": [
           "error"
         ],
         "properties": {
           "error": {
             "type": "string",
-            "description": "Stable machine-readable error code."
+            "description": "Stable machine-readable error code. Always `\"rate_limited\"`."
           }
         }
       },

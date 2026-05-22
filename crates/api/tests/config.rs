@@ -24,12 +24,28 @@ fn defaults_match_documented_values() {
     assert_eq!(cfg.auth.argon2.memory_kib, 65_536);
     assert_eq!(cfg.auth.argon2.iterations, 3);
     assert!(cfg.rate_limit.enabled);
-    assert_eq!(cfg.rate_limit.read.capacity, 120);
-    assert_eq!(cfg.rate_limit.read.refill_tokens, 120);
+    // Anonymous defaults: 60 reads/min, 10 writes/min — opinionated and
+    // tunable. Authenticated users get 10× higher (600/120).
+    assert_eq!(cfg.rate_limit.read.capacity, 60);
+    assert_eq!(cfg.rate_limit.read.refill_tokens, 60);
     assert_eq!(cfg.rate_limit.read.refill_interval_secs, 60);
-    assert_eq!(cfg.rate_limit.write.capacity, 30);
-    assert_eq!(cfg.rate_limit.write.refill_tokens, 30);
+    assert_eq!(cfg.rate_limit.write.capacity, 10);
+    assert_eq!(cfg.rate_limit.write.refill_tokens, 10);
     assert_eq!(cfg.rate_limit.write.refill_interval_secs, 60);
+    let auth_read = cfg
+        .rate_limit
+        .authenticated_read
+        .expect("authenticated read bucket default");
+    assert_eq!(auth_read.capacity, 600);
+    assert_eq!(auth_read.refill_tokens, 600);
+    assert_eq!(auth_read.refill_interval_secs, 60);
+    let auth_write = cfg
+        .rate_limit
+        .authenticated_write
+        .expect("authenticated write bucket default");
+    assert_eq!(auth_write.capacity, 120);
+    assert_eq!(auth_write.refill_tokens, 120);
+    assert_eq!(auth_write.refill_interval_secs, 60);
     assert_eq!(cfg.rate_limit.client_ip_header, None);
     assert!(cfg.rate_limit.trusted_proxies.is_empty());
     assert_eq!(cfg.rate_limit.backend, RateLimitBackendConfig::InMemory);
@@ -266,5 +282,44 @@ fn validate_rejects_zero_audit_log_retention() {
     let err = cfg
         .validate()
         .expect_err("zero audit retention must be rejected");
+    assert!(matches!(err, ConfigError::Invalid(_)));
+}
+
+#[test]
+fn redis_backend_round_trips_through_toml() {
+    Jail::expect_with(|jail| {
+        jail.clear_env();
+        jail.create_file(
+            "thewiki.toml",
+            r#"
+[database]
+url = "sqlite::memory:"
+max_connections = 1
+acquire_timeout_secs = 5
+
+[rate_limit.backend]
+kind = "redis"
+url = "redis://127.0.0.1:6379/0"
+"#,
+        )?;
+        let cfg =
+            Config::load(Some(std::path::Path::new("thewiki.toml"))).expect("redis backend parses");
+        match cfg.rate_limit.backend {
+            RateLimitBackendConfig::Redis { url } => {
+                assert_eq!(url, "redis://127.0.0.1:6379/0");
+            }
+            other => panic!("expected redis backend, got {other:?}"),
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn validate_rejects_redis_backend_without_url() {
+    let mut cfg = Config::defaults();
+    cfg.rate_limit.backend = RateLimitBackendConfig::Redis { url: String::new() };
+    let err = cfg
+        .validate()
+        .expect_err("empty redis url must be rejected");
     assert!(matches!(err, ConfigError::Invalid(_)));
 }

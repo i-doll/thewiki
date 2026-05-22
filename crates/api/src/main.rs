@@ -12,6 +12,7 @@ use anyhow::Context;
 use clap::Parser;
 use thewiki_api::auth::password::Argon2Hasher;
 use thewiki_api::auth::state::AuthState;
+use thewiki_api::rate_limit::RateLimitState;
 use thewiki_api::{
     app,
     cli::{self, ConfigCommand, ReindexArgs},
@@ -127,11 +128,21 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!("media backend init: {e}"))?;
     app_state = app_state.with_media(config.storage.media.clone(), media_backend);
 
-    let router = app::build_full(
+    // Build the rate-limit state with the configured backend. The in-memory
+    // backend is infallible; the Redis backend (gated behind the `redis`
+    // feature) connects up front so a malformed URL surfaces at startup
+    // rather than on the first request.
+    let rate_limit_state = RateLimitState::connect(
+        config.rate_limit.clone(),
+        app_state.auth_state.clone().or(Some(auth_state.clone())),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("initialising rate limiter: {e}"))?;
+    let router = app::build_full_with_rate_limit_state(
         app_state,
         auth_state,
         config.server.serve_frontend,
-        config.rate_limit,
+        rate_limit_state,
     );
 
     let listener = tokio::net::TcpListener::bind(&config.server.bind)

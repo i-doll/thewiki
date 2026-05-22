@@ -417,6 +417,21 @@ pub fn build_full<S: AppStorage>(
         rate_limit_config,
         app_state.auth_state.clone().or(Some(auth_state.clone())),
     );
+    build_full_with_rate_limit_state(app_state, auth_state, serve_frontend, rate_limit_state)
+}
+
+/// Variant of [`build_full`] that takes a caller-built [`RateLimitState`].
+///
+/// The `serve` subcommand uses this when the operator selected the Redis
+/// backend — connecting to Redis is async and fallible, so the state has to
+/// be built up front (via [`RateLimitState::connect`]) rather than inline in
+/// the router constructor.
+pub fn build_full_with_rate_limit_state<S: AppStorage>(
+    app_state: AppState<S>,
+    auth_state: AuthState,
+    serve_frontend: bool,
+    rate_limit_state: RateLimitState,
+) -> Router {
     // Page CRUD + recent-changes + OpenAPI subrouter.
     let api_router = api_router::<S>()
         .layer(middleware::from_fn(csrf::csrf_layer))

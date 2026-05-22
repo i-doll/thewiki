@@ -94,7 +94,19 @@ ammonia = { workspace = true }
 # parameterise over the backend choice. Rust 1.92 still doesn't make
 # `async fn` in trait dyn-compatible without help, so `async_trait` is the
 # pragmatic choice for this one trait.
-async-trait = "0.1"
+async-trait = { workspace = true }
+# Rate limiting (#35). `dashmap` is the sharded concurrent map under the
+# in-memory backend; `async-trait` lets the pluggable store trait stay async
+# without leaking the future type. The `redis` crate is optional — it ships
+# behind the `redis` cargo feature so default builds don't pull it in.
+dashmap = { workspace = true }
+redis = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enable the Redis-backed rate-limit store. See
+# `src/rate_limit/store/redis.rs` for the Lua-script bucket contract.
+redis = ["dep:redis"]
 
 [dev-dependencies]
 tokio = { workspace = true }
