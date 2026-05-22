@@ -192,6 +192,12 @@ fn add_operation_security(api_doc: &mut OpenApiDoc) {
     );
     set_operation_security(
         api_doc,
+        "/api/v1/pages/{slug}/protect",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
         "/api/v1/media",
         HttpMethod::Post,
         vec![session_and_csrf_requirement()],

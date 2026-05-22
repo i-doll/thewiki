@@ -27,6 +27,7 @@ use crate::error::ApiError;
 use crate::extractors::RequireAuth;
 use crate::pages::audit::page_event;
 use crate::pages::dto::PageView;
+use crate::pages::protection::{EditorContext, check_protection};
 use crate::pages::routes::{hydrate_page_view, parse_default_namespace_slug, resolve_namespace};
 use crate::state::{AppState, AppStorage};
 
@@ -93,6 +94,18 @@ pub async fn revert_page<S: AppStorage>(
         .pages()
         .get_by_namespace_and_slug(namespace.id, &slug)
         .await?;
+
+    // Per-page protection check (#34). A revert mutates the page just like
+    // any other edit, so the same gate applies. `RequireAuth` already
+    // covered the 401 case; this layer adds the 403 for under-privileged
+    // sessions.
+    check_protection(
+        page.protection_level,
+        EditorContext {
+            is_anonymous: false,
+            permissions: author.permissions,
+        },
+    )?;
 
     // Load the historical revision. Storage's `NotFound` maps to 404 via
     // `From<StorageError>` in `error.rs`.

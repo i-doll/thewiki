@@ -38,6 +38,9 @@ pub(super) async fn commit_page_audit(
             insert_revision(&mut tx, &revision).await?;
             update_page(&mut tx, &page).await?;
         }
+        PageAuditMutation::UpdatePage { page } => {
+            update_page(&mut tx, &page).await?;
+        }
         PageAuditMutation::DeletePage { page_id } => {
             let result = delete_page(&mut tx, page_id).await?;
             if result.rows_affected() == 0 {
@@ -91,7 +94,9 @@ fn validate_mutation(mutation: &PageAuditMutation) -> Result<(), StorageError> {
                 ));
             }
         }
-        PageAuditMutation::DeletePage { .. } | PageAuditMutation::AuditOnly => {}
+        PageAuditMutation::UpdatePage { .. }
+        | PageAuditMutation::DeletePage { .. }
+        | PageAuditMutation::AuditOnly => {}
     }
     Ok(())
 }

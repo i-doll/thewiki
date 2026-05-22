@@ -24,7 +24,7 @@
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
-use thewiki_core::{EmailAddress, User, UserId, Username};
+use thewiki_core::{EmailAddress, Permissions, User, UserId, Username};
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::UserRepository;
 use time::OffsetDateTime;
@@ -124,6 +124,11 @@ pub struct EditorExtractor {
     pub user_created_at: Option<OffsetDateTime>,
     /// Username snapshot to store on audit rows.
     pub username: String,
+    /// Effective permission bits (union of all roles the user holds).
+    /// [`Permissions::empty`] for the anonymous path and for authenticated
+    /// users without any role assignment — the per-page protection check
+    /// distinguishes the two via [`Self::is_anonymous`].
+    pub permissions: Permissions,
 }
 
 impl<S: AppStorage> FromRequestParts<AppState<S>> for EditorExtractor {
@@ -153,6 +158,7 @@ impl<S: AppStorage> FromRequestParts<AppState<S>> for EditorExtractor {
                 is_anonymous: false,
                 user_created_at: Some(session.user.created_at),
                 username: session.user.username.as_str().to_owned(),
+                permissions: session.permissions,
             }),
             Err(AuthError::MissingSession | AuthError::ExpiredSession) => {
                 if state.auth_config.anonymous_edits {
@@ -162,6 +168,7 @@ impl<S: AppStorage> FromRequestParts<AppState<S>> for EditorExtractor {
                         is_anonymous: true,
                         user_created_at: None,
                         username: ANONYMOUS_USERNAME.to_owned(),
+                        permissions: Permissions::empty(),
                     })
                 } else {
                     Err(ApiError::Unauthenticated)
@@ -189,6 +196,8 @@ pub struct RequireAuth {
     pub user_id: UserId,
     /// Username snapshot to store on audit rows.
     pub username: String,
+    /// Effective permission bits (union of all roles the user holds).
+    pub permissions: Permissions,
 }
 
 impl<S: AppStorage> FromRequestParts<AppState<S>> for RequireAuth {
@@ -205,6 +214,7 @@ impl<S: AppStorage> FromRequestParts<AppState<S>> for RequireAuth {
             Ok(session) => Ok(Self {
                 user_id: session.user.id,
                 username: session.user.username.as_str().to_owned(),
+                permissions: session.permissions,
             }),
             Err(AuthError::MissingSession | AuthError::ExpiredSession) => {
                 Err(ApiError::Unauthenticated)

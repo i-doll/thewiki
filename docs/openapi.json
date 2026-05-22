@@ -1441,6 +1441,112 @@
         }
       }
     },
+    "/api/v1/pages/{slug}/protect": {
+      "post": {
+        "tags": [
+          "pages"
+        ],
+        "summary": "`POST /api/v1/pages/{slug}/protect` — change a page's protection level.",
+        "operationId": "protect_page",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "URL slug within the default namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token matching the `thewiki_csrf` cookie",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProtectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Protection level updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks PROTECT permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/pages/{slug}/revert": {
       "post": {
         "tags": [
@@ -2207,6 +2313,7 @@
           "title",
           "content",
           "content_html",
+          "protection_level",
           "created_at",
           "updated_at"
         ],
@@ -2247,6 +2354,10 @@
             "type": "string",
             "description": "Slug of the namespace; joined in so clients don't need a second\nround trip just to render a breadcrumb."
           },
+          "protection_level": {
+            "$ref": "#/components/schemas/ProtectionLevel",
+            "description": "How protected this page is from edits. Drives the SPA's lock badge\nand is enforced server-side on every mutating handler (#34)."
+          },
           "slug": {
             "type": "string",
             "description": "URL slug, unique within the namespace."
@@ -2261,6 +2372,29 @@
             "description": "When the page row was last touched."
           }
         }
+      },
+      "ProtectRequest": {
+        "type": "object",
+        "description": "Body of `POST /api/v1/pages/{slug}/protect`.",
+        "required": [
+          "protection_level"
+        ],
+        "properties": {
+          "protection_level": {
+            "$ref": "#/components/schemas/ProtectionLevel",
+            "description": "New protection level for the page. Accepted wire forms mirror the\nsnake-case serde representation of [`ProtectionLevel`]:\n`\"none\"`, `\"semi_protected\"`, `\"protected\"`, `\"fully_protected\"`."
+          }
+        }
+      },
+      "ProtectionLevel": {
+        "type": "string",
+        "description": "How aggressively a page is protected from edits.\n\nThe semantics:\n\n- [`None`](ProtectionLevel::None) — anyone with the `EDIT` permission can\n  edit. The default for new pages.\n- [`SemiProtected`](ProtectionLevel::SemiProtected) — requires an\n  established account (no anonymous edits).\n- [`Protected`](ProtectionLevel::Protected) — requires an editor-or-higher\n  role.\n- [`FullyProtected`](ProtectionLevel::FullyProtected) — requires an admin.\n\nThe exact mapping from variant to required role is decided in the auth\nlayer; this enum is purely a data carrier.",
+        "enum": [
+          "none",
+          "semi_protected",
+          "protected",
+          "fully_protected"
+        ]
       },
       "RateLimitErrorBody": {
         "type": "object",
