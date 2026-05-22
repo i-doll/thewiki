@@ -24,6 +24,18 @@ export default defineConfig({
 				target: "http://localhost:8080",
 				changeOrigin: true,
 			},
+			// Liveness/readiness probes live at the root on the backend (not
+			// under /api), so the dev proxy must forward them explicitly. In
+			// production the SPA is served same-origin from the binary, so
+			// these resolve directly without a proxy.
+			"/healthz": {
+				target: "http://localhost:8080",
+				changeOrigin: true,
+			},
+			"/readyz": {
+				target: "http://localhost:8080",
+				changeOrigin: true,
+			},
 		},
 	},
 	build: {
