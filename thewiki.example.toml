@@ -77,10 +77,21 @@ backend = { kind = "db" }
 # Authentication and authorisation defaults.
 #
 # These are install-time defaults; per-page protection (M1) layers on top of
-# them. Runtime enforcement wiring lands in #14.
+# them. Page edit handlers consult these knobs at request time — see #14.
+#
+# The defaults below are the safest production posture (no anonymous edits,
+# closed registration, no approval queue). Flip `anonymous_edits = true`
+# alongside `approval_required_for = "anonymous"` if you want a low-friction
+# public wiki with a moderator gate.
+#
+# The SPA reads these flags via `GET /api/v1/auth/policy` to decide whether
+# to render the "Sign up" CTA and the "Edit anonymously" affordance.
 # ---------------------------------------------------------------------------
 [auth]
-# When `true`, anonymous (logged-out) visitors can edit pages.
+# When `true`, anonymous (logged-out) visitors can edit pages. The edit is
+# credited to a singleton "Anonymous" user row in the `users` table, lazily
+# created the first time an anonymous edit lands. Reads remain open
+# regardless of this flag.
 # Default: false (anonymous reads only).
 anonymous_edits = false
 
@@ -89,14 +100,26 @@ anonymous_edits = false
 #   "invite" — registration requires an invite code
 #   "closed" — admins create accounts manually
 # Default: "closed".
+#
+# Surfaced verbatim via `GET /api/v1/auth/policy` so the SPA knows whether
+# to show a "Sign up" affordance.
 registration = "closed"
 
-# Which classes of edits land in the moderator approval queue (M2). One of:
+# Which classes of edits land in the moderator approval queue. One of:
 #   "none"      — every edit goes live immediately
-#   "anonymous" — anonymous edits require approval
-#   "new-users" — anonymous + new (recently-registered) accounts require approval
+#   "anonymous" — anonymous edits require approval; authenticated edits go live
+#   "new-users" — anonymous edits + edits from accounts younger than 24 hours
+#                 require approval
 #   "all"       — every edit requires approval
 # Default: "none".
+#
+# When an edit matches the configured scope, the API returns `202 Accepted`
+# instead of `201 Created` / `200 OK` and the page's current revision stays
+# pointed at the previous head until a moderator promotes the pending edit.
+# The moderator queue itself ships in M2 (#40) — for now the gate logs the
+# decision but does not yet persist a `pending_revisions` row, so configuring
+# anything other than `"none"` will *silently drop* edits. Only flip this
+# once #40 lands.
 approval_required_for = "none"
 
 # Session lifetime in hours. Sessions are stored in the DB (no JWT), so this

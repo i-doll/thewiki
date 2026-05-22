@@ -11,6 +11,7 @@ use std::time::Duration;
 use thewiki_storage::sqlite::SqliteStorage;
 
 use crate::auth::password::Argon2Hasher;
+use crate::config::AuthConfig;
 
 /// Auth-related app state.
 ///
@@ -32,6 +33,11 @@ pub struct AuthState {
     /// TLS; `false` for local development over plain HTTP. Defaults to `true`
     /// — operators flip it via the `--insecure-cookie` CLI flag.
     pub secure_cookies: bool,
+    /// Snapshot of `Config::auth` — published verbatim by
+    /// `GET /api/v1/auth/policy` so the SPA can surface the right login /
+    /// signup affordances. Also consulted by the configurable-auth extractors
+    /// via the `AppState` indirection.
+    pub config: AuthConfig,
 }
 
 impl AuthState {
@@ -42,12 +48,14 @@ impl AuthState {
         hasher: Arc<Argon2Hasher>,
         session_ttl: Duration,
         secure_cookies: bool,
+        config: AuthConfig,
     ) -> Self {
         Self {
             storage,
             hasher,
             session_ttl,
             secure_cookies,
+            config,
         }
     }
 }

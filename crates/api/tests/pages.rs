@@ -60,7 +60,14 @@ async fn fresh_app() -> (Router, UserId) {
         .await
         .expect("seed test user");
 
-    let state = AppState::new(storage);
+    // Pages tests opt into anonymous edits so the existing assertions (which
+    // predate the configurable-auth wiring in #14 and used the now-gone
+    // `x-user-id` header) keep exercising the create/update/delete paths.
+    // The strict 401-without-session case is covered by the dedicated
+    // `configurable_auth` integration test module.
+    let mut auth_cfg = thewiki_api::config::Config::defaults().auth;
+    auth_cfg.anonymous_edits = true;
+    let state = AppState::new(storage, auth_cfg);
     let router = app::build_with_state(state);
     (router, user.id)
 }
@@ -104,7 +111,9 @@ async fn fresh_app_with_storage() -> (Router, UserId, SqliteStorage) {
         .await
         .expect("seed test user");
 
-    let state = AppState::new(storage.clone());
+    let mut auth_cfg = thewiki_api::config::Config::defaults().auth;
+    auth_cfg.anonymous_edits = true;
+    let state = AppState::new(storage.clone(), auth_cfg);
     let router = app::build_with_state(state);
     (router, user.id, storage)
 }
@@ -391,9 +400,13 @@ async fn list_paginates_with_cursor() {
 }
 
 #[tokio::test]
-async fn post_without_user_id_returns_401() {
+async fn post_without_session_when_anonymous_edits_enabled_succeeds() {
+    // The fresh_app fixture enables `anonymous_edits = true` (see the helper
+    // above), so a POST without a session is accepted and credited to the
+    // lazily-provisioned anonymous user. The strict 401-when-anonymous-edits-
+    // disabled case is covered by the configurable-auth integration tests.
     let (router, _) = fresh_app().await;
-    let (status, body) = json_request(
+    let (status, _body) = json_request(
         router,
         "POST",
         "/api/v1/pages",
@@ -406,8 +419,7 @@ async fn post_without_user_id_returns_401() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "body: {body}");
-    assert_eq!(body["code"], "unauthenticated");
+    assert_eq!(status, StatusCode::CREATED);
 }
 
 #[tokio::test]

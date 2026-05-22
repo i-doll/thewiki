@@ -111,8 +111,15 @@ async fn fresh_app_with_frontend(serve_frontend: bool) -> Router {
         .expect("seed Main namespace");
 
     let hasher = Arc::new(Argon2Hasher::new(test_argon2()).expect("hasher"));
-    let auth_state = AuthState::new(storage.clone(), hasher, Duration::from_secs(60 * 60), false);
-    let app_state = AppState::new(storage);
+    let auth_cfg = thewiki_api::config::Config::defaults().auth;
+    let auth_state = AuthState::new(
+        storage.clone(),
+        hasher,
+        Duration::from_secs(60 * 60),
+        false,
+        auth_cfg.clone(),
+    );
+    let app_state = AppState::new(storage, auth_cfg).with_auth_state(auth_state.clone());
 
     app::build_full(app_state, auth_state, serve_frontend)
 }
