@@ -19,7 +19,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use thewiki_core::{Permissions, ProtectionLevel};
+use thewiki_core::{NamespaceSlug, Permissions, ProtectionLevel};
 use thewiki_storage::repo::{PageAuditMutation, PageRepository};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
@@ -65,6 +65,19 @@ pub async fn protect_page<S: AppStorage>(
     actor: RequireAuth,
     Json(req): Json<ProtectRequest>,
 ) -> Result<Json<PageView>, ApiError> {
+    let namespace_slug = parse_default_namespace_slug()?;
+    protect_page_in_namespace(state, namespace_slug, slug, actor, req).await
+}
+
+/// Shared body for `POST /api/v1/pages/{slug}/protect` and
+/// `POST /api/v1/wiki/{namespace}/{slug}/protect`.
+pub(crate) async fn protect_page_in_namespace<S: AppStorage>(
+    state: AppState<S>,
+    namespace_slug: NamespaceSlug,
+    slug: String,
+    actor: RequireAuth,
+    req: ProtectRequest,
+) -> Result<Json<PageView>, ApiError> {
     // Gate on PROTECT. Same machine code the edit handlers use, so the SPA
     // can render a single "you don't have permission to change this" surface.
     if !actor.permissions.contains(Permissions::PROTECT) {
@@ -74,7 +87,6 @@ pub async fn protect_page<S: AppStorage>(
         });
     }
 
-    let namespace_slug = parse_default_namespace_slug()?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();
 

@@ -3,8 +3,36 @@
 //! Mutating requests inject the placeholder `X-User-Id` header (see
 //! `lib/auth.ts`). Read endpoints don't carry the header — the API only
 //! requires auth on writes today.
+//!
+//! Namespace-aware routing (#28): the helpers in this module accept an
+//! optional `namespace` argument that defaults to `Main`. When supplied
+//! they call the namespace-aware API surface (`/api/v1/wiki/{namespace}/{slug}`);
+//! otherwise they fall back to the legacy `/api/v1/pages/{slug}` routes
+//! that assume `Main`. The legacy paths stay alive for back-compat and the
+//! handful of consumers that haven't migrated yet.
 
 import { getCurrentUserId } from "./auth";
+
+/** Default namespace assumed when no explicit one is supplied. */
+export const DEFAULT_NAMESPACE = "Main";
+
+/**
+ * Normalise an optional namespace into the slug to use on the wire.
+ * Empty strings are treated as "absent" so URL parsing doesn't have to
+ * coerce them.
+ */
+function resolveNamespace(namespace?: string | null): string {
+	if (namespace === undefined || namespace === null || namespace.length === 0) {
+		return DEFAULT_NAMESPACE;
+	}
+	return namespace;
+}
+
+/** Build the canonical `/api/v1/wiki/{namespace}/{slug}` URL for reads. */
+function wikiPath(namespace: string | undefined | null, slug: string): string {
+	const ns = encodeURIComponent(resolveNamespace(namespace));
+	return `/api/v1/wiki/${ns}/${encodeURIComponent(slug)}`;
+}
 
 /**
  * Per-page protection level mirroring `thewiki_core::ProtectionLevel`.
@@ -41,9 +69,16 @@ export interface PageListResponse {
 	next_cursor: string | null;
 }
 
-/** Body for `POST /api/v1/pages`. */
+/**
+ * Body for `POST /api/v1/pages` and `POST /api/v1/wiki/{namespace}`.
+ *
+ * `namespace_slug` is optional on the namespace-aware route — the
+ * namespace comes from the URL there. It remains required-by-convention
+ * for the legacy `/api/v1/pages` call so existing clients keep working
+ * without code changes.
+ */
 export interface CreatePageRequest {
-	namespace_slug: string;
+	namespace_slug?: string;
 	slug: string;
 	title: string;
 	content: string;
@@ -101,10 +136,14 @@ function authHeaders(): HeadersInit {
 	};
 }
 
-export async function fetchPage(slug: string): Promise<PageView> {
-	return jsonRequest<PageView>(`/api/v1/pages/${encodeURIComponent(slug)}`, {
-		method: "GET",
-	});
+/**
+ * Fetch a page by slug.
+ *
+ * Resolves through the namespace-aware route `/api/v1/wiki/{namespace}/{slug}`,
+ * which falls back to `Main` when no namespace is provided.
+ */
+export async function fetchPage(slug: string, namespace?: string): Promise<PageView> {
+	return jsonRequest<PageView>(wikiPath(namespace, slug), { method: "GET" });
 }
 
 export async function listPages(options: {
@@ -123,16 +162,30 @@ export async function listPages(options: {
 	return jsonRequest<PageListResponse>(url, { method: "GET" });
 }
 
+/**
+ * Create a page. The `namespace_slug` on `body` selects the target
+ * namespace; the helper routes through `/api/v1/wiki/{namespace}` so the
+ * back-end can pick up the namespace from the URL.
+ */
 export async function createPage(body: CreatePageRequest): Promise<PageView> {
-	return jsonRequest<PageView>("/api/v1/pages", {
+	const namespace = resolveNamespace(body.namespace_slug);
+	return jsonRequest<PageView>(`/api/v1/wiki/${encodeURIComponent(namespace)}`, {
 		method: "POST",
 		headers: authHeaders(),
 		body: JSON.stringify(body),
 	});
 }
 
-export async function updatePage(slug: string, body: UpdatePageRequest): Promise<PageView> {
-	return jsonRequest<PageView>(`/api/v1/pages/${encodeURIComponent(slug)}`, {
+/**
+ * Commit a new revision of a page. Routes through the namespace-aware
+ * surface so URLs stay consistent with the read path.
+ */
+export async function updatePage(
+	slug: string,
+	body: UpdatePageRequest,
+	namespace?: string,
+): Promise<PageView> {
+	return jsonRequest<PageView>(wikiPath(namespace, slug), {
 		method: "PUT",
 		headers: authHeaders(),
 		body: JSON.stringify(body),
@@ -151,8 +204,12 @@ export interface ProtectPageRequest {
  * the calling session — the server returns a `page_protected` 403 otherwise,
  * which surfaces in the SPA via [`ApiError`].
  */
-export async function protectPage(slug: string, body: ProtectPageRequest): Promise<PageView> {
-	return jsonRequest<PageView>(`/api/v1/pages/${encodeURIComponent(slug)}/protect`, {
+export async function protectPage(
+	slug: string,
+	body: ProtectPageRequest,
+	namespace?: string,
+): Promise<PageView> {
+	return jsonRequest<PageView>(`${wikiPath(namespace, slug)}/protect`, {
 		method: "POST",
 		headers: authHeaders(),
 		body: JSON.stringify(body),
@@ -206,6 +263,27 @@ export function parsePermissions(raw: string | undefined | null): Set<string> {
 			.map((s) => s.trim())
 			.filter((s) => s.length > 0),
 	);
+}
+
+/** Mirrors `NamespaceView` from `crates/api/src/namespaces/dto.rs`. */
+export interface NamespaceView {
+	id: string;
+	slug: string;
+	display_name: string;
+}
+
+/** Response from `GET /api/v1/namespaces`. */
+export interface NamespaceListResponse {
+	items: NamespaceView[];
+}
+
+/**
+ * Fetch every namespace defined on this wiki. Used by the SPA to render
+ * namespace prefixes on search results and to drive the (future)
+ * namespace switcher.
+ */
+export async function listNamespaces(): Promise<NamespaceListResponse> {
+	return jsonRequest<NamespaceListResponse>("/api/v1/namespaces", { method: "GET" });
 }
 
 /**

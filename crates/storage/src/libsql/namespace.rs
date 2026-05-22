@@ -5,9 +5,13 @@ use thewiki_core::{Namespace, NamespaceId, NamespaceSlug};
 
 use crate::error::StorageError;
 use crate::libsql::codec::{
-    format_ts, into_db, map_unique_violation, namespace_from_libsql_row, uuid_bytes,
+    db_error, format_ts, into_db, map_fk_restrict_violation, map_unique_violation,
+    namespace_from_libsql_row, uuid_bytes,
 };
 use crate::repo::NamespaceRepository;
+
+/// Slug used for the implicit default namespace seeded at boot (#28).
+const DEFAULT_NAMESPACE_SLUG: &str = "Main";
 
 /// libsql-backed namespace repository.
 pub struct LibsqlNamespaceRepository<'a> {
@@ -94,5 +98,66 @@ impl NamespaceRepository for LibsqlNamespaceRepository<'_> {
             out.push(namespace_from_libsql_row(&row)?);
         }
         Ok(out)
+    }
+
+    async fn update_display_name(
+        &self,
+        id: NamespaceId,
+        display_name: &str,
+    ) -> Result<(), StorageError> {
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let affected = self
+            .conn
+            .execute(
+                "UPDATE namespaces SET display_name = ?1 WHERE id = ?2",
+                params![display_name.to_owned(), Value::Blob(id_bytes.to_vec())],
+            )
+            .await
+            .map_err(db_error)?;
+        if affected == 0 {
+            return Err(StorageError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn delete(&self, id: NamespaceId) -> Result<(), StorageError> {
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let result = self
+            .conn
+            .execute(
+                "DELETE FROM namespaces WHERE id = ?1",
+                params![Value::Blob(id_bytes.to_vec())],
+            )
+            .await;
+        match result {
+            Ok(0) => Err(StorageError::NotFound),
+            Ok(_) => Ok(()),
+            Err(err) => Err(map_fk_restrict_violation(
+                err,
+                "namespace still contains pages",
+            )),
+        }
+    }
+
+    async fn get_or_create_default(&self) -> Result<Namespace, StorageError> {
+        let slug = NamespaceSlug::new(DEFAULT_NAMESPACE_SLUG).map_err(|e| {
+            StorageError::InvalidInput(format!("default namespace slug is invalid: {e}"))
+        })?;
+        match self.get_by_slug(&slug).await {
+            Ok(ns) => Ok(ns),
+            Err(StorageError::NotFound) => {
+                let ns = Namespace {
+                    id: NamespaceId::new(),
+                    slug,
+                    display_name: DEFAULT_NAMESPACE_SLUG.to_owned(),
+                };
+                match self.create(&ns).await {
+                    Ok(()) => Ok(ns),
+                    Err(StorageError::Conflict(_)) => self.get_by_slug(&ns.slug).await,
+                    Err(e) => Err(e),
+                }
+            }
+            Err(e) => Err(e),
+        }
     }
 }

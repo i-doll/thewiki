@@ -822,6 +822,359 @@
         ]
       }
     },
+    "/api/v1/namespaces": {
+      "get": {
+        "tags": [
+          "namespaces"
+        ],
+        "summary": "`GET /api/v1/namespaces` — list every namespace defined on this wiki.",
+        "description": "Open to anonymous callers; the SPA's page list and search results already\nneed this information to render namespace prefixes.",
+        "operationId": "list_namespaces",
+        "responses": {
+          "200": {
+            "description": "Namespace list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamespaceListResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "namespaces"
+        ],
+        "summary": "`POST /api/v1/namespaces` — create a new namespace.",
+        "description": "Requires [`Permissions::MANAGE_NAMESPACES`]. Returns `201 Created` with\nthe new row on success, `409` if the slug is already in use.",
+        "operationId": "create_namespace",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token matching the `thewiki_csrf` cookie",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNamespaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Namespace created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamespaceView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_NAMESPACES",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Slug already in use",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/namespaces/{slug}": {
+      "delete": {
+        "tags": [
+          "namespaces"
+        ],
+        "summary": "`DELETE /api/v1/namespaces/{slug}` — remove a namespace.",
+        "description": "Refuses (409) when any pages still live in the namespace; the admin must\nmove them first. The schema's FK enforces this on the storage side too,\nbut we surface the 409 with a clear message rather than letting the\ndatabase error bubble up generic.",
+        "operationId": "delete_namespace",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Slug of the namespace to delete",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token matching the `thewiki_csrf` cookie",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Namespace deleted"
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_NAMESPACES",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Namespace still contains pages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "namespaces"
+        ],
+        "summary": "`PATCH /api/v1/namespaces/{slug}` — rename the display name of a\nnamespace.",
+        "description": "Slug renames are intentionally out of scope (URL breakage); only the\nhuman-readable label can be changed here.",
+        "operationId": "update_namespace",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Slug of the namespace to update",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token matching the `thewiki_csrf` cookie",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNamespaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Display name updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamespaceView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_NAMESPACES",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/pages": {
       "get": {
         "tags": [
@@ -1938,6 +2291,914 @@
           }
         }
       }
+    },
+    "/api/v1/wiki/{namespace}": {
+      "post": {
+        "tags": [
+          "wiki"
+        ],
+        "summary": "`POST /api/v1/wiki/{namespace}` — create a page in a specific namespace.",
+        "operationId": "create",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Slug of the namespace to create the page in",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Optional session and CSRF cookies",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Page created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Edit accepted but pending approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Slug already taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/wiki/{namespace}/{slug}": {
+      "get": {
+        "tags": [
+          "wiki"
+        ],
+        "summary": "`GET /api/v1/wiki/{namespace}/{slug}` — fetch a page.",
+        "operationId": "get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Namespace slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Page slug within the namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page or namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "wiki"
+        ],
+        "summary": "`PUT /api/v1/wiki/{namespace}/{slug}` — commit a new revision.",
+        "operationId": "update",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Namespace slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Page slug within the namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Optional session and CSRF cookies",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Page updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Edit accepted but pending approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page or namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "wiki"
+        ],
+        "summary": "`DELETE /api/v1/wiki/{namespace}/{slug}` — remove a page and its\nrevisions.",
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Namespace slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Page slug within the namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Optional session and CSRF cookies",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Page deleted"
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page or namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/wiki/{namespace}/{slug}/backlinks": {
+      "get": {
+        "tags": [
+          "wiki"
+        ],
+        "summary": "`GET /api/v1/wiki/{namespace}/{slug}/backlinks`.",
+        "operationId": "list_backlinks",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Namespace slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Page slug within the namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call. Omit to start from the\nbeginning.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to\n[`thewiki_storage::repo::MAX_PAGE_SIZE`]. `0`/missing falls back to\nthe route-level default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Backlinks list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacklinkListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wiki/{namespace}/{slug}/diff": {
+      "get": {
+        "tags": [
+          "wiki"
+        ],
+        "summary": "`GET /api/v1/wiki/{namespace}/{slug}/diff`.",
+        "operationId": "diff_revisions",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Namespace slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Page slug within the namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Revision the diff is computed *from* — shown as `-` lines.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RevisionId"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Revision the diff is computed *to* — shown as `+` lines.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RevisionId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Diff between two revisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wiki/{namespace}/{slug}/protect": {
+      "post": {
+        "tags": [
+          "wiki"
+        ],
+        "summary": "`POST /api/v1/wiki/{namespace}/{slug}/protect`.",
+        "operationId": "protect",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Namespace slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Page slug within the namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Session and CSRF cookies",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProtectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Protection level updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks PROTECT permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/wiki/{namespace}/{slug}/revert": {
+      "post": {
+        "tags": [
+          "wiki"
+        ],
+        "summary": "`POST /api/v1/wiki/{namespace}/{slug}/revert`.",
+        "operationId": "revert",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Namespace slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Page slug within the namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Session and CSRF cookies",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Page reverted; new revision committed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/wiki/{namespace}/{slug}/revisions": {
+      "get": {
+        "tags": [
+          "wiki"
+        ],
+        "summary": "`GET /api/v1/wiki/{namespace}/{slug}/revisions`.",
+        "operationId": "list_revisions",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Namespace slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Page slug within the namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call. Omit to start from the\nnewest revision.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to\n[`thewiki_storage::repo::MAX_PAGE_SIZE`]. `0`/missing falls back to\nthe route-level default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revision history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page or namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2112,11 +3373,28 @@
           }
         }
       },
+      "CreateNamespaceRequest": {
+        "type": "object",
+        "description": "Body of `POST /api/v1/namespaces`.",
+        "required": [
+          "slug",
+          "display_name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "Human-readable display name."
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug. Must satisfy\n[`thewiki_core::NamespaceSlug`](thewiki_core::NamespaceSlug)'s\nvalidation rules: ASCII alphanumerics, `_`, `-` (no `:`)."
+          }
+        }
+      },
       "CreatePageRequest": {
         "type": "object",
-        "description": "Body of `POST /api/v1/pages`.",
+        "description": "Body of `POST /api/v1/pages` and `POST /api/v1/wiki/{namespace}`.\n\nFor the namespace-aware route (`/api/v1/wiki/{namespace}`, added in #28)\nthe namespace is taken from the URL and `namespace_slug` is ignored if\nprovided. For the legacy `/api/v1/pages` route, `namespace_slug` is\noptional and defaults to `Main`.",
         "required": [
-          "namespace_slug",
           "slug",
           "title",
           "content"
@@ -2127,12 +3405,15 @@
             "description": "Initial body for the page. The first revision is committed with this\ncontent."
           },
           "namespace_slug": {
-            "type": "string",
-            "description": "Slug of the namespace this page lives in. The namespace must already\nexist; the API does not create namespaces on demand."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Slug of the namespace this page lives in. Optional — the namespace\ncan also be carried in the URL path (`/api/v1/wiki/{namespace}`) or\ndefaulted to `Main` on the legacy `/api/v1/pages` route. The\nnamespace must already exist; the API does not create namespaces on\ndemand."
           },
           "slug": {
             "type": "string",
-            "description": "URL-safe slug, unique within `namespace_slug`."
+            "description": "URL-safe slug, unique within the resolved namespace."
           },
           "title": {
             "type": "string",
@@ -2340,6 +3621,45 @@
         "type": "string",
         "format": "uuid",
         "description": "Identifier for a [`crate::namespace::Namespace`]."
+      },
+      "NamespaceListResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/namespaces`.\n\nNo pagination — operators rarely define more than a handful of\nnamespaces, so a single batch is plenty.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamespaceView"
+            },
+            "description": "Every namespace defined on this wiki, in creation order."
+          }
+        }
+      },
+      "NamespaceView": {
+        "type": "object",
+        "description": "A single namespace, returned by both the list and create endpoints.",
+        "required": [
+          "id",
+          "slug",
+          "display_name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "Human-readable display label."
+          },
+          "id": {
+            "$ref": "#/components/schemas/NamespaceId",
+            "description": "Stable identifier."
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL-safe slug. Forms the `<namespace>` segment of `/wiki/<namespace>/<slug>`."
+          }
+        }
       },
       "PageId": {
         "type": "string",
@@ -2766,6 +4086,19 @@
           }
         }
       },
+      "UpdateNamespaceRequest": {
+        "type": "object",
+        "description": "Body of `PATCH /api/v1/namespaces/{slug}`.\n\nSlug renames are deliberately not supported — they invalidate URLs and\nhave cascading effects on the link graph, search index, and audit log.\nOperators who really need to rename a namespace can create a new one,\nmove pages across via the admin tools (future work), and delete the\nempty original.",
+        "required": [
+          "display_name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "New display name."
+          }
+        }
+      },
       "UpdatePageRequest": {
         "type": "object",
         "description": "Body of `PUT /api/v1/pages/{slug}`.",
@@ -2863,7 +4196,15 @@
   "tags": [
     {
       "name": "pages",
-      "description": "Page CRUD"
+      "description": "Page CRUD (legacy `/api/v1/pages/...`, defaults to the `Main` namespace; clients should migrate to `wiki` per #28)"
+    },
+    {
+      "name": "wiki",
+      "description": "Namespace-aware page CRUD (`/api/v1/wiki/{namespace}/...`)"
+    },
+    {
+      "name": "namespaces",
+      "description": "Namespace metadata + admin CRUD"
     },
     {
       "name": "revisions",

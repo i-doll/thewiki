@@ -11,13 +11,22 @@ use thewiki_core::{NamespaceId, PageId, ProtectionLevel, RevisionId};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
-/// Body of `POST /api/v1/pages`.
+/// Body of `POST /api/v1/pages` and `POST /api/v1/wiki/{namespace}`.
+///
+/// For the namespace-aware route (`/api/v1/wiki/{namespace}`, added in #28)
+/// the namespace is taken from the URL and `namespace_slug` is ignored if
+/// provided. For the legacy `/api/v1/pages` route, `namespace_slug` is
+/// optional and defaults to `Main`.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreatePageRequest {
-    /// Slug of the namespace this page lives in. The namespace must already
-    /// exist; the API does not create namespaces on demand.
-    pub namespace_slug: String,
-    /// URL-safe slug, unique within `namespace_slug`.
+    /// Slug of the namespace this page lives in. Optional — the namespace
+    /// can also be carried in the URL path (`/api/v1/wiki/{namespace}`) or
+    /// defaulted to `Main` on the legacy `/api/v1/pages` route. The
+    /// namespace must already exist; the API does not create namespaces on
+    /// demand.
+    #[serde(default)]
+    pub namespace_slug: Option<String>,
+    /// URL-safe slug, unique within the resolved namespace.
     pub slug: String,
     /// Human-readable title shown in the UI.
     pub title: String,

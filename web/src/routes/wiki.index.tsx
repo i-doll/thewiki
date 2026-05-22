@@ -64,12 +64,17 @@ function WikiIndexComponent() {
 					{query.data.items.map((item) => (
 						<li key={item.id}>
 							<Link
-								to="/wiki/$slug"
-								params={{ slug: item.slug }}
+								to="/wiki/$namespace/$slug"
+								params={{ namespace: item.namespace_slug, slug: item.slug }}
 								className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-neutral-50"
 							>
 								<span className="font-medium text-neutral-900">{item.title}</span>
-								<span className="font-mono text-xs text-neutral-500">{item.slug}</span>
+								<span
+									className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs text-neutral-600"
+									title={`Namespace: ${item.namespace_slug}`}
+								>
+									{item.namespace_slug}/{item.slug}
+								</span>
 							</Link>
 						</li>
 					))}

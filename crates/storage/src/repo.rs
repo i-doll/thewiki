@@ -272,6 +272,50 @@ pub trait NamespaceRepository: Send + Sync {
     /// Propagates lower-level driver failures as
     /// [`StorageError::Database`].
     fn list(&self) -> impl Future<Output = Result<Vec<Namespace>, StorageError>> + Send;
+
+    /// Update only the human-readable display name of a namespace.
+    ///
+    /// Slug renames are intentionally not supported here — they would
+    /// invalidate URLs and have cascading effects across the link graph,
+    /// search index, and audit log. Renaming the display name is safe.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::NotFound`] if no namespace has this `id`.
+    fn update_display_name(
+        &self,
+        id: NamespaceId,
+        display_name: &str,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Delete a namespace.
+    ///
+    /// The caller is expected to verify the namespace contains no pages
+    /// before invoking this — the schema's FK from `pages.namespace_id` is
+    /// `ON DELETE RESTRICT`, so a non-empty namespace produces a
+    /// [`StorageError::Conflict`].
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::NotFound`] if the row didn't exist.
+    /// * [`StorageError::Conflict`] if pages still reference the namespace.
+    fn delete(&self, id: NamespaceId) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Ensure the default `Main` namespace exists, returning it whether it
+    /// was just created or already present. Idempotent across racing
+    /// callers — typically invoked once at server boot.
+    ///
+    /// The default uses the `Main` slug and `"Main"` display name. Operators
+    /// can rename the display name afterwards via [`update_display_name`];
+    /// the slug stays fixed because URL routing (#28) treats `Main` as the
+    /// implicit prefix.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures as
+    /// [`StorageError::Database`].
+    fn get_or_create_default(&self)
+    -> impl Future<Output = Result<Namespace, StorageError>> + Send;
 }
 
 /// Persistence operations for the [`Role`] aggregate.

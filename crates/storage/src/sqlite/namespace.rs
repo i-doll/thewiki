@@ -7,6 +7,9 @@ use crate::error::StorageError;
 use crate::repo::NamespaceRepository;
 use crate::sqlite::codec::{format_ts, map_unique_violation, namespace_from_row, uuid_bytes};
 
+/// Slug used for the implicit default namespace seeded at boot (#28).
+const DEFAULT_NAMESPACE_SLUG: &str = "Main";
+
 /// SQLite-backed namespace repository. Borrows the pool from
 /// [`SqliteStorage`](super::SqliteStorage).
 pub struct SqliteNamespaceRepository<'a> {
@@ -89,4 +92,85 @@ impl NamespaceRepository for SqliteNamespaceRepository<'_> {
             })
             .collect()
     }
+
+    async fn update_display_name(
+        &self,
+        id: NamespaceId,
+        display_name: &str,
+    ) -> Result<(), StorageError> {
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let result = sqlx::query("UPDATE namespaces SET display_name = ?1 WHERE id = ?2")
+            .bind(display_name)
+            .bind(id_bytes.as_slice())
+            .execute(self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            return Err(StorageError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn delete(&self, id: NamespaceId) -> Result<(), StorageError> {
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let result = sqlx::query("DELETE FROM namespaces WHERE id = ?1")
+            .bind(id_bytes.as_slice())
+            .execute(self.pool)
+            .await;
+        match result {
+            Ok(res) => {
+                if res.rows_affected() == 0 {
+                    Err(StorageError::NotFound)
+                } else {
+                    Ok(())
+                }
+            }
+            // The FK from `pages.namespace_id` is `ON DELETE RESTRICT`, so a
+            // non-empty namespace surfaces as a foreign-key violation. Map
+            // it to `Conflict` so the API layer can return 409 with a clear
+            // "move the pages first" message.
+            Err(err) => Err(map_fk_violation_as_conflict(
+                err,
+                "namespace still contains pages",
+            )),
+        }
+    }
+
+    async fn get_or_create_default(&self) -> Result<Namespace, StorageError> {
+        // `NamespaceSlug::new("Main")` cannot fail — the slug is a compile-
+        // time constant that satisfies the validation rules. Use `map_err`
+        // anyway so a programmer error in the future surfaces loudly.
+        let slug = NamespaceSlug::new(DEFAULT_NAMESPACE_SLUG).map_err(|e| {
+            StorageError::InvalidInput(format!("default namespace slug is invalid: {e}"))
+        })?;
+        match self.get_by_slug(&slug).await {
+            Ok(ns) => Ok(ns),
+            Err(StorageError::NotFound) => {
+                let ns = Namespace {
+                    id: NamespaceId::new(),
+                    slug,
+                    display_name: DEFAULT_NAMESPACE_SLUG.to_owned(),
+                };
+                match self.create(&ns).await {
+                    Ok(()) => Ok(ns),
+                    // A racing caller beat us — fetch the now-existing row.
+                    Err(StorageError::Conflict(_)) => self.get_by_slug(&ns.slug).await,
+                    Err(e) => Err(e),
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// SQLite's foreign-key violation surfaces as extended error code `787`
+/// (`SQLITE_CONSTRAINT_FOREIGNKEY`). Map it to [`StorageError::Conflict`]
+/// so the API layer can render a 409 with a "move the pages first" message
+/// when the operator tries to delete a non-empty namespace.
+fn map_fk_violation_as_conflict(err: sqlx::Error, message: &str) -> StorageError {
+    if let Some(db_err) = err.as_database_error()
+        && db_err.code().as_deref() == Some("787")
+    {
+        return StorageError::Conflict(message.to_owned());
+    }
+    StorageError::from(err)
 }

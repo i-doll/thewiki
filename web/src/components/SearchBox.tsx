@@ -175,16 +175,22 @@ export function SearchBox({ initialQuery = "" }: SearchBoxProps) {
 										aria-selected={false}
 										onClick={() => {
 											setOpen(false);
+											// Navigate to the namespace-aware route (#28). The
+											// namespace prefix is visible in the dropdown so the
+											// user already sees where they're going.
 											navigate({
-												to: "/wiki/$slug",
-												params: { slug: hit.slug },
+												to: "/wiki/$namespace/$slug",
+												params: { namespace: hit.namespace_slug, slug: hit.slug },
 											});
 										}}
 										className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-neutral-50"
 									>
 										<div className="flex items-center justify-between gap-2">
 											<span className="truncate font-medium text-neutral-900">{hit.title}</span>
-											<span className="shrink-0 font-mono text-xs text-neutral-500">
+											<span
+												className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs text-neutral-600"
+												title={`Namespace: ${hit.namespace_slug}`}
+											>
 												{hit.namespace_slug}
 											</span>
 										</div>

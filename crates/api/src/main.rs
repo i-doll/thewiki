@@ -71,6 +71,20 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
     .await
     .with_context(|| format!("opening storage at {}", config.database.url))?;
 
+    // Seed the implicit `Main` namespace (#28). Idempotent — a no-op on
+    // every boot after the first. Runs before the HTTP listener binds so
+    // a fresh database is never served a 404 for the default namespace.
+    let main_ns = storage
+        .namespaces()
+        .get_or_create_default()
+        .await
+        .context("seeding default namespace")?;
+    tracing::info!(
+        slug = %main_ns.slug.as_str(),
+        id = %main_ns.id.into_uuid(),
+        "default namespace ready",
+    );
+
     if config.audit_log.enabled {
         let pruned = prune_expired_audit_log(&storage, config.audit_log.retention_days)
             .await
