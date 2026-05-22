@@ -22,7 +22,8 @@ pub mod static_assets;
 pub mod telemetry;
 
 pub use app::{
-    build, build_auth_app, build_auth_app_with_rate_limit, build_full, build_with_state,
+    build, build_auth_app, build_auth_app_with_rate_limit, build_full,
+    build_full_with_rate_limit_state, build_with_state,
 };
 pub use config::Config;
 pub use error::ApiError;

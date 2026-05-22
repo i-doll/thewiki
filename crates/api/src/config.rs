@@ -282,10 +282,25 @@ pub struct RateLimitConfig {
     /// Global switch. Keep enabled in production; tests and trusted private
     /// deployments can disable it explicitly.
     pub enabled: bool,
-    /// Bucket used for safe/read methods (`GET`, `HEAD`, `OPTIONS`).
+    /// Bucket used for safe/read methods (`GET`, `HEAD`, `OPTIONS`) by
+    /// anonymous requests. Authenticated users use [`Self::authenticated_read`]
+    /// when set, falling back to this bucket otherwise.
     pub read: RateLimitBucketConfig,
-    /// Bucket used for mutating methods (`POST`, `PUT`, `PATCH`, `DELETE`, ...).
+    /// Bucket used for mutating methods (`POST`, `PUT`, `PATCH`, `DELETE`, ...)
+    /// by anonymous requests. Authenticated users use
+    /// [`Self::authenticated_write`] when set, falling back to this bucket
+    /// otherwise.
     pub write: RateLimitBucketConfig,
+    /// Read bucket override for authenticated users. Typically higher than
+    /// [`Self::read`] — operators trust signed-in users more. When `None`,
+    /// authenticated reads share the anonymous bucket.
+    #[serde(default)]
+    pub authenticated_read: Option<RateLimitBucketConfig>,
+    /// Write bucket override for authenticated users. Typically higher than
+    /// [`Self::write`]. When `None`, authenticated writes share the anonymous
+    /// bucket.
+    #[serde(default)]
+    pub authenticated_write: Option<RateLimitBucketConfig>,
     /// Optional proxy header used to derive the client IP. Only honored when
     /// the socket peer is in `trusted_proxies`.
     #[serde(default)]
@@ -323,13 +338,26 @@ pub enum ClientIpHeader {
 }
 
 /// Rate-limit bucket storage backend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `InMemory` is the default and is suitable for single-replica deploys.
+/// `Redis` requires building with `--features thewiki-api/redis`; the field
+/// is always parseable so a multi-replica deploy can declare the intent in
+/// its config file and only the binary's feature flags decide whether the
+/// process can serve it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum RateLimitBackendConfig {
     /// Per-process in-memory buckets. This is the default and is suitable for
     /// single-binary/single-replica deploys.
     InMemory,
+    /// Shared bucket state in Redis. The URL is in `redis://` or `rediss://`
+    /// form. Only honoured when the binary is built with the `redis` cargo
+    /// feature.
+    Redis {
+        /// Redis connection URL (`redis://host:port[/db]`).
+        url: String,
+    },
 }
 
 /// Full-text search (Tantivy) configuration (#26).
@@ -459,18 +487,39 @@ impl Config {
                 },
             },
             search: SearchConfig::default(),
+            // Opinionated defaults the operator will almost certainly tune.
+            // Anonymous quotas err on the side of *strict* — they're enough
+            // for a normal browsing session and aggressive enough to make
+            // bot scraping notice immediately. Authenticated quotas are 10×
+            // higher; the signed-in user is identified and (typically)
+            // bound by an account-level ToS, so the protection priority
+            // shifts from "throttle abusers" to "absorb editing bursts".
             rate_limit: RateLimitConfig {
                 enabled: true,
+                // 60 reads/min per anonymous IP.
                 read: RateLimitBucketConfig {
+                    capacity: 60,
+                    refill_tokens: 60,
+                    refill_interval_secs: 60,
+                },
+                // 10 writes/min per anonymous IP.
+                write: RateLimitBucketConfig {
+                    capacity: 10,
+                    refill_tokens: 10,
+                    refill_interval_secs: 60,
+                },
+                // 600 reads/min per authenticated user.
+                authenticated_read: Some(RateLimitBucketConfig {
+                    capacity: 600,
+                    refill_tokens: 600,
+                    refill_interval_secs: 60,
+                }),
+                // 120 writes/min per authenticated user.
+                authenticated_write: Some(RateLimitBucketConfig {
                     capacity: 120,
                     refill_tokens: 120,
                     refill_interval_secs: 60,
-                },
-                write: RateLimitBucketConfig {
-                    capacity: 30,
-                    refill_tokens: 30,
-                    refill_interval_secs: 60,
-                },
+                }),
                 client_ip_header: None,
                 trusted_proxies: Vec::new(),
                 backend: RateLimitBackendConfig::InMemory,
@@ -597,10 +646,23 @@ impl Config {
 
         validate_rate_limit_bucket("rate_limit.read", &self.rate_limit.read)?;
         validate_rate_limit_bucket("rate_limit.write", &self.rate_limit.write)?;
+        if let Some(b) = &self.rate_limit.authenticated_read {
+            validate_rate_limit_bucket("rate_limit.authenticated_read", b)?;
+        }
+        if let Some(b) = &self.rate_limit.authenticated_write {
+            validate_rate_limit_bucket("rate_limit.authenticated_write", b)?;
+        }
         if self.rate_limit.client_ip_header.is_some() && self.rate_limit.trusted_proxies.is_empty()
         {
             return Err(ConfigError::Invalid(
                 "rate_limit.client_ip_header requires at least one trusted proxy".to_string(),
+            ));
+        }
+        if let RateLimitBackendConfig::Redis { url } = &self.rate_limit.backend
+            && url.trim().is_empty()
+        {
+            return Err(ConfigError::Invalid(
+                "rate_limit.backend = redis requires a non-empty `url`".to_string(),
             ));
         }
         if self.audit_log.retention_days == 0 {
