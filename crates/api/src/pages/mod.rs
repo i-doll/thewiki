@@ -1,12 +1,13 @@
 //! Page CRUD routes (`/api/v1/pages*`).
 //!
 //! The handlers live in [`mod@routes`]; DTOs in [`dto`]. Revision listing
-//! and the diff endpoint live in [`revisions`]. [`router`] wires the lot
-//! into an [`axum::Router`] and returns the matching utoipa
-//! [`utoipa_axum::router::OpenApiRouter`] so the OpenAPI spec stays in sync
-//! with what is actually mounted.
+//! and the diff endpoint live in [`revisions`]; the revert endpoint in
+//! [`revert`]. [`router`] wires the lot into an [`axum::Router`] and returns
+//! the matching utoipa [`utoipa_axum::router::OpenApiRouter`] so the OpenAPI
+//! spec stays in sync with what is actually mounted.
 
 pub mod dto;
+pub mod revert;
 pub mod revisions;
 pub mod routes;
 
@@ -34,4 +35,5 @@ pub fn router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
         ))
         .routes(routes!(revisions::list_revisions))
         .routes(routes!(revisions::diff_revisions))
+        .routes(routes!(revert::revert_page))
 }
