@@ -72,6 +72,7 @@
 
 pub mod content_format;
 pub mod id;
+pub mod media;
 pub mod namespace;
 pub mod page;
 pub mod permissions;
@@ -84,7 +85,8 @@ pub mod user;
 pub mod validation;
 
 pub use content_format::ContentFormat;
-pub use id::{AuditLogId, NamespaceId, PageId, RevisionId, RoleId, SessionId, UserId};
+pub use id::{AuditLogId, MediaId, NamespaceId, PageId, RevisionId, RoleId, SessionId, UserId};
+pub use media::{CONTENT_HASH_BYTES, Media};
 pub use namespace::{NAMESPACE_SLUG_MAX_BYTES, Namespace, NamespaceSlug};
 pub use page::Page;
 pub use permissions::Permissions;

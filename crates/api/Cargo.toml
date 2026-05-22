@@ -80,6 +80,22 @@ uuid = { workspace = true }
 rust-embed = { workspace = true }
 mime_guess = { workspace = true }
 
+# Media upload pipeline (#32). `object_store` abstracts S3 / R2 / MinIO behind
+# a single trait; the DB-blob backend uses the storage crate's
+# `MediaBlobRepository`. `sha2` hashes upload bytes for the content-address
+# dedup; `bytes::Bytes` is the canonical buffer for blob payloads;
+# `ammonia` scrubs SVG uploads (already pulled in transitively by the render
+# crate but listed here for clarity since the media handler uses it directly).
+object_store = { workspace = true }
+sha2 = { workspace = true }
+bytes = { workspace = true }
+ammonia = { workspace = true }
+# `MediaBackend` is held behind `Arc<dyn …>` so the router doesn't have to
+# parameterise over the backend choice. Rust 1.92 still doesn't make
+# `async fn` in trait dyn-compatible without help, so `async_trait` is the
+# pragmatic choice for this one trait.
+async-trait = "0.1"
+
 [dev-dependencies]
 tokio = { workspace = true }
 tower = { workspace = true }

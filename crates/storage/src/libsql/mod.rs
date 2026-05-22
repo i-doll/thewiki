@@ -63,6 +63,7 @@ use crate::error::StorageError;
 
 mod audit_log;
 mod codec;
+mod media;
 mod namespace;
 mod page;
 mod page_audit;
@@ -73,6 +74,7 @@ mod session;
 mod user;
 
 pub use audit_log::LibsqlAuditLogRepository;
+pub use media::{LibsqlMediaBlobRepository, LibsqlMediaRepository};
 pub use namespace::LibsqlNamespaceRepository;
 pub use page::LibsqlPageRepository;
 pub use recent_changes::LibsqlRecentChangesRepository;
@@ -105,6 +107,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "20260522093000_audit_log",
         include_str!("../../../../migrations/20260522093000_audit_log.sql"),
+    ),
+    (
+        "20260522170000_media",
+        include_str!("../../../../migrations/20260522170000_media.sql"),
     ),
 ];
 
@@ -281,6 +287,20 @@ impl LibsqlStorage {
     #[must_use]
     pub fn audit_log(&self) -> LibsqlAuditLogRepository<'_> {
         LibsqlAuditLogRepository::new(&self.conn)
+    }
+
+    /// Borrow this handle as a [`MediaRepository`](crate::repo::MediaRepository).
+    #[must_use]
+    pub fn media(&self) -> LibsqlMediaRepository<'_> {
+        LibsqlMediaRepository::new(&self.conn)
+    }
+
+    /// Borrow this handle as a
+    /// [`MediaBlobRepository`](crate::repo::MediaBlobRepository). Only
+    /// useful when the configured storage backend is `Db`.
+    #[must_use]
+    pub fn media_blobs(&self) -> LibsqlMediaBlobRepository<'_> {
+        LibsqlMediaBlobRepository::new(&self.conn)
     }
 
     /// Commit a page mutation together with its audit-log row.

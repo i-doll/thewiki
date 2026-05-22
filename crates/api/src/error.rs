@@ -65,6 +65,20 @@ pub enum ApiError {
     #[error("forbidden")]
     Forbidden,
 
+    /// The request body exceeded the operator-configured size cap. Renders
+    /// as `413 Payload Too Large`. Used by the media upload endpoint when
+    /// the field length exceeds `storage.media.max_upload_bytes`.
+    #[error("payload too large (limit: {limit} bytes)")]
+    PayloadTooLarge {
+        /// Configured byte limit at the time of the request.
+        limit: u64,
+    },
+
+    /// The upload's `Content-Type` was not in the operator allowlist.
+    /// Renders as `415 Unsupported Media Type`.
+    #[error("unsupported media type: {0}")]
+    UnsupportedMediaType(String),
+
     /// An internal error escaped without a more specific mapping. Renders as
     /// `500 Internal Server Error`. The error chain is logged; the wire form
     /// only carries a generic message so we don't leak internals to callers.
@@ -82,6 +96,8 @@ impl ApiError {
             Self::InvalidInput(_) => StatusCode::BAD_REQUEST,
             Self::Unauthenticated => StatusCode::UNAUTHORIZED,
             Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::PayloadTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::UnsupportedMediaType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -95,6 +111,8 @@ impl ApiError {
             Self::InvalidInput(_) => "invalid_input",
             Self::Unauthenticated => "unauthenticated",
             Self::Forbidden => "forbidden",
+            Self::PayloadTooLarge { .. } => "payload_too_large",
+            Self::UnsupportedMediaType(_) => "unsupported_media_type",
             Self::Internal(_) => "internal_error",
         }
     }
@@ -105,6 +123,7 @@ impl ApiError {
         let message = match self {
             Self::NotFound | Self::Unauthenticated | Self::Forbidden => self.to_string(),
             Self::Conflict(msg) | Self::InvalidInput(msg) => msg.clone(),
+            Self::PayloadTooLarge { .. } | Self::UnsupportedMediaType(_) => self.to_string(),
             // `Internal` carries the source for logging, but the response
             // surface stays generic so we don't leak details to callers.
             Self::Internal(_) => "internal server error".to_string(),

@@ -80,6 +80,26 @@ backend = { kind = "db" }
 # region = "us-east-1"
 # endpoint_url = "https://s3.example.com"   # optional, e.g. for R2/MinIO
 
+# Media upload pipeline (#32). Tightens what `POST /api/v1/media` accepts.
+#
+# `max_upload_bytes` is the per-upload size cap; the upload endpoint returns
+# 413 Payload Too Large when the request body exceeds this. Defaults to
+# 10 MiB.
+#
+# `allowed_content_types` is the IANA MIME-type allowlist. Anything outside
+# this set is rejected with 415 Unsupported Media Type. SVGs are accepted
+# but scrubbed through `ammonia` (no `<script>`, no event handlers) before
+# storage.
+[storage.media]
+max_upload_bytes = 10485760  # 10 MiB
+allowed_content_types = [
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+]
+
 # ---------------------------------------------------------------------------
 # Authentication and authorisation defaults.
 #

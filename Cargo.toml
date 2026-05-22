@@ -51,7 +51,7 @@ pretty_assertions = "1"
 similar = "2"
 
 # HTTP stack (#7).
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = [
@@ -136,14 +136,20 @@ tower-cookies = "0.11"
 # obvious in the auth crate's `Cargo.toml`).
 subtle = "2"
 
-# Full-text search (#26). Tantivy embeds the index in-process. We pin to the
-# 0.26 line because that is the version published when the search crate is
-# wired up; the 0.25 → 0.26 jump is mostly cosmetic (`with_default` rename,
-# updated query parser) and downstream callers only consume our wrapper.
+# Full-text search (#26). Tantivy embeds the index in-process.
 tantivy = "0.26"
 
 # Isolated index paths for the search integration tests. Dev-only.
 tempfile = "3"
+
+# Media upload pipeline (#32). `object_store` is the storage abstraction used
+# by the S3-compatible backend; the DB backend stays on sqlx/libsql.
+# `sha2` computes the content hash for deduplication. `bytes::Bytes` is the
+# canonical buffer type for hand-off between the multipart extractor, the
+# hasher, and the storage backend.
+object_store = { version = "0.13", features = ["aws"] }
+sha2 = "0.10"
+bytes = "1"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

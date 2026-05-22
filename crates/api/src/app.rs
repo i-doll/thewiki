@@ -44,6 +44,7 @@ use uuid::Uuid;
 use crate::audit_log;
 use crate::auth::{self, AuthState, csrf};
 use crate::config::{Config, RateLimitConfig};
+use crate::media;
 use crate::pages;
 use crate::rate_limit::{self, RateLimitState};
 use crate::recent_changes;
@@ -81,6 +82,7 @@ const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
         (name = "auth", description = "Sessions, login, /me"),
         (name = "recent-changes", description = "Wiki-wide chronological edit feed"),
         (name = "audit-log", description = "Administrative audit trail"),
+        (name = "media", description = "Content-addressed media uploads"),
     )
 )]
 pub struct ApiDoc;
@@ -91,6 +93,7 @@ fn api_router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
         .nest("/api/v1/pages", pages::router::<S>())
         .nest("/api/v1/recent-changes", recent_changes::router::<S>())
         .nest("/api/v1/audit-log", audit_log::router::<S>())
+        .nest("/api/v1/media", media::router::<S>())
 }
 
 /// Generate the full public REST OpenAPI document.
@@ -184,6 +187,18 @@ fn add_operation_security(api_doc: &mut OpenApiDoc) {
         api_doc,
         "/api/v1/pages/{slug}/revert",
         HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/media",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/media/{id}",
+        HttpMethod::Delete,
         vec![session_and_csrf_requirement()],
     );
 }

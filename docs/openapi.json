@@ -550,6 +550,269 @@
         }
       }
     },
+    "/api/v1/media": {
+      "post": {
+        "tags": [
+          "media"
+        ],
+        "summary": "`POST /api/v1/media` — accept a multipart upload, dedup by content hash,\nstore the blob in the configured backend.",
+        "description": "Returns the existing `MediaView` (with status `200 OK`) when a row with\nthe same hash already exists; otherwise inserts a row and returns `200`.\nWe deliberately use `200` for both paths so the client doesn't have to\nbranch on \"did the server actually persist this?\" — the `id` and `url`\nare stable either way.",
+        "operationId": "upload_media",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Session and CSRF cookies.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Single `file` field carrying the upload bytes.",
+          "content": {
+            "multipart/form-data": {}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upload accepted (or deduped against an existing row)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed multipart request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Upload exceeds storage.media.max_upload_bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content type not in the configured allowlist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Backend write failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/media/{id}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "`GET /api/v1/media/{id}` — return the bytes for `id`.",
+        "description": "Sets `Content-Type` to the stored MIME type and an immutable\n`Cache-Control` since media is content-addressed and will never change\nfor the same id.",
+        "operationId": "get_media",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "UUIDv7 of the media row",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Blob bytes (raw)",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "400": {
+            "description": "Malformed id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Media not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "media"
+        ],
+        "summary": "`DELETE /api/v1/media/{id}` — remove the metadata row and the blob.",
+        "description": "Auth-gated through [`RequireAuth`] — anonymous callers always 401, even\nif `auth.anonymous_edits = true`. A finer role check\n(`Permissions::DELETE_MEDIA`) is a TODO once #14's role wiring lands.",
+        "operationId": "delete_media",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "UUIDv7 of the media row",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Session and CSRF cookies.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Media deleted"
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Media not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/pages": {
       "get": {
         "tags": [
@@ -1799,6 +2062,64 @@
           }
         }
       },
+      "MediaId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier for a [`crate::media::Media`] upload."
+      },
+      "MediaView": {
+        "type": "object",
+        "description": "Public projection of a [`Media`] row.\n\n`content_hash_hex` is the lowercase hex form of the SHA-256 digest — the\nraw bytes would round-trip as a base64 string under `serde`, which is\nless useful to clients that want to copy/paste the hash. `url` is the\ncanonical fetch path for the bytes.",
+        "required": [
+          "id",
+          "content_hash_hex",
+          "content_type",
+          "byte_size",
+          "uploaded_by",
+          "created_at",
+          "url"
+        ],
+        "properties": {
+          "byte_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Stored length in bytes.",
+            "minimum": 0
+          },
+          "content_hash_hex": {
+            "type": "string",
+            "description": "Hex-encoded SHA-256 digest of the stored bytes."
+          },
+          "content_type": {
+            "type": "string",
+            "description": "IANA media type the upload was stored as."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Upload timestamp."
+          },
+          "id": {
+            "$ref": "#/components/schemas/MediaId",
+            "description": "Primary key."
+          },
+          "original_filename": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Filename the client supplied at upload time."
+          },
+          "uploaded_by": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "User who uploaded the asset."
+          },
+          "url": {
+            "type": "string",
+            "description": "Canonical fetch URL: `/api/v1/media/{id}`."
+          }
+        }
+      },
       "NamespaceId": {
         "type": "string",
         "format": "uuid",
@@ -2238,6 +2559,10 @@
     {
       "name": "audit-log",
       "description": "Administrative audit trail"
+    },
+    {
+      "name": "media",
+      "description": "Content-addressed media uploads"
     }
   ]
 }

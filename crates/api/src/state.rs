@@ -21,13 +21,14 @@ use axum::extract::FromRef;
 use thewiki_search::IndexerHandle;
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
-    AuditLogRepository, NamespaceRepository, NewAuditLogEntry, PageAuditMutation,
-    PageLinkRepository, PageRepository, RecentChangesRepository, RevisionRepository,
-    UserRepository,
+    AuditLogRepository, MediaBlobRepository, MediaRepository, NamespaceRepository,
+    NewAuditLogEntry, PageAuditMutation, PageLinkRepository, PageRepository,
+    RecentChangesRepository, RevisionRepository, UserRepository,
 };
 
 use crate::auth::AuthState;
 use crate::config::AuthConfig;
+use crate::media::MediaBackend;
 
 /// A cloneable storage facade that hands out per-aggregate repositories.
 ///
@@ -65,6 +66,15 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     type PageLinks<'a>: PageLinkRepository + 'a
     where
         Self: 'a;
+    /// Media metadata repository borrowed from this handle (#32).
+    type Media<'a>: MediaRepository + 'a
+    where
+        Self: 'a;
+    /// Media blob repository borrowed from this handle (#32). Only used by
+    /// the in-DB blob backend; the S3 backend uses `object_store` directly.
+    type MediaBlobs<'a>: MediaBlobRepository + 'a
+    where
+        Self: 'a;
 
     /// Borrow a [`PageRepository`].
     fn pages(&self) -> Self::Pages<'_>;
@@ -80,6 +90,10 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     fn users(&self) -> Self::Users<'_>;
     /// Borrow a [`PageLinkRepository`] (powers backlinks API, #30).
     fn page_links(&self) -> Self::PageLinks<'_>;
+    /// Borrow a [`MediaRepository`] (powers media uploads, #32).
+    fn media(&self) -> Self::Media<'_>;
+    /// Borrow a [`MediaBlobRepository`] (powers the in-DB media backend, #32).
+    fn media_blobs(&self) -> Self::MediaBlobs<'_>;
 
     /// Commit a page mutation and its required audit row atomically.
     fn commit_page_audit(
@@ -97,6 +111,8 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     type AuditLog<'a> = thewiki_storage::sqlite::SqliteAuditLogRepository<'a>;
     type Users<'a> = thewiki_storage::sqlite::SqliteUserRepository<'a>;
     type PageLinks<'a> = thewiki_storage::sqlite::SqlitePageLinkRepository<'a>;
+    type Media<'a> = thewiki_storage::sqlite::SqliteMediaRepository<'a>;
+    type MediaBlobs<'a> = thewiki_storage::sqlite::SqliteMediaBlobRepository<'a>;
 
     fn pages(&self) -> Self::Pages<'_> {
         Self::pages(self)
@@ -118,6 +134,12 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     }
     fn page_links(&self) -> Self::PageLinks<'_> {
         Self::page_links(self)
+    }
+    fn media(&self) -> Self::Media<'_> {
+        Self::media(self)
+    }
+    fn media_blobs(&self) -> Self::MediaBlobs<'_> {
+        Self::media_blobs(self)
     }
 
     fn commit_page_audit(
@@ -179,6 +201,13 @@ pub struct AppState<S: AppStorage> {
     /// page-CRUD handlers still call the handle but the no-op variant
     /// drops every job.
     pub search: IndexerHandle,
+    /// Tuning for the media upload endpoint (size cap, type allowlist).
+    /// Pulled from [`crate::config::StorageConfig::media`].
+    pub media_config: crate::config::MediaConfig,
+    /// Blob backend for the media endpoints (#32). `None` in tests / app
+    /// roots that don't wire media routes; otherwise an `Arc<dyn …>`
+    /// because [`MediaBackend`] is dyn-compatible.
+    pub media_backend: Option<Arc<dyn MediaBackend>>,
 }
 
 impl<S: AppStorage> AppState<S> {
@@ -194,6 +223,8 @@ impl<S: AppStorage> AppState<S> {
             auth_config,
             auth_state: None,
             search: IndexerHandle::disabled(),
+            media_config: crate::config::MediaConfig::default(),
+            media_backend: None,
         }
     }
 
@@ -229,6 +260,18 @@ impl<S: AppStorage> AppState<S> {
         self.route_config.default_page_size = n;
         self
     }
+
+    /// Wire the media upload pipeline (#32) — backend + config.
+    #[must_use]
+    pub fn with_media(
+        mut self,
+        media_config: crate::config::MediaConfig,
+        backend: Arc<dyn MediaBackend>,
+    ) -> Self {
+        self.media_config = media_config;
+        self.media_backend = Some(backend);
+        self
+    }
 }
 
 impl<S: AppStorage> Clone for AppState<S> {
@@ -239,6 +282,8 @@ impl<S: AppStorage> Clone for AppState<S> {
             auth_config: self.auth_config.clone(),
             auth_state: self.auth_state.clone(),
             search: self.search.clone(),
+            media_config: self.media_config.clone(),
+            media_backend: self.media_backend.clone(),
         }
     }
 }
