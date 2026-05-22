@@ -18,6 +18,7 @@ pub mod pages;
 pub mod rate_limit;
 pub mod recent_changes;
 pub mod render;
+pub mod search;
 pub mod state;
 pub mod static_assets;
 pub mod telemetry;

@@ -39,6 +39,11 @@ pub struct SearchQuery {
     pub limit: u32,
     /// Opaque relevance cursor. Reserved for the next pagination PR.
     pub cursor: Option<String>,
+    /// Multiplier applied to the `title` field during BM25 scoring. Values
+    /// above 1.0 favour title matches over body matches; `0.0` disables the
+    /// boost entirely (every field weighted equally). The API layer reads
+    /// this from `Config::search.title_boost` (default 2.0).
+    pub title_boost: f32,
 }
 
 impl SearchQuery {

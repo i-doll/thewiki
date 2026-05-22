@@ -4592,6 +4592,7 @@ dependencies = [
  "similar",
  "sqlx",
  "subtle",
+ "tempfile",
  "thewiki-core",
  "thewiki-render",
  "thewiki-search",

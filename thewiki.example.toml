@@ -247,6 +247,11 @@ commit_interval_ms = 200
 # immediately instead of waiting for the timer. Default: 100.
 batch_size = 100
 
+# Title-field boost applied at query time. Values above 1.0 promote
+# title matches over body matches in BM25 scoring; 0.0 disables the boost
+# entirely (every field weighted equally). Default: 2.0.
+title_boost = 2.0
+
 # ---------------------------------------------------------------------------
 # Administrative audit log (#36).
 #

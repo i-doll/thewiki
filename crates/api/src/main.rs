@@ -19,7 +19,7 @@ use thewiki_api::{
     config::Config,
     media, telemetry,
 };
-use thewiki_search::{Indexer, PageDoc, SearchIndex};
+use thewiki_search::{Indexer, PageDoc, SearchIndex, Searcher};
 use thewiki_storage::repo::{
     AuditLogRepository, Cursor, MediaRepository, NamespaceRepository, PageRepository,
     RevisionRepository,
@@ -114,7 +114,13 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
     .context("spawning blocking search-index open")?
     .with_context(|| format!("opening search index at {}", index_path.display()))?;
     let needs_rebuild = !search_index.has_last_indexed_marker();
-    let indexer_handle = Indexer::new(std::sync::Arc::new(search_index))
+    // Share the `Arc<SearchIndex>` between the indexer worker (writes) and
+    // the searcher handle (reads). Tantivy's `OnCommitWithDelay` reader
+    // reload picks up committed writes within the configured window, so the
+    // read side stays consistent without us having to plumb anything else.
+    let search_index = std::sync::Arc::new(search_index);
+    let searcher = Searcher::new(std::sync::Arc::clone(&search_index));
+    let indexer_handle = Indexer::new(std::sync::Arc::clone(&search_index))
         .with_commit_interval(Duration::from_millis(config.search.commit_interval_ms))
         .with_commit_batch(config.search.batch_size as usize)
         .spawn();
@@ -128,7 +134,9 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
 
     let mut app_state = thewiki_api::state::AppState::new(storage.clone(), config.auth.clone())
         .with_auth_state(auth_state.clone())
-        .with_search(indexer_handle);
+        .with_search(indexer_handle)
+        .with_searcher(searcher)
+        .with_search_title_boost(config.search.title_boost);
     let media_backend = thewiki_api::media::build_media_backend(
         &config.storage.backend,
         std::sync::Arc::clone(&app_state.storage),

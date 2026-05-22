@@ -33,6 +33,9 @@ use thewiki_storage::sqlite::{SqliteOptions, SqliteStorage};
 use time::OffsetDateTime;
 use tower::ServiceExt;
 
+use tempfile::TempDir;
+use thewiki_search::{PageDoc, SearchIndex, Searcher};
+
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
 struct TestApp {
@@ -357,6 +360,127 @@ async fn search_query_returns_results_shape() {
         "fixture has no search index, expected empty"
     );
     assert_eq!(body["data"]["search"]["totalEstimate"], 0);
+}
+
+/// Build a router with a real Tantivy index seeded with two pages so we can
+/// assert that the GraphQL `search` resolver returns the same shape as REST.
+async fn build_app_with_seeded_search() -> (Router, TempDir) {
+    let storage = SqliteStorage::new(
+        "sqlite::memory:",
+        SqliteOptions {
+            max_connections: 1,
+            acquire_timeout: Duration::from_secs(5),
+            foreign_keys: true,
+        },
+    )
+    .await
+    .expect("storage");
+    storage
+        .namespaces()
+        .create(&Namespace {
+            id: NamespaceId::new(),
+            slug: NamespaceSlug::new("Main").expect("slug"),
+            display_name: "Main".into(),
+        })
+        .await
+        .expect("seed namespace");
+
+    let hasher = Arc::new(
+        Argon2Hasher::new(Argon2Config {
+            memory_kib: 19_456,
+            iterations: 2,
+            parallelism: 1,
+        })
+        .expect("hasher"),
+    );
+    let auth_cfg = Config::defaults().auth;
+    let auth_state = AuthState::new(
+        storage.clone(),
+        hasher,
+        Duration::from_secs(60 * 60),
+        false,
+        auth_cfg.clone(),
+    );
+
+    let dir = TempDir::new().expect("tmpdir");
+    let index = SearchIndex::open(dir.path()).expect("open");
+    let mut writer = index.new_writer().expect("writer");
+    let ns_id = NamespaceId::new();
+    for (title, slug, body) in [
+        (
+            "Apollo Program",
+            "apollo-program",
+            "The Apollo program landed the first humans on the Moon.",
+        ),
+        (
+            "Voyager Probes",
+            "voyager-probes",
+            "Voyager 1 and 2 explored the outer planets and beyond.",
+        ),
+    ] {
+        index
+            .upsert_on(
+                &writer,
+                &PageDoc {
+                    page_id: thewiki_core::PageId::new(),
+                    namespace_id: ns_id,
+                    namespace_slug: "Main".to_string(),
+                    slug: slug.to_string(),
+                    title: title.to_string(),
+                    body: body.to_string(),
+                    tags: Vec::new(),
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .expect("upsert");
+    }
+    writer.commit().expect("commit");
+    index.write_last_indexed_marker().expect("marker");
+    let index = Arc::new(SearchIndex::open(dir.path()).expect("reopen"));
+    let searcher = Searcher::new(Arc::clone(&index));
+
+    let app_state = AppState::new(storage, auth_cfg)
+        .with_auth_state(auth_state.clone())
+        .with_searcher(searcher);
+    let mut rate_limit = Config::defaults().rate_limit;
+    rate_limit.enabled = false;
+    let rate_limit_state = RateLimitState::new(rate_limit, Some(auth_state.clone()));
+    let router = app::build_full_with_rate_limit_state(
+        app_state,
+        auth_state,
+        false,
+        rate_limit_state,
+        GraphQLConfig::default(),
+    );
+    (router, dir)
+}
+
+#[tokio::test]
+async fn search_query_returns_real_hits_when_index_is_seeded() {
+    let (router, _dir) = build_app_with_seeded_search().await;
+    let (status, body) = gql_request(
+        router,
+        json!({
+            "query": "{ search(query: \"Apollo\") { hits { title slug score snippet } totalEstimate } }"
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert!(body.get("errors").is_none(), "got errors: {body}");
+    let hits = body["data"]["search"]["hits"]
+        .as_array()
+        .expect("hits array");
+    assert!(!hits.is_empty(), "expected at least one hit; body: {body}");
+    let top = &hits[0];
+    assert_eq!(top["title"], "Apollo Program");
+    // The body field contains "Apollo" so the snippet should carry highlight
+    // markers.
+    let snippet = top["snippet"].as_str().expect("snippet");
+    assert!(
+        snippet.contains("<mark>") && snippet.contains("</mark>"),
+        "snippet should carry <mark>; got: {snippet}"
+    );
 }
 
 #[tokio::test]

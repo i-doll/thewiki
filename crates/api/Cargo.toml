@@ -145,6 +145,12 @@ kamadak-exif = { workspace = true }
 # pulling in a heavier image-construction crate. `image` itself depends
 # on `gif` so the lockfile already carries it.
 gif = "0.14"
+# Search integration tests open a Tantivy index in a throw-away dir.
+tempfile = { workspace = true }
+# Directly drive the search index when seeding the test fixture so the
+# tests don't have to wait on the async indexer worker for a commit to
+# land.
+thewiki-search = { workspace = true }
 
 [lints]
 workspace = true
