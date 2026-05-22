@@ -150,6 +150,21 @@ tempfile = "3"
 object_store = { version = "0.13", features = ["aws"] }
 sha2 = "0.10"
 bytes = "1"
+
+# Image thumbnailing (#33). The default feature set covers PNG / JPEG / GIF
+# / WebP (the formats the upload allowlist accepts). The encoder side strips
+# EXIF by default — re-encoding through `image::DynamicImage::write_to`
+# leaves no metadata in the output stream, which is the privacy property we
+# want for stored variants.
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "gif",
+    "webp",
+] }
+# EXIF parsing — used only by integration tests to verify variants are
+# stripped. The runtime never reads EXIF directly; re-encoding is sufficient.
+kamadak-exif = "0.6"
 # Rate limiting (#35). The in-memory backend uses `dashmap` for sharded
 # concurrent maps so request-time bucket checks don't contend on a single
 # mutex. `async-trait` is needed for the pluggable `RateLimitStore` trait —

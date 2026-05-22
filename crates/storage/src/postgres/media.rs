@@ -9,7 +9,10 @@ use uuid::Uuid;
 
 use crate::error::StorageError;
 use crate::postgres::codec::map_unique_violation;
-use crate::repo::{MediaBlobRepository, MediaRepository};
+use crate::repo::{
+    MediaBlobRepository, MediaRepository, MediaVariant, MediaVariantRepository, PageSlice,
+    clamp_limit,
+};
 
 /// Native row shape: Postgres binds `BYTEA`/`UUID`/`TIMESTAMPTZ` directly.
 type MediaRow = (
@@ -129,6 +132,46 @@ impl MediaRepository for PostgresMediaRepository<'_> {
             Ok(())
         }
     }
+
+    async fn list_all(
+        &self,
+        cursor: Option<MediaId>,
+        limit: u32,
+    ) -> Result<PageSlice<Media>, StorageError> {
+        let limit = clamp_limit(limit);
+        let rows: Vec<MediaRow> = if let Some(cursor) = cursor {
+            sqlx::query_as(
+                "SELECT id, content_hash, content_type, byte_size, original_filename,
+                        uploaded_by, created_at
+                 FROM media WHERE id > $1 ORDER BY id ASC LIMIT $2",
+            )
+            .bind(cursor.into_uuid())
+            .bind(i64::from(limit))
+            .fetch_all(self.pool)
+            .await?
+        } else {
+            sqlx::query_as(
+                "SELECT id, content_hash, content_type, byte_size, original_filename,
+                        uploaded_by, created_at
+                 FROM media ORDER BY id ASC LIMIT $1",
+            )
+            .bind(i64::from(limit))
+            .fetch_all(self.pool)
+            .await?
+        };
+        let items: Vec<Media> = rows
+            .into_iter()
+            .map(row_to_media)
+            .collect::<Result<_, _>>()?;
+        let next = if items.len() as u32 == limit {
+            items
+                .last()
+                .map(|m| crate::repo::Cursor(m.id.into_uuid().to_string()))
+        } else {
+            None
+        };
+        Ok(PageSlice { items, next })
+    }
 }
 
 /// Postgres-backed blob repository, backing the in-DB media backend.
@@ -171,6 +214,113 @@ impl MediaBlobRepository for PostgresMediaBlobRepository<'_> {
 
     async fn delete(&self, media_id: MediaId) -> Result<(), StorageError> {
         sqlx::query("DELETE FROM media_blobs WHERE media_id = $1")
+            .bind(media_id.into_uuid())
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+/// Native row shape for `media_variants` (#33).
+type MediaVariantRow = (
+    Uuid,            // media_id
+    String,          // variant
+    String,          // content_type
+    i32,             // byte_size
+    i32,             // width
+    i32,             // height
+    Option<Vec<u8>>, // data
+    OffsetDateTime,  // created_at
+);
+
+fn row_to_variant(row: MediaVariantRow) -> Result<MediaVariant, StorageError> {
+    let (media_id, variant, content_type, byte_size, width, height, data, created_at) = row;
+    let byte_size = u64::try_from(byte_size).map_err(|_| {
+        StorageError::invalid_input(format!("variant byte_size out of range: {byte_size}"))
+    })?;
+    let width = u32::try_from(width)
+        .map_err(|_| StorageError::invalid_input(format!("variant width out of range: {width}")))?;
+    let height = u32::try_from(height).map_err(|_| {
+        StorageError::invalid_input(format!("variant height out of range: {height}"))
+    })?;
+    Ok(MediaVariant {
+        media_id: MediaId::from_uuid(media_id),
+        variant,
+        content_type,
+        byte_size,
+        width,
+        height,
+        data: data.map(Bytes::from),
+        created_at,
+    })
+}
+
+/// Postgres-backed [`MediaVariantRepository`].
+pub struct PostgresMediaVariantRepository<'a> {
+    pool: &'a PgPool,
+}
+
+impl<'a> PostgresMediaVariantRepository<'a> {
+    pub(super) fn new(pool: &'a PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl MediaVariantRepository for PostgresMediaVariantRepository<'_> {
+    async fn put(&self, variant: &MediaVariant) -> Result<(), StorageError> {
+        let byte_size = i32::try_from(variant.byte_size).map_err(|_| {
+            StorageError::invalid_input(format!("byte_size {} exceeds i32::MAX", variant.byte_size))
+        })?;
+        let width = i32::try_from(variant.width).map_err(|_| {
+            StorageError::invalid_input(format!("width {} exceeds i32::MAX", variant.width))
+        })?;
+        let height = i32::try_from(variant.height).map_err(|_| {
+            StorageError::invalid_input(format!("height {} exceeds i32::MAX", variant.height))
+        })?;
+        let data_slice: Option<&[u8]> = variant.data.as_ref().map(|b| b.as_ref());
+        sqlx::query(
+            "INSERT INTO media_variants
+                (media_id, variant, content_type, byte_size, width, height, data, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (media_id, variant) DO UPDATE SET
+                content_type = EXCLUDED.content_type,
+                byte_size = EXCLUDED.byte_size,
+                width = EXCLUDED.width,
+                height = EXCLUDED.height,
+                data = EXCLUDED.data,
+                created_at = EXCLUDED.created_at",
+        )
+        .bind(variant.media_id.into_uuid())
+        .bind(&variant.variant)
+        .bind(&variant.content_type)
+        .bind(byte_size)
+        .bind(width)
+        .bind(height)
+        .bind(data_slice)
+        .bind(variant.created_at)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get(
+        &self,
+        media_id: MediaId,
+        variant: &str,
+    ) -> Result<Option<MediaVariant>, StorageError> {
+        let row: Option<MediaVariantRow> = sqlx::query_as(
+            "SELECT media_id, variant, content_type, byte_size, width, height, data, created_at
+             FROM media_variants WHERE media_id = $1 AND variant = $2",
+        )
+        .bind(media_id.into_uuid())
+        .bind(variant)
+        .fetch_optional(self.pool)
+        .await?;
+        row.map(row_to_variant).transpose()
+    }
+
+    async fn delete_for_media(&self, media_id: MediaId) -> Result<(), StorageError> {
+        sqlx::query("DELETE FROM media_variants WHERE media_id = $1")
             .bind(media_id.into_uuid())
             .execute(self.pool)
             .await?;

@@ -676,7 +676,7 @@
           "media"
         ],
         "summary": "`GET /api/v1/media/{id}` — return the bytes for `id`.",
-        "description": "Sets `Content-Type` to the stored MIME type and an immutable\n`Cache-Control` since media is content-addressed and will never change\nfor the same id.",
+        "description": "Without `?size=`, serves the original verbatim. With a valid\n`?size=`, serves the matching thumbnail variant (WebP). When the\nrequested variant doesn't exist (vector / animated source, or\ngeneration failed) the original is returned as a graceful fallback.\n\nSets `Content-Type` to the stored MIME type, `Vary: Accept` (since\nfuture content-negotiation can rotate the response without leaking a\nstale cache) and an immutable `Cache-Control` since media is\ncontent-addressed and will never change for the same id.",
         "operationId": "get_media",
         "parameters": [
           {
@@ -684,6 +684,15 @@
             "in": "path",
             "description": "UUIDv7 of the media row",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "Variant label: `small` (≤320 px), `medium` (≤768 px), `large`\n(≤1280 px). Anything else returns 400 with the list of accepted\nvalues.",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -697,7 +706,7 @@
             }
           },
           "400": {
-            "description": "Malformed id",
+            "description": "Malformed id or invalid size",
             "content": {
               "application/json": {
                 "schema": {

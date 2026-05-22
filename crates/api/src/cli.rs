@@ -40,12 +40,27 @@ pub enum Command {
     /// database. Useful after a crash, a schema bump, or simply to verify
     /// the index has not drifted.
     Reindex(ReindexArgs),
+    /// Regenerate thumbnail variants for every media row (#33).
+    ///
+    /// Walks `media`, re-decodes each original blob, and re-renders the
+    /// small/medium/large variants. Useful after a config change (new
+    /// size, new encoder) or to back-fill rows that pre-date the
+    /// thumbnail pipeline.
+    RegenThumbnails(RegenThumbnailsArgs),
     // TODO(storage): `Migrate { Run, Status }` once `thewiki-storage` is wired.
 }
 
 /// Arguments for the `reindex` subcommand.
 #[derive(Debug, clap::Args)]
 pub struct ReindexArgs {
+    /// Path to a `thewiki.toml` configuration file.
+    #[arg(short = 'c', long = "config", env = "THEWIKI_CONFIG_PATH")]
+    pub config: Option<PathBuf>,
+}
+
+/// Arguments for the `regen-thumbnails` subcommand.
+#[derive(Debug, clap::Args)]
+pub struct RegenThumbnailsArgs {
     /// Path to a `thewiki.toml` configuration file.
     #[arg(short = 'c', long = "config", env = "THEWIKI_CONFIG_PATH")]
     pub config: Option<PathBuf>,

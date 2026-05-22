@@ -232,3 +232,50 @@ fn registry_can_render_through_trait_object() {
     assert_eq!(doc.headings.len(), 1);
     assert_eq!(doc.headings[0].anchor, "title");
 }
+
+#[test]
+fn media_image_renders_as_picture_with_srcset() {
+    // The src points at `/api/v1/media/<uuid>` — the renderer rewrites
+    // the surrounding `<img>` into a `<picture>` carrying the three
+    // thumbnail variants (#33).
+    let uuid = "019325cd-3a4f-7c1e-9ad2-1234567890ab";
+    let src = format!("![cat]({}{uuid})", "/api/v1/media/");
+    let doc = render(&src);
+    assert!(doc.html.contains("<picture>"), "html = {}", doc.html);
+    assert!(
+        doc.html
+            .contains(&format!("/api/v1/media/{uuid}?size=small 320w")),
+        "html = {}",
+        doc.html,
+    );
+    assert!(
+        doc.html
+            .contains(&format!("/api/v1/media/{uuid}?size=medium 768w")),
+        "html = {}",
+        doc.html,
+    );
+    assert!(
+        doc.html
+            .contains(&format!("/api/v1/media/{uuid}?size=large 1280w")),
+        "html = {}",
+        doc.html,
+    );
+    assert!(doc.html.contains("loading=\"lazy\""), "html = {}", doc.html);
+    assert!(
+        doc.html.contains("decoding=\"async\""),
+        "html = {}",
+        doc.html
+    );
+    assert!(doc.html.contains("alt=\"cat\""), "html = {}", doc.html);
+}
+
+#[test]
+fn external_image_url_stays_a_plain_img() {
+    let doc = render("![logo](https://example.com/pic.png)");
+    assert!(!doc.html.contains("<picture>"));
+    assert!(
+        doc.html.contains("src=\"https://example.com/pic.png\""),
+        "html = {}",
+        doc.html,
+    );
+}

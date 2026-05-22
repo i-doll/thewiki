@@ -15,13 +15,14 @@ use thewiki_api::auth::state::AuthState;
 use thewiki_api::rate_limit::RateLimitState;
 use thewiki_api::{
     app,
-    cli::{self, ConfigCommand, ReindexArgs},
+    cli::{self, ConfigCommand, RegenThumbnailsArgs, ReindexArgs},
     config::Config,
-    telemetry,
+    media, telemetry,
 };
 use thewiki_search::{Indexer, PageDoc, SearchIndex};
 use thewiki_storage::repo::{
-    AuditLogRepository, Cursor, NamespaceRepository, PageRepository, RevisionRepository,
+    AuditLogRepository, Cursor, MediaRepository, NamespaceRepository, PageRepository,
+    RevisionRepository,
 };
 use thewiki_storage::sqlite::{SqliteOptions, SqliteStorage};
 use time::{Duration as TimeDuration, OffsetDateTime};
@@ -38,6 +39,9 @@ async fn main() -> anyhow::Result<ExitCode> {
         cli::Command::Openapi => run_openapi(),
         cli::Command::Config(cmd) => Ok(run_config(cmd)),
         cli::Command::Reindex(args) => run_reindex(args).await.map(|()| ExitCode::SUCCESS),
+        cli::Command::RegenThumbnails(args) => {
+            run_regen_thumbnails(args).await.map(|()| ExitCode::SUCCESS)
+        }
     }
 }
 
@@ -387,6 +391,92 @@ async fn run_reindex(args: ReindexArgs) -> anyhow::Result<()> {
         "reindex complete: {indexed} document(s) committed to {}",
         index_path.display()
     );
+    Ok(())
+}
+
+/// `thewiki regen-thumbnails` — walk every media row, re-render the
+/// small/medium/large thumbnail variants, and persist them via the
+/// configured backend (#33).
+///
+/// Progress is reported line-by-line to stdout so an operator can watch
+/// it stream past. Variant generation is best-effort per row: a failure
+/// on one image is logged but doesn't halt the loop.
+async fn run_regen_thumbnails(args: RegenThumbnailsArgs) -> anyhow::Result<()> {
+    let config = Config::load(args.config.as_deref()).context("loading configuration")?;
+    config.validate().context("validating configuration")?;
+
+    let storage = SqliteStorage::new(
+        &config.database.url,
+        SqliteOptions {
+            max_connections: config.database.max_connections,
+            acquire_timeout: Duration::from_secs(config.database.acquire_timeout_secs),
+            foreign_keys: true,
+        },
+    )
+    .await
+    .with_context(|| format!("opening storage at {}", config.database.url))?;
+
+    let backend = media::build_media_backend(
+        &config.storage.backend,
+        std::sync::Arc::new(storage.clone()),
+    )
+    .map_err(|e| anyhow::anyhow!("media backend init: {e}"))?;
+
+    let variants_repo = storage.media_variants();
+    let mut cursor: Option<thewiki_core::MediaId> = None;
+    let mut total = 0u64;
+    let mut regenerated = 0u64;
+    loop {
+        let slice = storage
+            .media()
+            .list_all(cursor, 100)
+            .await
+            .context("listing media")?;
+        if slice.items.is_empty() {
+            break;
+        }
+        for media_row in &slice.items {
+            total += 1;
+            let bytes = match backend.get(media_row.id).await {
+                Ok(b) => b,
+                Err(err) => {
+                    eprintln!(
+                        "[{}] skipped (fetch failed: {err})",
+                        media_row.id.into_uuid()
+                    );
+                    continue;
+                }
+            };
+            let rendered =
+                media::thumbnail::render_in_blocking_pool(media_row.content_type.clone(), bytes)
+                    .await;
+            if rendered.is_empty() {
+                println!(
+                    "[{}] no variants generated ({})",
+                    media_row.id.into_uuid(),
+                    media_row.content_type,
+                );
+                continue;
+            }
+            let variant_count = rendered.len();
+            media::thumbnail::store_variants(media_row.id, rendered, &variants_repo, &backend)
+                .await;
+            regenerated += 1;
+            println!(
+                "[{}] {} variants stored",
+                media_row.id.into_uuid(),
+                variant_count,
+            );
+        }
+        // The cursor returned by `list_all` is the string form of the last
+        // id; for the in-process walk we just grab the last item's id
+        // directly so we don't have to re-parse a UUID we already have.
+        match slice.items.last() {
+            Some(m) if slice.next.is_some() => cursor = Some(m.id),
+            _ => break,
+        }
+    }
+    println!("done: regenerated {regenerated} of {total} media row(s)");
     Ok(())
 }
 

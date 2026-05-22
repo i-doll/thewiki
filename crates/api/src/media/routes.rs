@@ -17,21 +17,24 @@
 //! hashing. So two uploads of "the same" malicious SVG that scrub down to
 //! identical sanitised bytes will dedupe; this is intentional.
 
-use axum::extract::{DefaultBodyLimit, Multipart, Path, State};
+use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, body::Bytes as AxumBytes};
 use bytes::Bytes;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thewiki_core::{Media, MediaId};
 use time::OffsetDateTime;
+use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::extractors::RequireAuth;
 use crate::media::dto::MediaView;
+use crate::media::thumbnail;
 use crate::state::{AppState, AppStorage};
-use thewiki_storage::repo::MediaRepository;
+use thewiki_storage::repo::{MediaRepository, MediaVariantRepository};
 
 /// Form field that carries the upload payload. Anything else in the
 /// multipart request is ignored — clients are free to also pass an
@@ -176,29 +179,67 @@ pub async fn upload_media<S: AppStorage>(
     // immediately after we hand the id back. The blob write runs second;
     // if it fails we clean up the row to keep the table consistent.
     state.storage.media().create(&media).await?;
-    if let Err(err) = backend.put(id, stored_bytes).await {
+    if let Err(err) = backend.put(id, stored_bytes.clone()).await {
         // Best-effort cleanup; if it also fails we still want to surface
         // the original backend error to the caller.
         let _ = state.storage.media().delete(id).await;
         return Err(ApiError::from(err));
     }
+
+    // Kick off thumbnail generation in a background task. The original
+    // upload is already committed — failure here is logged and never
+    // surfaced to the caller. (#33)
+    let variants_storage = std::sync::Arc::clone(&state.storage);
+    let variants_backend = backend.clone();
+    let content_type_for_task = media.content_type.clone();
+    tokio::spawn(async move {
+        let rendered =
+            thumbnail::render_in_blocking_pool(content_type_for_task, stored_bytes).await;
+        if rendered.is_empty() {
+            return;
+        }
+        let variants_repo = variants_storage.media_variants();
+        thumbnail::store_variants(id, rendered, &variants_repo, &variants_backend).await;
+    });
+
     Ok((StatusCode::OK, Json(MediaView::from_media(&media))))
+}
+
+/// Query parameters for `GET /api/v1/media/{id}` (#33).
+///
+/// `size` selects a pre-rendered thumbnail variant. Omitted: the original
+/// is served (same behaviour as the #32 implementation).
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct GetMediaQuery {
+    /// Variant label: `small` (≤320 px), `medium` (≤768 px), `large`
+    /// (≤1280 px). Anything else returns 400 with the list of accepted
+    /// values.
+    #[serde(default)]
+    pub size: Option<String>,
 }
 
 /// `GET /api/v1/media/{id}` — return the bytes for `id`.
 ///
-/// Sets `Content-Type` to the stored MIME type and an immutable
-/// `Cache-Control` since media is content-addressed and will never change
-/// for the same id.
+/// Without `?size=`, serves the original verbatim. With a valid
+/// `?size=`, serves the matching thumbnail variant (WebP). When the
+/// requested variant doesn't exist (vector / animated source, or
+/// generation failed) the original is returned as a graceful fallback.
+///
+/// Sets `Content-Type` to the stored MIME type, `Vary: Accept` (since
+/// future content-negotiation can rotate the response without leaking a
+/// stale cache) and an immutable `Cache-Control` since media is
+/// content-addressed and will never change for the same id.
 #[utoipa::path(
     get,
     path = "/{id}",
     params(
         ("id" = String, Path, description = "UUIDv7 of the media row"),
+        GetMediaQuery,
     ),
     responses(
         (status = 200, description = "Blob bytes (raw)", content_type = "application/octet-stream"),
-        (status = 400, description = "Malformed id", body = crate::error::ErrorBody),
+        (status = 400, description = "Malformed id or invalid size", body = crate::error::ErrorBody),
         (status = 404, description = "Media not found", body = crate::error::ErrorBody),
         (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
     ),
@@ -207,6 +248,7 @@ pub async fn upload_media<S: AppStorage>(
 pub async fn get_media<S: AppStorage>(
     State(state): State<AppState<S>>,
     Path(id_raw): Path<String>,
+    Query(query): Query<GetMediaQuery>,
 ) -> Result<Response, ApiError> {
     let backend = state
         .media_backend
@@ -216,18 +258,59 @@ pub async fn get_media<S: AppStorage>(
 
     let id = parse_media_id(&id_raw)?;
     let media = state.storage.media().get_by_id(id).await?;
-    let bytes = backend.get(id).await?;
 
-    Ok((
+    // Resolve the variant request if one was supplied. Unknown labels
+    // are a client-side bug — return 400 with the canonical list so
+    // operators don't have to guess.
+    if let Some(size) = query.size.as_deref() {
+        validate_variant_label(size)?;
+        if let Some(variant) = state.storage.media_variants().get(id, size).await? {
+            // DB backend keeps the bytes inline; S3 backend keeps them
+            // in the bucket and stores `data = NULL` on the row.
+            let bytes = match variant.data {
+                Some(data) => data,
+                None => backend.get_variant(id, size).await?,
+            };
+            return Ok(variant_response(&variant.content_type, bytes));
+        }
+        // Fall through to the original — operators don't need to special-
+        // case animated GIFs or SVG in their consumers.
+    }
+
+    let bytes = backend.get(id).await?;
+    Ok(variant_response(&media.content_type, bytes))
+}
+
+/// List of variant labels in canonical order. Used to build the 400
+/// error body when a client supplies a typo.
+const VARIANT_LABELS: [&str; 3] = [
+    thumbnail::VARIANT_SMALL,
+    thumbnail::VARIANT_MEDIUM,
+    thumbnail::VARIANT_LARGE,
+];
+
+fn validate_variant_label(label: &str) -> Result<(), ApiError> {
+    if VARIANT_LABELS.contains(&label) {
+        Ok(())
+    } else {
+        Err(ApiError::InvalidInput(format!(
+            "unknown size {label:?}; expected one of: {}",
+            VARIANT_LABELS.join(", ")
+        )))
+    }
+}
+
+fn variant_response(content_type: &str, bytes: Bytes) -> Response {
+    (
         StatusCode::OK,
         [
-            (header::CONTENT_TYPE, media.content_type.as_str()),
-            // Content-addressed: the bytes for a given id are immutable.
+            (header::CONTENT_TYPE, content_type),
             (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+            (header::VARY, "Accept"),
         ],
         bytes,
     )
-        .into_response())
+        .into_response()
 }
 
 /// `DELETE /api/v1/media/{id}` — remove the metadata row and the blob.
@@ -272,6 +355,16 @@ pub async fn delete_media<S: AppStorage>(
     // successful backend delete, the orphaned row is harmless and a follow-
     // up retry will clean it up.
     backend.delete(id).await?;
+    // Best-effort: nuke variant bucket entries (S3 only — DB backend's
+    // row cascade handles them already). Failure here would leave orphan
+    // files but is logged rather than blocking the row delete.
+    if let Err(err) = backend.delete_variants(id).await {
+        tracing::warn!(
+            media_id = %id.into_uuid(),
+            error = %err,
+            "could not clean up variant bucket entries on delete",
+        );
+    }
     state.storage.media().delete(id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

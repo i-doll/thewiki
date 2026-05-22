@@ -95,6 +95,45 @@ pub trait MediaBackend: Send + Sync + 'static {
     /// Remove the bytes for `media_id`. Idempotent — deleting a missing
     /// row is OK.
     async fn delete(&self, media_id: MediaId) -> Result<(), MediaBackendError>;
+
+    /// Store thumbnail variant bytes (#33). The DB backend stores variant
+    /// bytes in the `media_variants.data` column, so its impl is a no-op;
+    /// the S3 backend pushes the bytes to
+    /// `<bucket>/media/<media_id>/<variant>.webp`.
+    async fn put_variant(
+        &self,
+        _media_id: MediaId,
+        _variant_label: &str,
+        _data: Bytes,
+    ) -> Result<(), MediaBackendError> {
+        Ok(())
+    }
+
+    /// Fetch thumbnail variant bytes (#33). The DB backend is unused for
+    /// this — the variant rows carry the bytes directly. The S3 backend
+    /// fetches from the bucket.
+    async fn get_variant(
+        &self,
+        _media_id: MediaId,
+        _variant_label: &str,
+    ) -> Result<Bytes, MediaBackendError> {
+        Err(MediaBackendError::NotFound)
+    }
+
+    /// Delete every variant for `media_id` (#33). The DB backend's row
+    /// cascade does this for free; the S3 backend has to walk the prefix.
+    async fn delete_variants(&self, _media_id: MediaId) -> Result<(), MediaBackendError> {
+        Ok(())
+    }
+
+    /// Whether the backend stores variant bytes in the metadata row
+    /// (`true` for the in-DB backend) or in a separate bucket location
+    /// (`false` for the S3 backend). Used by the upload pipeline to
+    /// decide whether to populate `media_variants.data` or push the
+    /// bytes to the bucket.
+    fn variants_inline_in_db(&self) -> bool {
+        false
+    }
 }
 
 /// In-database blob backend.
@@ -135,6 +174,10 @@ impl<S: AppStorage> MediaBackend for DbMediaBackend<S> {
             .delete(media_id)
             .await
             .map_err(MediaBackendError::from)
+    }
+
+    fn variants_inline_in_db(&self) -> bool {
+        true
     }
 }
 
@@ -187,6 +230,19 @@ impl S3MediaBackend {
     fn object_path(media_id: MediaId) -> ObjectPath {
         ObjectPath::from(format!("media/{}", media_id.into_uuid()))
     }
+
+    /// Bucket key for a thumbnail variant. Variants share a prefix with
+    /// the original media so an operator can browse a given upload's
+    /// derived files with one `ls`.
+    fn variant_path(media_id: MediaId, label: &str) -> ObjectPath {
+        ObjectPath::from(format!("media/{}/{}.webp", media_id.into_uuid(), label))
+    }
+
+    /// Bucket key prefix for every variant of `media_id`. Used when we
+    /// need to walk and drop every entry on delete.
+    fn variant_prefix(media_id: MediaId) -> ObjectPath {
+        ObjectPath::from(format!("media/{}", media_id.into_uuid()))
+    }
 }
 
 #[async_trait]
@@ -215,6 +271,52 @@ impl MediaBackend for S3MediaBackend {
             Err(object_store::Error::NotFound { .. }) => Ok(()),
             Err(err) => Err(MediaBackendError::from(err)),
         }
+    }
+
+    async fn put_variant(
+        &self,
+        media_id: MediaId,
+        variant_label: &str,
+        data: Bytes,
+    ) -> Result<(), MediaBackendError> {
+        let path = Self::variant_path(media_id, variant_label);
+        self.store.put(&path, data.into()).await?;
+        Ok(())
+    }
+
+    async fn get_variant(
+        &self,
+        media_id: MediaId,
+        variant_label: &str,
+    ) -> Result<Bytes, MediaBackendError> {
+        let path = Self::variant_path(media_id, variant_label);
+        let result = self.store.get(&path).await?;
+        let bytes = result.bytes().await?;
+        Ok(bytes)
+    }
+
+    async fn delete_variants(&self, media_id: MediaId) -> Result<(), MediaBackendError> {
+        // Walk the prefix and delete each variant key. The `list` stream
+        // yields the original blob too, but we skip it — the caller of
+        // `delete_variants` always owns the matching `delete` for the
+        // original anyway. We poll the stream with `StreamExt::next` so
+        // we don't need to pull in an extra trait crate just for
+        // `try_next`.
+        use futures_util::StreamExt;
+        let prefix = Self::variant_prefix(media_id);
+        let mut stream = self.store.list(Some(&prefix));
+        while let Some(item) = stream.next().await {
+            let meta = item.map_err(MediaBackendError::from)?;
+            if meta.location == Self::object_path(media_id) {
+                continue;
+            }
+            if let Err(err) = self.store.delete(&meta.location).await
+                && !matches!(err, object_store::Error::NotFound { .. })
+            {
+                return Err(MediaBackendError::from(err));
+            }
+        }
+        Ok(())
     }
 }
 

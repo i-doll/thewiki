@@ -74,7 +74,7 @@ mod session;
 mod user;
 
 pub use audit_log::LibsqlAuditLogRepository;
-pub use media::{LibsqlMediaBlobRepository, LibsqlMediaRepository};
+pub use media::{LibsqlMediaBlobRepository, LibsqlMediaRepository, LibsqlMediaVariantRepository};
 pub use namespace::LibsqlNamespaceRepository;
 pub use page::LibsqlPageRepository;
 pub use recent_changes::LibsqlRecentChangesRepository;
@@ -111,6 +111,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "20260522170000_media",
         include_str!("../../../../migrations/20260522170000_media.sql"),
+    ),
+    (
+        "20260523000000_media_variants",
+        include_str!("../../../../migrations/20260523000000_media_variants.sql"),
     ),
 ];
 
@@ -301,6 +305,13 @@ impl LibsqlStorage {
     #[must_use]
     pub fn media_blobs(&self) -> LibsqlMediaBlobRepository<'_> {
         LibsqlMediaBlobRepository::new(&self.conn)
+    }
+
+    /// Borrow this handle as a
+    /// [`MediaVariantRepository`](crate::repo::MediaVariantRepository) (#33).
+    #[must_use]
+    pub fn media_variants(&self) -> LibsqlMediaVariantRepository<'_> {
+        LibsqlMediaVariantRepository::new(&self.conn)
     }
 
     /// Commit a page mutation together with its audit-log row.
