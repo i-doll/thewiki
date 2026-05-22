@@ -43,7 +43,8 @@ use uuid::Uuid;
 
 use crate::audit_log;
 use crate::auth::{self, AuthState, csrf};
-use crate::config::{Config, RateLimitConfig};
+use crate::config::{Config, GraphQLConfig, RateLimitConfig};
+use crate::graphql::{self, GraphQLState};
 use crate::media;
 use crate::pages;
 use crate::rate_limit::{self, RateLimitState};
@@ -417,7 +418,13 @@ pub fn build_full<S: AppStorage>(
         rate_limit_config,
         app_state.auth_state.clone().or(Some(auth_state.clone())),
     );
-    build_full_with_rate_limit_state(app_state, auth_state, serve_frontend, rate_limit_state)
+    build_full_with_rate_limit_state(
+        app_state,
+        auth_state,
+        serve_frontend,
+        rate_limit_state,
+        GraphQLConfig::default(),
+    )
 }
 
 /// Variant of [`build_full`] that takes a caller-built [`RateLimitState`].
@@ -431,6 +438,7 @@ pub fn build_full_with_rate_limit_state<S: AppStorage>(
     auth_state: AuthState,
     serve_frontend: bool,
     rate_limit_state: RateLimitState,
+    graphql_config: GraphQLConfig,
 ) -> Router {
     // Page CRUD + recent-changes + OpenAPI subrouter.
     let api_router = api_router::<S>()
@@ -440,7 +448,7 @@ pub fn build_full_with_rate_limit_state<S: AppStorage>(
     let (api_router, _) = api_router.split_for_parts();
     let api_doc = openapi::<S>();
     let swagger = SwaggerUi::new(SWAGGER_UI_PATH).url(OPENAPI_JSON_PATH, api_doc);
-    let stateful_api = api_router.with_state(app_state);
+    let stateful_api = api_router.with_state(app_state.clone());
 
     // Auth subrouter.
     let auth_router: Router = auth::routes::build_router()
@@ -450,9 +458,15 @@ pub fn build_full_with_rate_limit_state<S: AppStorage>(
         .with_state(auth_state)
         .into();
 
+    // GraphQL subrouter (#37). The schema is generic over the storage facade
+    // so its router carries its own typed state — see `graphql/mod.rs`.
+    let graphql_state = GraphQLState::new(app_state, graphql_config);
+    let graphql_router: Router = graphql::router::<S>().with_state(graphql_state);
+
     let mut router = Router::new()
         .merge(stateful_api)
         .merge(swagger)
+        .merge(graphql_router)
         .nest("/api/v1/auth", auth_router)
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz));

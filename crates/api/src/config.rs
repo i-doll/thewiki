@@ -47,6 +47,78 @@ pub struct Config {
     pub audit_log: AuditLogConfig,
     /// Observability (log format and filter).
     pub telemetry: TelemetryConfig,
+    /// GraphQL surface (#37). Enabled by default; the playground and
+    /// introspection knobs typically get flipped off in production via env.
+    #[serde(default)]
+    pub graphql: GraphQLConfig,
+}
+
+/// GraphQL endpoint configuration.
+///
+/// Mirrors the operator-facing knobs documented in `thewiki.example.toml`.
+/// All defaults match the "developer-friendly" posture: GraphiQL and
+/// introspection are on, persisted queries are off (they're an
+/// opt-in surface today), and the depth/complexity limits are generous
+/// enough that a hand-written query won't trip them but a hostile one
+/// will.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphQLConfig {
+    /// Serve the GraphiQL HTML at `/api/graphql/playground`. Flip to `false`
+    /// in production once clients are wired — there's no auth on the
+    /// playground page itself (the queries it sends still hit the same
+    /// resolvers and respect the session cookie), but it advertises the
+    /// schema, so the safe production posture is "playground off,
+    /// introspection off".
+    #[serde(default = "default_graphql_playground")]
+    pub playground_enabled: bool,
+    /// Allow GraphQL introspection (`__schema` / `__type`). Disabling this
+    /// hides the schema from unauthenticated callers, which is the standard
+    /// production posture. Defaults to `true` so out-of-the-box deploys can
+    /// be explored with any GraphQL client.
+    #[serde(default = "default_graphql_introspection")]
+    pub introspection_enabled: bool,
+    /// Accept persisted-query lookups (Apollo APQ shape: clients send
+    /// `extensions.persistedQuery.sha256Hash`). When `true` the server
+    /// transparently caches queries in-memory the first time it sees them
+    /// and answers subsequent hash-only requests from the cache. Defaults to
+    /// `false` because the cache is process-local and adds an additional
+    /// surface that operators should opt into.
+    #[serde(default)]
+    pub persisted_queries_enabled: bool,
+    /// Cap on query depth. Defends against deeply nested adversarial queries
+    /// (the classic `{ user { friends { friends { ... } } } }` exponent).
+    #[serde(default = "default_graphql_max_depth")]
+    pub max_query_depth: u32,
+    /// Cap on query complexity. async-graphql's complexity score adds 1 per
+    /// selected field by default; resolvers can override the cost individually.
+    #[serde(default = "default_graphql_max_complexity")]
+    pub max_query_complexity: u32,
+}
+
+fn default_graphql_playground() -> bool {
+    true
+}
+fn default_graphql_introspection() -> bool {
+    true
+}
+fn default_graphql_max_depth() -> u32 {
+    15
+}
+fn default_graphql_max_complexity() -> u32 {
+    1_000
+}
+
+impl Default for GraphQLConfig {
+    fn default() -> Self {
+        Self {
+            playground_enabled: default_graphql_playground(),
+            introspection_enabled: default_graphql_introspection(),
+            persisted_queries_enabled: false,
+            max_query_depth: default_graphql_max_depth(),
+            max_query_complexity: default_graphql_max_complexity(),
+        }
+    }
 }
 
 /// HTTP server tuning.
@@ -544,6 +616,7 @@ impl Config {
                 log_format: LogFormat::Json,
                 log_filter: "info,thewiki=debug".to_string(),
             },
+            graphql: GraphQLConfig::default(),
         }
     }
 
@@ -697,6 +770,17 @@ impl Config {
         if self.search.batch_size == 0 {
             return Err(ConfigError::Invalid(
                 "search.batch_size must be > 0".to_string(),
+            ));
+        }
+
+        if self.graphql.max_query_depth == 0 {
+            return Err(ConfigError::Invalid(
+                "graphql.max_query_depth must be > 0".to_string(),
+            ));
+        }
+        if self.graphql.max_query_complexity == 0 {
+            return Err(ConfigError::Invalid(
+                "graphql.max_query_complexity must be > 0".to_string(),
             ));
         }
 

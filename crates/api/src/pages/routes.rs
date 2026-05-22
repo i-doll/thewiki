@@ -144,7 +144,7 @@ pub(super) async fn resolve_namespace<S: AppStorage>(
 /// Rendering goes through [`crate::render::render_markdown`] so wikilinks
 /// are resolved against the page repository — missing targets render with
 /// `class="redlink"` so the SPA can style them without a second round-trip.
-pub(super) async fn hydrate_page_view<S: AppStorage>(
+pub(crate) async fn hydrate_page_view<S: AppStorage>(
     state: &AppState<S>,
     page: Page,
     namespace_slug: String,
