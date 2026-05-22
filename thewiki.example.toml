@@ -40,8 +40,15 @@ serve_frontend = true
 # Database.
 # ---------------------------------------------------------------------------
 [database]
-# sqlx URL. SQLite is the only M0 backend; `postgres://` and `libsql://` land
-# in M1. Path is resolved relative to the working directory; absolute paths
+# Backend driver. One of `sqlite` (default, always available) or `postgres`
+# (requires the binary to be built with `--features thewiki-storage/postgres`).
+# `libsql` lands in #24.
+driver = "sqlite"
+
+# sqlx URL. Must match `driver`:
+#   sqlite://path/to/file.db
+#   postgres://user:pass@host:5432/database
+# Path is resolved relative to the working directory; absolute paths
 # (`sqlite:///var/lib/thewiki/thewiki.db`) are recommended for production.
 # Default: `sqlite://data/thewiki.db`.
 url = "sqlite://data/thewiki.db"

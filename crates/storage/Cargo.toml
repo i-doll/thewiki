@@ -9,18 +9,18 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-# M0 ships SQLite. M1 adds `libsql` (this issue) and `postgres` (#25) so the
-# API crate can pick a backend at compile time without dragging the full driver
-# matrix into every build.
+# M0 ships SQLite. M1 adds `libsql` (#24) and `postgres` (#25), gated by their
+# own features so the API crate picks one backend at compile time.
 #
-# Why `sqlx` is gated behind `sqlite`: both `sqlx-sqlite` and `libsql` bundle
-# their own statically-linked SQLite engine (`libsqlite3-sys` vs.
-# `libsql-ffi`). If both are pulled in unconditionally the test binaries fail
-# to link with duplicate `sqlite3_*` symbols. Selecting the backend at compile
-# time is the standard answer: an operator only ships one driver, never both.
+# Why `sqlx` is gated behind `sqlite` (and `postgres`): both `sqlx-sqlite`
+# and `libsql` bundle their own statically-linked SQLite engine
+# (`libsqlite3-sys` vs `libsql-ffi`). Pulled in together they fail to link
+# with duplicate `sqlite3_*` symbols. Selecting the backend at compile time
+# is the standard answer.
 default = ["sqlite"]
 sqlite = ["dep:sqlx"]
 libsql = ["dep:libsql"]
+postgres = ["dep:sqlx", "sqlx/postgres"]
 
 [dependencies]
 thewiki-core = { workspace = true }

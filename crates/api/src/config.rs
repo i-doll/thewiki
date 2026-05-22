@@ -90,14 +90,37 @@ fn default_serve_frontend() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
+    /// Which backend the URL targets. Defaults to `sqlite`. The Postgres
+    /// adapter (#25) is selected with `driver = "postgres"`; the libsql
+    /// adapter lands in #24. The dispatch reading this field is wired in
+    /// alongside the runtime that owns it; the field is parsed here so
+    /// operators can already declare their target backend.
+    #[serde(default)]
+    pub driver: DatabaseDriver,
     /// Database URL, in sqlx's URL syntax. SQLite is the only M0 backend;
-    /// `postgres://` and `libsql://` land in M1.
+    /// `postgres://` is supported behind the `postgres` cargo feature
+    /// (M1, #25) and `libsql://` lands in #24.
     pub url: String,
     /// Maximum number of pooled connections.
     pub max_connections: u32,
     /// Timeout (seconds) for acquiring a connection from the pool before
     /// returning an error to the caller.
     pub acquire_timeout_secs: u64,
+}
+
+/// Database driver selector. `sqlite` is the default and the only backend
+/// `thewiki` ships at M0; `postgres` becomes available once the binary is
+/// built with `--features thewiki-storage/postgres`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum DatabaseDriver {
+    /// SQLite via `sqlx::SqlitePool`. URL form: `sqlite://path` or
+    /// `sqlite::memory:`.
+    #[default]
+    Sqlite,
+    /// Postgres via `sqlx::PgPool`. URL form: `postgres://user:pass@host/db`.
+    Postgres,
 }
 
 /// Object storage backend selector.
@@ -324,6 +347,7 @@ impl Config {
                 serve_frontend: default_serve_frontend(),
             },
             database: DatabaseConfig {
+                driver: DatabaseDriver::Sqlite,
                 url: "sqlite://data/thewiki.db".to_string(),
                 max_connections: 16,
                 acquire_timeout_secs: 10,
