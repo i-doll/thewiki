@@ -1,0 +1,17 @@
+thewiki has been installed.
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+Service: {{ include "thewiki.fullname" . }}:{{ .Values.service.port }}
+Database URL:{{ if .Values.database.existingSecret }} existing secret {{ include "thewiki.databaseSecretName" . }}{{ else }} generated secret {{ include "thewiki.databaseSecretName" . }}{{ end }}
+
+{{ if .Values.ingress.enabled }}
+Ingress hosts:
+{{- range .Values.ingress.hosts }}
+  - {{ .host }}
+{{- end }}
+{{ else }}
+Port-forward locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "thewiki.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://127.0.0.1:8080
+{{ end }}
