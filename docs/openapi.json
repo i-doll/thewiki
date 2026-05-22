@@ -1,0 +1,1775 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "thewiki API",
+    "description": "REST endpoints for thewiki — see https://github.com/i-doll/thewiki",
+    "contact": {
+      "name": "thewiki contributors"
+    },
+    "license": {
+      "name": "AGPL-3.0-only",
+      "identifier": "AGPL-3.0-only"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`POST /api/v1/auth/login` — verify credentials and issue a session cookie.",
+        "description": "Constant-time guarantee on the failure path: when the username is unknown,\nwe still run an Argon2 verify against a pre-computed PHC string. Wall-clock\ntime per attempt is therefore dominated by the configured Argon2 cost\nregardless of which arm fires.\n\nRate limiting is applied by the router middleware before this handler runs.",
+        "operationId": "login",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Optional existing session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`. Required only when a session cookie is present.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token matching the `thewiki_csrf` cookie. Required only when a session cookie is present.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated user and session cookies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPayload"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing or invalid when a session cookie is present",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Authentication storage or hashing failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`POST /api/v1/auth/logout` — revoke the session and clear both cookies.",
+        "description": "Requires a valid session. The CSRF layer also requires the matching\n`X-CSRF-Token` header because logout is a state-mutating call.",
+        "operationId": "logout",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token matching the `thewiki_csrf` cookie",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Session revoked and cookies cleared"
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Authentication storage failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`GET /api/v1/auth/me` — return the authenticated user payload.",
+        "operationId": "me",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "`thewiki_session` cookie",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPayload"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Authentication storage failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/policy": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`GET /api/v1/auth/policy` — publish the operator-configured auth shape\nso the SPA can render the right affordances.",
+        "description": "Always available (no auth required) — by design, since the answer is what\nthe UI needs *before* the user has a session.",
+        "operationId": "policy",
+        "responses": {
+          "200": {
+            "description": "Auth policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthPolicyPayload"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pages": {
+      "get": {
+        "tags": [
+          "pages"
+        ],
+        "summary": "`GET /api/v1/pages` — list pages, cursor-paginated.",
+        "operationId": "list_pages",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "query",
+            "description": "Namespace slug to list pages from. Defaults to `Main` if absent.\nNamespace prefix routing lands with #28.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call. Omit to start from the\nbeginning.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to\n[`thewiki_storage::repo::MAX_PAGE_SIZE`]. `0`/missing falls back to\nthe route-level default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "pages"
+        ],
+        "summary": "`POST /api/v1/pages` — create a page plus its initial revision.",
+        "description": "Steps:\n1. Resolve the namespace by slug (404 if missing).\n2. Insert the page row with `current_revision_id = NULL`.\n3. Insert the initial revision, authored by the caller.\n4. Update the page row to point at the new revision (unless approval is\n   required, in which case the page stays headless until a moderator\n   promotes the pending revision).\n\nThe schema's `pages.current_revision_id` FK is `ON DELETE SET NULL`, so\nthe brief NULL state in step 2 is legitimate even with FK enforcement on.",
+        "operationId": "create_page",
+        "parameters": [
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Optional session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`. Required only for authenticated edits; anonymous edits may omit them when enabled.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token matching the `thewiki_csrf` cookie. Required only when a session cookie is present.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Page created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Edit accepted but pending approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Slug already taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}": {
+      "get": {
+        "tags": [
+          "pages"
+        ],
+        "summary": "`GET /api/v1/pages/{slug}` — fetch a page by slug in the default namespace.",
+        "description": "Read is open by design — anonymous reads are always allowed (the\n`anonymous_edits` flag only gates mutating endpoints).",
+        "operationId": "get_page",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "URL slug within the default namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "pages"
+        ],
+        "summary": "`PUT /api/v1/pages/{slug}` — commit a new revision.",
+        "description": "Title is optional (keeps the existing title when omitted); content always\nproduces a new revision row. When the approval-queue gate matches, the\nrevision lands in the (stubbed) queue and the response is `202 Accepted`\nwith the page row still pointing at the previous head.",
+        "operationId": "update_page",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "URL slug within the default namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Optional session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`. Required only for authenticated edits; anonymous edits may omit them when enabled.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token matching the `thewiki_csrf` cookie. Required only when a session cookie is present.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Page updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Edit accepted but pending approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "pages"
+        ],
+        "summary": "`DELETE /api/v1/pages/{slug}` — remove a page and all its revisions.",
+        "description": "The `revisions` table has `ON DELETE CASCADE` on `page_id`, so wiping the\npage row collapses the history. Deletion is gated by the same configurable\nextractor as edits — operators who flip `anonymous_edits = true` accept\nthat anonymous callers can delete as well. The eventual role-gated\nextractor (TODO(#14): `RequireRole(Role::Admin)`) will tighten this.",
+        "operationId": "delete_page",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "URL slug within the default namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Optional session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`. Required only for authenticated edits; anonymous edits may omit them when enabled.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token matching the `thewiki_csrf` cookie. Required only when a session cookie is present.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Page deleted"
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/diff": {
+      "get": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "`GET /api/v1/pages/{slug}/diff?from=<rev>&to=<rev>` — pairwise revision\ndiff.",
+        "description": "Both `from` and `to` must belong to the page identified by `{slug}`; a\nmismatch (or an unknown revision id) yields 404 — we do not want to leak\nthe existence of revisions on other pages.",
+        "operationId": "diff_revisions",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "URL slug within the default namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Revision the diff is computed *from* — shown as `-` lines.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RevisionId"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Revision the diff is computed *to* — shown as `+` lines.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RevisionId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Diff between two revisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pages/{slug}/revert": {
+      "post": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "`POST /api/v1/pages/{slug}/revert` — revert a page to a historical revision.",
+        "description": "Steps:\n1. Resolve the page by slug in the default namespace (404 if missing).\n2. Load the historical revision by id (404 if missing).\n3. Verify the revision belongs to this page; if not, **also 404**. We\n   deliberately do not surface a 403 here — leaking the existence of\n   revision ids belonging to other pages would be a cross-page oracle.\n4. Commit a new revision with the historical body. Its `parent_id` is the\n   page's *current* head (not the revision being reverted to) so the\n   history graph stays linear and the audit trail captures both endpoints.\n5. Advance `page.current_revision_id` to the new revision.\n6. Emit a `tracing::info!` on the `audit` target. TODO(#36) wires this\n   into a proper persistent audit log.\n\nReturns the now-current [`PageView`].",
+        "operationId": "revert_page",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "URL slug within the default namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "in": "header",
+            "description": "Session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "description": "Double-submit CSRF token matching the `thewiki_csrf` cookie",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Page reverted; new revision committed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/revisions": {
+      "get": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "`GET /api/v1/pages/{slug}/revisions` — paginated history for a page.",
+        "description": "Returns 404 if the page itself does not exist. A page that exists but has\nno revisions yet (a transient state — see the doc on\n`pages.current_revision_id`) returns an empty list.",
+        "operationId": "list_revisions",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "URL slug within the default namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call. Omit to start from the\nnewest revision.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to\n[`thewiki_storage::repo::MAX_PAGE_SIZE`]. `0`/missing falls back to\nthe route-level default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revision history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recent-changes": {
+      "get": {
+        "tags": [
+          "recent-changes"
+        ],
+        "summary": "`GET /api/v1/recent-changes` — chronological wiki-wide edit feed.",
+        "description": "Cursor-paginated, newest first. Filterable by `since`, `namespace`, and\n`actor`. Unknown namespaces / actors render as `404`; an unset filter\nsimply drops the corresponding predicate.",
+        "operationId": "list_recent_changes",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "description": "RFC 3339 timestamp. Only revisions committed at or after this point\nare returned. Omit to include all history.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "description": "Namespace slug to filter on. Omit to include every namespace.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Username to filter on. Only revisions authored by this user are\nreturned.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call. Omit to start from the\nnewest entry.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to\n[`thewiki_storage::repo::MAX_PAGE_SIZE`]. `0`/missing falls back to\nthe route-level default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent changes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecentChangesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Namespace or actor not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AuthErrorBody": {
+        "type": "object",
+        "description": "Wire form returned by auth endpoints on failure.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Stable machine-readable error code."
+          }
+        }
+      },
+      "AuthPolicyPayload": {
+        "type": "object",
+        "description": "Wire shape of `GET /api/v1/auth/policy`.\n\nThe SPA reads this on boot to decide whether to render the \"Sign up\" CTA\n(open / invite) and whether to surface an \"Edit anonymously\" affordance.\nKept narrow on purpose — operators tune fifteen knobs in `thewiki.toml`,\nbut only these two affect what the SPA shows the user *before* they have\na session.",
+        "required": [
+          "registration",
+          "anonymous_edits",
+          "approval_required_for"
+        ],
+        "properties": {
+          "anonymous_edits": {
+            "type": "boolean",
+            "description": "Whether anonymous (logged-out) callers can submit edits."
+          },
+          "approval_required_for": {
+            "type": "string",
+            "description": "Whether edits land in a moderator approval queue. The exact scope\n(`\"none\"`, `\"anonymous\"`, `\"new-users\"`, `\"all\"`) is exposed so the\nSPA can show a \"your edit will be reviewed\" hint before the user\nclicks save."
+          },
+          "registration": {
+            "type": "string",
+            "description": "Account registration policy: `\"open\"`, `\"invite\"`, or `\"closed\"`."
+          }
+        }
+      },
+      "CreatePageRequest": {
+        "type": "object",
+        "description": "Body of `POST /api/v1/pages`.",
+        "required": [
+          "namespace_slug",
+          "slug",
+          "title",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Initial body for the page. The first revision is committed with this\ncontent."
+          },
+          "namespace_slug": {
+            "type": "string",
+            "description": "Slug of the namespace this page lives in. The namespace must already\nexist; the API does not create namespaces on demand."
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL-safe slug, unique within `namespace_slug`."
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable title shown in the UI."
+          }
+        }
+      },
+      "DiffHunk": {
+        "type": "object",
+        "description": "A unified-diff hunk: a contiguous span of changed lines plus a small\nwindow of context on either side.\n\n`old_start` / `new_start` are 1-based line numbers, matching the\n`@@ -old_start,old_count +new_start,new_count @@` convention used by\n`git diff`. When `*_count == 0` the corresponding `*_start` is `0` (this\nis what `git diff` does for pure additions or deletions).",
+        "required": [
+          "old_start",
+          "old_count",
+          "new_start",
+          "new_count",
+          "lines"
+        ],
+        "properties": {
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiffLine"
+            },
+            "description": "Lines in the hunk, in display order."
+          },
+          "new_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of lines from the `to` side covered by this hunk.",
+            "minimum": 0
+          },
+          "new_start": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1-based line number of the first line in the `to` body, or `0` when\nthe hunk represents a pure deletion.",
+            "minimum": 0
+          },
+          "old_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of lines from the `from` side covered by this hunk.",
+            "minimum": 0
+          },
+          "old_start": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1-based line number of the first line in the `from` body, or `0`\nwhen the hunk represents a pure insertion.",
+            "minimum": 0
+          }
+        }
+      },
+      "DiffKind": {
+        "type": "string",
+        "description": "Kind of line in a [`DiffHunk`].\n\n`#[non_exhaustive]` so we can add new variants (e.g. `ChangeInPlace`,\n`NoNewlineAtEof`) without breaking downstream matches.",
+        "enum": [
+          "context",
+          "insertion",
+          "deletion"
+        ]
+      },
+      "DiffLine": {
+        "type": "object",
+        "description": "A single line inside a [`DiffHunk`].",
+        "required": [
+          "kind",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Content of the line. Includes the trailing newline as it appears in\nthe source so callers can reassemble a faithful unified diff."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiffKind",
+            "description": "Whether the line is context / insertion / deletion."
+          }
+        }
+      },
+      "DiffResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/pages/{slug}/diff`.",
+        "required": [
+          "from",
+          "to",
+          "unified",
+          "hunks"
+        ],
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/RevisionId",
+            "description": "Revision the diff was computed from."
+          },
+          "hunks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiffHunk"
+            },
+            "description": "Same diff, broken into structured hunks for clients that want to\nrender their own side-by-side view."
+          },
+          "to": {
+            "$ref": "#/components/schemas/RevisionId",
+            "description": "Revision the diff was computed to."
+          },
+          "unified": {
+            "type": "string",
+            "description": "Ready-to-display unified-diff text. The `---`/`+++` header lines name\nthe two revisions by id for traceability."
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "description": "The wire form of an API error.\n\nKept intentionally small: a stable machine-readable `code` plus a free-form\nhuman message. New variants can be added by extending [`ApiError`] without\nchanging this shape.",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable code (`not_found`, `conflict`, …)."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable description of what went wrong."
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "description": "JSON body for [`login`].",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "Password in clear. Compared in constant time via Argon2id verify."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login handle. Must validate as a [`Username`](thewiki_core::Username);\ninvalid strings short-circuit to 401 with the generic error to avoid\nleaking what's a valid handle."
+          }
+        }
+      },
+      "NamespaceId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier for a [`crate::namespace::Namespace`]."
+      },
+      "PageId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier for a [`crate::page::Page`]."
+      },
+      "PageListItem": {
+        "type": "object",
+        "description": "Lighter representation of a page used inside [`PageListResponse`].\n\nLacks `content` and `namespace_id`; clients listing a namespace already\nknow the namespace.",
+        "required": [
+          "id",
+          "namespace_slug",
+          "slug",
+          "title",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/PageId",
+            "description": "Stable identifier."
+          },
+          "namespace_slug": {
+            "type": "string",
+            "description": "Slug of the namespace this page lives in."
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug."
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable title."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the page row was last touched."
+          }
+        }
+      },
+      "PageListResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/pages?cursor=…&limit=…`.\n\n`next_cursor` is `None` once the listing has been exhausted; otherwise\npass it back as `?cursor=…` to fetch the next page.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PageListItem"
+            },
+            "description": "Rows in this batch, ordered `(created_at ASC, id ASC)` per the\nstorage layer's contract."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Token to fetch the next page, or `None` if there are no more pages."
+          }
+        }
+      },
+      "PageView": {
+        "type": "object",
+        "description": "A single page returned by the read endpoints.\n\n`content` is the body of the current revision (joined in for convenience).\nListing endpoints use the lighter [`PageListItem`] instead so they don't\nhave to ship every page's full body.",
+        "required": [
+          "id",
+          "namespace_id",
+          "namespace_slug",
+          "slug",
+          "title",
+          "content",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Body of the current revision, or empty string if no revision exists."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the page row was first created."
+          },
+          "current_revision_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RevisionId",
+                "description": "Pointer to the current head revision. `None` only in the transient\nstate between page creation and the first revision being committed\n(today that window is closed inside `POST /api/v1/pages`)."
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/PageId",
+            "description": "Stable identifier."
+          },
+          "namespace_id": {
+            "$ref": "#/components/schemas/NamespaceId",
+            "description": "Namespace this page lives in."
+          },
+          "namespace_slug": {
+            "type": "string",
+            "description": "Slug of the namespace; joined in so clients don't need a second\nround trip just to render a breadcrumb."
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug, unique within the namespace."
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable title."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the page row was last touched."
+          }
+        }
+      },
+      "RateLimitErrorBody": {
+        "type": "object",
+        "description": "Wire form returned when a request exceeds its configured rate limit.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Stable machine-readable error code."
+          }
+        }
+      },
+      "RecentChangeView": {
+        "type": "object",
+        "description": "A single entry in the recent-changes feed.\n\nConstructed by the handler from a `thewiki_storage::repo::RecentChange`\n— one revision flattened with its page, namespace, and author context.",
+        "required": [
+          "revision_id",
+          "page_id",
+          "page_slug",
+          "namespace_id",
+          "namespace_slug",
+          "author_id",
+          "author_username",
+          "created_at"
+        ],
+        "properties": {
+          "author_id": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "User who committed the revision."
+          },
+          "author_username": {
+            "type": "string",
+            "description": "Username of the author."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the revision was committed."
+          },
+          "edit_summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional short note describing the edit."
+          },
+          "namespace_id": {
+            "$ref": "#/components/schemas/NamespaceId",
+            "description": "Namespace the edited page lives in."
+          },
+          "namespace_slug": {
+            "type": "string",
+            "description": "Slug of the namespace."
+          },
+          "page_id": {
+            "$ref": "#/components/schemas/PageId",
+            "description": "The page that was edited."
+          },
+          "page_slug": {
+            "type": "string",
+            "description": "URL slug of the edited page."
+          },
+          "revision_id": {
+            "$ref": "#/components/schemas/RevisionId",
+            "description": "Identifier of the revision this entry refers to."
+          }
+        }
+      },
+      "RecentChangesResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/recent-changes`.\n\nItems are ordered newest first. `next_cursor` is `None` once the feed has\nbeen exhausted; otherwise pass it back as `?cursor=…` to fetch the next\npage. The cursor encodes a fixed `(created_at, id)` boundary so it stays\nstable even when new edits land between calls.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecentChangeView"
+            },
+            "description": "Rows in this batch, ordered `(created_at DESC, id DESC)`."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Token to fetch the next page, or `None` if the feed has been\nexhausted."
+          }
+        }
+      },
+      "RevertRequest": {
+        "type": "object",
+        "description": "Body of `POST /api/v1/pages/{slug}/revert`.",
+        "required": [
+          "from_revision"
+        ],
+        "properties": {
+          "from_revision": {
+            "$ref": "#/components/schemas/RevisionId",
+            "description": "Revision to revert *to*. Must belong to the page named in the path."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional short note describing the revert (think Git commit message).\nFalls back to `\"Reverted to <revision id>\"` when omitted."
+          }
+        }
+      },
+      "RevisionId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier for a [`crate::revision::Revision`]."
+      },
+      "RevisionListResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/pages/{slug}/revisions`.\n\nItems are newest-first per the storage contract. `next_cursor` is `None`\nonce the history has been fully walked; otherwise pass it back as\n`?cursor=…` to fetch the next page.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RevisionView"
+            },
+            "description": "Revisions in this batch, newest first."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Token to fetch the next page, or `None` if there are no more\nrevisions."
+          }
+        }
+      },
+      "RevisionView": {
+        "type": "object",
+        "description": "Compact summary of a revision used by the list endpoint.\n\n`body_excerpt` is the first ~200 characters of the revision body. It's a\nrendered string (not bytes), counted by `chars`, so multi-byte runes are\nnot split halfway through.",
+        "required": [
+          "id",
+          "page_id",
+          "author_id",
+          "body_excerpt",
+          "created_at"
+        ],
+        "properties": {
+          "author_id": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "User who authored this revision."
+          },
+          "body_excerpt": {
+            "type": "string",
+            "description": "First ~200 characters of the body. Use the diff endpoint to compare\nthe full body against another revision."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the revision was committed."
+          },
+          "edit_summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional short note describing the edit (think Git commit message)."
+          },
+          "id": {
+            "$ref": "#/components/schemas/RevisionId",
+            "description": "Stable identifier."
+          },
+          "page_id": {
+            "$ref": "#/components/schemas/PageId",
+            "description": "Page this revision belongs to."
+          },
+          "parent_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RevisionId",
+                "description": "Previous revision in the page's history, or `None` for the first\nrevision."
+              }
+            ]
+          }
+        }
+      },
+      "UpdatePageRequest": {
+        "type": "object",
+        "description": "Body of `PUT /api/v1/pages/{slug}`.",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "New body. Always required — an update commits a new revision."
+          },
+          "edit_summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional short note describing the edit (think Git commit message)."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New title. Omitting it keeps the existing title."
+          }
+        }
+      },
+      "UserId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier for a [`crate::user::User`]."
+      },
+      "UserPayload": {
+        "type": "object",
+        "description": "JSON body for a successful login / `/me`.",
+        "required": [
+          "id",
+          "username",
+          "roles",
+          "permissions"
+        ],
+        "properties": {
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name (falls back to username at the UI layer)."
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Email, if any."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User ID (UUIDv7)."
+          },
+          "permissions": {
+            "type": "string",
+            "description": "Effective permission flags, pipe-separated (e.g. `\"READ | EDIT\"`).\nConvenience for the SPA so it doesn't need to re-evaluate the role\ntable."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Role names the user holds. Permission bits are not exposed on the\nwire to keep the surface stable across permission-set changes."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login handle."
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "CsrfToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-csrf-token",
+        "description": "Double-submit CSRF token matching the thewiki_csrf cookie."
+      },
+      "SessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "thewiki_session",
+        "description": "Opaque session cookie issued by POST /api/v1/auth/login."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "pages",
+      "description": "Page CRUD"
+    },
+    {
+      "name": "revisions",
+      "description": "Revision history + diffs"
+    },
+    {
+      "name": "auth",
+      "description": "Sessions, login, /me"
+    },
+    {
+      "name": "recent-changes",
+      "description": "Wiki-wide chronological edit feed"
+    }
+  ]
+}

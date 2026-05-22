@@ -29,6 +29,8 @@ pub struct Cli {
 pub enum Command {
     /// Start the HTTP server.
     Serve(ServeArgs),
+    /// Print the generated OpenAPI document as JSON.
+    Openapi,
     /// Inspect or validate configuration without booting the server.
     #[command(subcommand)]
     Config(ConfigCommand),

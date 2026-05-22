@@ -176,14 +176,20 @@ pub(super) async fn hydrate_page_view<S: AppStorage>(
 #[utoipa::path(
     post,
     path = "",
+    params(
+        ("cookie" = Option<String>, Header, description = "Optional session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`. Required only for authenticated edits; anonymous edits may omit them when enabled."),
+        ("x-csrf-token" = Option<String>, Header, description = "Double-submit CSRF token matching the `thewiki_csrf` cookie. Required only when a session cookie is present."),
+    ),
     request_body = CreatePageRequest,
     responses(
         (status = 201, description = "Page created", body = PageView),
         (status = 202, description = "Edit accepted but pending approval", body = PageView),
         (status = 400, description = "Invalid input", body = crate::error::ErrorBody),
         (status = 401, description = "Unauthenticated", body = crate::error::ErrorBody),
+        (status = 403, description = "CSRF token missing or invalid", body = crate::auth::error::AuthErrorBody),
         (status = 404, description = "Namespace not found", body = crate::error::ErrorBody),
         (status = 409, description = "Slug already taken", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
     ),
     tag = "pages",
 )]
@@ -247,6 +253,7 @@ pub async fn create_page<S: AppStorage>(
     responses(
         (status = 200, description = "Page", body = PageView),
         (status = 404, description = "Page not found", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
     ),
     tag = "pages",
 )]
@@ -274,13 +281,19 @@ pub async fn get_page<S: AppStorage>(
 #[utoipa::path(
     put,
     path = "/{slug}",
-    params(("slug" = String, Path, description = "URL slug within the default namespace")),
+    params(
+        ("slug" = String, Path, description = "URL slug within the default namespace"),
+        ("cookie" = Option<String>, Header, description = "Optional session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`. Required only for authenticated edits; anonymous edits may omit them when enabled."),
+        ("x-csrf-token" = Option<String>, Header, description = "Double-submit CSRF token matching the `thewiki_csrf` cookie. Required only when a session cookie is present."),
+    ),
     request_body = UpdatePageRequest,
     responses(
         (status = 200, description = "Page updated", body = PageView),
         (status = 202, description = "Edit accepted but pending approval", body = PageView),
         (status = 401, description = "Unauthenticated", body = crate::error::ErrorBody),
+        (status = 403, description = "CSRF token missing or invalid", body = crate::auth::error::AuthErrorBody),
         (status = 404, description = "Page not found", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
     ),
     tag = "pages",
 )]
@@ -343,12 +356,17 @@ pub async fn update_page<S: AppStorage>(
 #[utoipa::path(
     delete,
     path = "/{slug}",
-    params(("slug" = String, Path, description = "URL slug within the default namespace")),
+    params(
+        ("slug" = String, Path, description = "URL slug within the default namespace"),
+        ("cookie" = Option<String>, Header, description = "Optional session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`. Required only for authenticated edits; anonymous edits may omit them when enabled."),
+        ("x-csrf-token" = Option<String>, Header, description = "Double-submit CSRF token matching the `thewiki_csrf` cookie. Required only when a session cookie is present."),
+    ),
     responses(
         (status = 204, description = "Page deleted"),
         (status = 401, description = "Unauthenticated", body = crate::error::ErrorBody),
-        (status = 403, description = "Forbidden", body = crate::error::ErrorBody),
+        (status = 403, description = "CSRF token missing or invalid", body = crate::auth::error::AuthErrorBody),
         (status = 404, description = "Page not found", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
     ),
     tag = "pages",
 )]
@@ -379,6 +397,7 @@ pub async fn delete_page<S: AppStorage>(
     responses(
         (status = 200, description = "Page list", body = PageListResponse),
         (status = 404, description = "Namespace not found", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
     ),
     tag = "pages",
 )]

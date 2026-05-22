@@ -57,14 +57,19 @@ pub struct RevertRequest {
 #[utoipa::path(
     post,
     path = "/{slug}/revert",
-    params(("slug" = String, Path, description = "URL slug within the default namespace")),
+    params(
+        ("slug" = String, Path, description = "URL slug within the default namespace"),
+        ("cookie" = String, Header, description = "Session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`"),
+        ("x-csrf-token" = String, Header, description = "Double-submit CSRF token matching the `thewiki_csrf` cookie"),
+    ),
     request_body = RevertRequest,
     responses(
         (status = 200, description = "Page reverted; new revision committed", body = PageView),
         (status = 400, description = "Invalid input", body = crate::error::ErrorBody),
         (status = 401, description = "Unauthenticated", body = crate::error::ErrorBody),
-        (status = 403, description = "Forbidden", body = crate::error::ErrorBody),
+        (status = 403, description = "CSRF token missing or invalid", body = crate::auth::error::AuthErrorBody),
         (status = 404, description = "Page or revision not found", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
     ),
     tag = "revisions",
 )]

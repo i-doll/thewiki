@@ -32,6 +32,11 @@ use tower_http::{
 };
 use tracing::{Level, field};
 use utoipa::OpenApi;
+use utoipa::openapi::{
+    Components, OpenApi as OpenApiDoc,
+    path::HttpMethod,
+    security::{ApiKey, ApiKeyValue, SecurityRequirement, SecurityScheme},
+};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
@@ -52,6 +57,9 @@ pub const OPENAPI_JSON_PATH: &str = "/api/openapi.json";
 
 /// Path that serves the Swagger UI explorer.
 pub const SWAGGER_UI_PATH: &str = "/api/docs";
+
+const SESSION_COOKIE_SECURITY: &str = "SessionCookie";
+const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
 
 /// Aggregated OpenAPI document.
 ///
@@ -74,6 +82,153 @@ pub const SWAGGER_UI_PATH: &str = "/api/docs";
     )
 )]
 pub struct ApiDoc;
+
+/// Build the OpenAPI-aware REST router for the app-state backed endpoints.
+fn api_router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
+    OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .nest("/api/v1/pages", pages::router::<S>())
+        .nest("/api/v1/recent-changes", recent_changes::router::<S>())
+}
+
+/// Generate the full public REST OpenAPI document.
+///
+/// The app has two state roots today (`AppState<S>` for wiki data and
+/// `AuthState` for session endpoints), so auth routes are documented through a
+/// second OpenAPI router and then merged into the main document.
+pub fn openapi<S: AppStorage>() -> OpenApiDoc {
+    let (_, mut api_doc) = api_router::<S>().split_for_parts();
+    let (_, auth_doc) = OpenApiRouter::new()
+        .nest("/api/v1/auth", auth::routes::build_router())
+        .split_for_parts();
+    api_doc.merge(auth_doc);
+    finalize_openapi(&mut api_doc);
+    api_doc
+}
+
+fn finalize_openapi(api_doc: &mut OpenApiDoc) {
+    add_security_schemes(api_doc);
+    add_operation_security(api_doc);
+}
+
+fn add_security_schemes(api_doc: &mut OpenApiDoc) {
+    let components = api_doc.components.get_or_insert_with(Components::new);
+    components.add_security_scheme(
+        SESSION_COOKIE_SECURITY,
+        SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+            auth::session::SESSION_COOKIE,
+            "Opaque session cookie issued by POST /api/v1/auth/login.",
+        ))),
+    );
+    components.add_security_scheme(
+        CSRF_TOKEN_SECURITY,
+        SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+            auth::session::CSRF_HEADER,
+            "Double-submit CSRF token matching the thewiki_csrf cookie.",
+        ))),
+    );
+}
+
+fn add_operation_security(api_doc: &mut OpenApiDoc) {
+    set_operation_security(
+        api_doc,
+        "/api/v1/auth/login",
+        HttpMethod::Post,
+        optional_session_and_csrf_requirement(),
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/auth/logout",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/auth/me",
+        HttpMethod::Get,
+        vec![session_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/pages",
+        HttpMethod::Post,
+        optional_session_and_csrf_requirement(),
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/pages/{slug}",
+        HttpMethod::Put,
+        optional_session_and_csrf_requirement(),
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/pages/{slug}",
+        HttpMethod::Delete,
+        optional_session_and_csrf_requirement(),
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/pages/{slug}/revert",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+}
+
+fn session_requirement() -> SecurityRequirement {
+    SecurityRequirement::new(SESSION_COOKIE_SECURITY, Vec::<String>::new())
+}
+
+fn session_and_csrf_requirement() -> SecurityRequirement {
+    session_requirement().add(CSRF_TOKEN_SECURITY, Vec::<String>::new())
+}
+
+fn optional_session_and_csrf_requirement() -> Vec<SecurityRequirement> {
+    vec![
+        SecurityRequirement::default(),
+        session_and_csrf_requirement(),
+    ]
+}
+
+fn set_operation_security(
+    api_doc: &mut OpenApiDoc,
+    path: &str,
+    method: HttpMethod,
+    security: Vec<SecurityRequirement>,
+) {
+    let method_name = match &method {
+        HttpMethod::Get => "GET",
+        HttpMethod::Post => "POST",
+        HttpMethod::Put => "PUT",
+        HttpMethod::Delete => "DELETE",
+        HttpMethod::Options => "OPTIONS",
+        HttpMethod::Head => "HEAD",
+        HttpMethod::Patch => "PATCH",
+        HttpMethod::Trace => "TRACE",
+    };
+    let operation = api_doc
+        .paths
+        .paths
+        .get_mut(path)
+        .and_then(|item| match method {
+            HttpMethod::Get => item.get.as_mut(),
+            HttpMethod::Post => item.post.as_mut(),
+            HttpMethod::Put => item.put.as_mut(),
+            HttpMethod::Delete => item.delete.as_mut(),
+            HttpMethod::Options => item.options.as_mut(),
+            HttpMethod::Head => item.head.as_mut(),
+            HttpMethod::Patch => item.patch.as_mut(),
+            HttpMethod::Trace => item.trace.as_mut(),
+        });
+
+    if let Some(operation) = operation {
+        operation.security = Some(security);
+    } else {
+        tracing::warn!(
+            path,
+            method = method_name,
+            "OpenAPI operation not found for security annotation"
+        );
+    }
+}
 
 /// Span factory used by [`TraceLayer`].
 ///
@@ -162,9 +317,7 @@ pub fn build_with_state_with_rate_limit<S: AppStorage>(
     rate_limit_config: RateLimitConfig,
 ) -> Router {
     let rate_limit_state = RateLimitState::new(rate_limit_config, state.auth_state.clone());
-    let api_router: OpenApiRouter<AppState<S>> = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .nest("/api/v1/pages", pages::router::<S>())
-        .nest("/api/v1/recent-changes", recent_changes::router::<S>())
+    let api_router = api_router::<S>()
         .layer(middleware::from_fn(rate_limit::rate_limit_layer))
         .layer(axum::Extension(rate_limit_state));
 
@@ -198,19 +351,17 @@ pub fn build_auth_app_with_rate_limit(
     state: AuthState,
     rate_limit_config: RateLimitConfig,
 ) -> Router {
-    let auth_router = auth::routes::build_router();
     let rate_limit_state = RateLimitState::new(rate_limit_config, Some(state.clone()));
+    let auth_router: Router<AuthState> = auth::routes::build_router()
+        .layer(axum::middleware::from_fn(csrf::csrf_layer))
+        .layer(middleware::from_fn(rate_limit::rate_limit_layer))
+        .layer(axum::Extension(rate_limit_state))
+        .into();
 
     let router = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        .nest(
-            "/api/v1/auth",
-            auth_router
-                .layer(axum::middleware::from_fn(csrf::csrf_layer))
-                .layer(middleware::from_fn(rate_limit::rate_limit_layer))
-                .layer(axum::Extension(rate_limit_state)),
-        )
+        .nest("/api/v1/auth", auth_router)
         .layer(CookieManagerLayer::new())
         .with_state(state);
 
@@ -237,22 +388,22 @@ pub fn build_full<S: AppStorage>(
         app_state.auth_state.clone().or(Some(auth_state.clone())),
     );
     // Page CRUD + recent-changes + OpenAPI subrouter.
-    let api_router: OpenApiRouter<AppState<S>> = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .nest("/api/v1/pages", pages::router::<S>())
-        .nest("/api/v1/recent-changes", recent_changes::router::<S>())
+    let api_router = api_router::<S>()
         .layer(middleware::from_fn(csrf::csrf_layer))
         .layer(middleware::from_fn(rate_limit::rate_limit_layer))
         .layer(axum::Extension(rate_limit_state.clone()));
-    let (api_router, api_doc) = api_router.split_for_parts();
+    let (api_router, _) = api_router.split_for_parts();
+    let api_doc = openapi::<S>();
     let swagger = SwaggerUi::new(SWAGGER_UI_PATH).url(OPENAPI_JSON_PATH, api_doc);
     let stateful_api = api_router.with_state(app_state);
 
     // Auth subrouter.
-    let auth_router = auth::routes::build_router()
+    let auth_router: Router = auth::routes::build_router()
         .layer(middleware::from_fn(csrf::csrf_layer))
         .layer(middleware::from_fn(rate_limit::rate_limit_layer))
         .layer(axum::Extension(rate_limit_state))
-        .with_state(auth_state);
+        .with_state(auth_state)
+        .into();
 
     let mut router = Router::new()
         .merge(stateful_api)

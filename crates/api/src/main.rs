@@ -28,8 +28,18 @@ async fn main() -> anyhow::Result<ExitCode> {
 
     match cli.command {
         cli::Command::Serve(args) => serve(args).await.map(|()| ExitCode::SUCCESS),
+        cli::Command::Openapi => run_openapi(),
         cli::Command::Config(cmd) => Ok(run_config(cmd)),
     }
+}
+
+/// Emit the generated OpenAPI document. This is used by CI to ensure
+/// `docs/openapi.json` stays in sync with handler annotations.
+fn run_openapi() -> anyhow::Result<ExitCode> {
+    let doc = app::openapi::<SqliteStorage>();
+    let json = serde_json::to_string_pretty(&doc).context("serialising OpenAPI document")?;
+    println!("{json}");
+    Ok(ExitCode::SUCCESS)
 }
 
 async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {

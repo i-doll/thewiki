@@ -53,6 +53,7 @@ pub struct RecentChangesResponse {
 
 /// Query parameters for `GET /api/v1/recent-changes`.
 #[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct RecentChangesQuery {
     /// RFC 3339 timestamp. Only revisions committed at or after this point
     /// are returned. Omit to include all history.

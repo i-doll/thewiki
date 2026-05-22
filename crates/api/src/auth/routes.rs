@@ -19,8 +19,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
-use axum::{Router, response::Response};
+use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use thewiki_core::Username;
 use thewiki_core::{Permissions, Role, User, UserId};
@@ -28,6 +27,9 @@ use thewiki_storage::StorageError;
 use thewiki_storage::repo::{RoleRepository, SessionRepository, UserRepository};
 use time::OffsetDateTime;
 use tower_cookies::Cookies;
+use utoipa::ToSchema;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::auth::error::AuthError;
 use crate::auth::extractors::AuthSession;
@@ -40,7 +42,7 @@ use crate::auth::state::AuthState;
 use crate::config::RegistrationPolicy;
 
 /// JSON body for [`login`].
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct LoginRequest {
     /// Login handle. Must validate as a [`Username`](thewiki_core::Username);
     /// invalid strings short-circuit to 401 with the generic error to avoid
@@ -51,7 +53,7 @@ pub struct LoginRequest {
 }
 
 /// JSON body for a successful login / `/me`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct UserPayload {
     /// User ID (UUIDv7).
     pub id: uuid::Uuid,
@@ -102,7 +104,24 @@ fn format_permissions(p: Permissions) -> String {
 /// time per attempt is therefore dominated by the configured Argon2 cost
 /// regardless of which arm fires.
 ///
-/// TODO(#35): per-IP rate limiting goes here. Out of scope for #13.
+/// Rate limiting is applied by the router middleware before this handler runs.
+#[utoipa::path(
+    post,
+    path = "/login",
+    params(
+        ("cookie" = Option<String>, Header, description = "Optional existing session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`. Required only when a session cookie is present."),
+        ("x-csrf-token" = Option<String>, Header, description = "Double-submit CSRF token matching the `thewiki_csrf` cookie. Required only when a session cookie is present."),
+    ),
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Authenticated user and session cookies", body = UserPayload),
+        (status = 401, description = "Invalid credentials", body = crate::auth::error::AuthErrorBody),
+        (status = 403, description = "CSRF token missing or invalid when a session cookie is present", body = crate::auth::error::AuthErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
+        (status = 500, description = "Authentication storage or hashing failure", body = crate::auth::error::AuthErrorBody),
+    ),
+    tag = "auth",
+)]
 pub async fn login(
     State(state): State<AuthState>,
     cookies: Cookies,
@@ -203,6 +222,22 @@ pub async fn login(
 ///
 /// Requires a valid session. The CSRF layer also requires the matching
 /// `X-CSRF-Token` header because logout is a state-mutating call.
+#[utoipa::path(
+    post,
+    path = "/logout",
+    params(
+        ("cookie" = String, Header, description = "Session and CSRF cookies: `thewiki_session=...; thewiki_csrf=...`"),
+        ("x-csrf-token" = String, Header, description = "Double-submit CSRF token matching the `thewiki_csrf` cookie"),
+    ),
+    responses(
+        (status = 204, description = "Session revoked and cookies cleared"),
+        (status = 401, description = "Missing or expired session", body = crate::auth::error::AuthErrorBody),
+        (status = 403, description = "CSRF token missing or invalid", body = crate::auth::error::AuthErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
+        (status = 500, description = "Authentication storage failure", body = crate::auth::error::AuthErrorBody),
+    ),
+    tag = "auth",
+)]
 pub async fn logout(
     State(state): State<AuthState>,
     cookies: Cookies,
@@ -220,6 +255,18 @@ pub async fn logout(
 }
 
 /// `GET /api/v1/auth/me` — return the authenticated user payload.
+#[utoipa::path(
+    get,
+    path = "/me",
+    params(("cookie" = String, Header, description = "`thewiki_session` cookie")),
+    responses(
+        (status = 200, description = "Authenticated user", body = UserPayload),
+        (status = 401, description = "Missing or expired session", body = crate::auth::error::AuthErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
+        (status = 500, description = "Authentication storage failure", body = crate::auth::error::AuthErrorBody),
+    ),
+    tag = "auth",
+)]
 pub async fn me(
     State(state): State<AuthState>,
     auth: AuthSession,
@@ -240,17 +287,17 @@ pub async fn me(
 /// Kept narrow on purpose — operators tune fifteen knobs in `thewiki.toml`,
 /// but only these two affect what the SPA shows the user *before* they have
 /// a session.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AuthPolicyPayload {
     /// Account registration policy: `"open"`, `"invite"`, or `"closed"`.
-    pub registration: &'static str,
+    pub registration: String,
     /// Whether anonymous (logged-out) callers can submit edits.
     pub anonymous_edits: bool,
     /// Whether edits land in a moderator approval queue. The exact scope
     /// (`"none"`, `"anonymous"`, `"new-users"`, `"all"`) is exposed so the
     /// SPA can show a "your edit will be reviewed" hint before the user
     /// clicks save.
-    pub approval_required_for: &'static str,
+    pub approval_required_for: String,
 }
 
 /// `GET /api/v1/auth/policy` — publish the operator-configured auth shape
@@ -258,6 +305,15 @@ pub struct AuthPolicyPayload {
 ///
 /// Always available (no auth required) — by design, since the answer is what
 /// the UI needs *before* the user has a session.
+#[utoipa::path(
+    get,
+    path = "/policy",
+    responses(
+        (status = 200, description = "Auth policy", body = AuthPolicyPayload),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
+    ),
+    tag = "auth",
+)]
 pub async fn policy(State(state): State<AuthState>) -> Json<AuthPolicyPayload> {
     let registration = match state.config.registration {
         RegistrationPolicy::Open => "open",
@@ -271,19 +327,19 @@ pub async fn policy(State(state): State<AuthState>) -> Json<AuthPolicyPayload> {
         crate::config::ApprovalScope::All => "all",
     };
     Json(AuthPolicyPayload {
-        registration,
+        registration: registration.to_string(),
         anonymous_edits: state.config.anonymous_edits,
-        approval_required_for: approval,
+        approval_required_for: approval.to_string(),
     })
 }
 
 /// Build the auth router. Mounted under `/api/v1/auth` by [`crate::app::build_with_state`].
-pub fn build_router() -> Router<AuthState> {
-    Router::new()
-        .route("/login", post(login))
-        .route("/logout", post(logout))
-        .route("/me", get(me))
-        .route("/policy", get(policy))
+pub fn build_router() -> OpenApiRouter<AuthState> {
+    OpenApiRouter::new()
+        .routes(routes!(login))
+        .routes(routes!(logout))
+        .routes(routes!(me))
+        .routes(routes!(policy))
 }
 
 /// Look up a user's stored PHC password hash. `None` means the user exists
