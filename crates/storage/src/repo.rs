@@ -619,3 +619,97 @@ pub fn clamp_limit(limit: u32) -> u32 {
     let l = if limit == 0 { DEFAULT_PAGE_SIZE } else { limit };
     l.min(MAX_PAGE_SIZE)
 }
+
+/// A row in the wikilink graph: "page X links to (namespace, slug)".
+///
+/// Populated by the API layer's create/update path from
+/// `MarkdownRenderer::extract_links`. The pair `(target_namespace_slug,
+/// target_page_slug)` is stored rather than a page ID so dangling references
+/// (links to not-yet-created pages, i.e. redlinks) survive and so target
+/// deletion doesn't immediately scrub history.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageLink {
+    /// Source page that contains the `[[Target]]`.
+    pub source_page_id: PageId,
+    /// Namespace slug of the link target.
+    pub target_namespace_slug: String,
+    /// Page slug of the link target.
+    pub target_page_slug: String,
+}
+
+/// A backlink row enriched with the source page's metadata for direct
+/// rendering by the API layer.
+///
+/// Produced by [`PageLinkRepository::list_backlinks_to`]: each row is a
+/// page that links *to* the queried target, joined against the `pages`
+/// table so the response can render a clickable list without follow-up
+/// lookups.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BacklinkRow {
+    /// Source page ID — the page that contains the wikilink.
+    pub source_page_id: PageId,
+    /// Namespace ID the source page lives in.
+    pub source_namespace_id: NamespaceId,
+    /// Namespace slug the source page lives in (joined for convenience).
+    pub source_namespace_slug: String,
+    /// URL slug of the source page.
+    pub source_page_slug: String,
+    /// Human-readable title of the source page.
+    pub source_page_title: String,
+}
+
+/// Persistence operations for the outbound-wikilink graph (#30).
+///
+/// The single source of truth is the `page_links` table, populated by the
+/// API layer on page create / update. The query side is one method:
+/// [`list_backlinks_to`](Self::list_backlinks_to) — "who links to this
+/// `(namespace, slug)`?".
+///
+/// Mutation lives behind two methods:
+///
+/// * [`replace_for_source`](Self::replace_for_source) — atomically swap the
+///   set of outbound links for a given source page. Called from the page
+///   create / update path so the graph always reflects the current
+///   revision's `[[Target]]` set.
+/// * [`delete_for_source`](Self::delete_for_source) — drop every row for a
+///   source page (the `ON DELETE CASCADE` on `page_links.source_page_id`
+///   already handles physical deletion; this is the explicit handle).
+pub trait PageLinkRepository: Send + Sync {
+    /// Replace every outbound link for `source_page_id` with `links`.
+    ///
+    /// Idempotent: the existing rows are deleted before the new ones are
+    /// inserted, so callers do not need to track the previous state. The
+    /// caller passes the **resolved** `(target_namespace_slug,
+    /// target_page_slug)` pairs; the repository does not parse Markdown.
+    fn replace_for_source(
+        &self,
+        source_page_id: PageId,
+        links: &[PageLink],
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Drop every outbound link for `source_page_id`. Used when the page is
+    /// emptied or deleted out-of-band.
+    fn delete_for_source(
+        &self,
+        source_page_id: PageId,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// List the pages that link to the `(namespace_slug, page_slug)` pair.
+    ///
+    /// Order is `(source_page_id ASC)` — stable, deterministic, and aligned
+    /// with the UUIDv7 byte prefix so a btree scan stays sequential. The
+    /// cursor encodes the last `source_page_id` returned so the next call
+    /// resumes strictly after it.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::InvalidInput`] if `cursor` is malformed for this
+    /// backend.
+    fn list_backlinks_to(
+        &self,
+        target_namespace_slug: &str,
+        target_page_slug: &str,
+        cursor: Option<Cursor>,
+        limit: u32,
+    ) -> impl Future<Output = Result<PageSlice<BacklinkRow>, StorageError>> + Send;
+}

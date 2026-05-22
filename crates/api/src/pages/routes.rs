@@ -10,9 +10,13 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde_json::json;
+use thewiki_core::id::NamespaceId;
+use thewiki_core::render::Renderer;
 use thewiki_core::{ContentFormat, NamespaceSlug, Page, PageId, ProtectionLevel, Revision};
+use thewiki_render::MarkdownRenderer;
 use thewiki_storage::repo::{
-    Cursor, NamespaceRepository, PageAuditMutation, PageRepository, RevisionRepository,
+    BacklinkRow, Cursor, NamespaceRepository, PageAuditMutation, PageLink, PageLinkRepository,
+    PageRepository, PageSlice, RevisionRepository,
 };
 use time::OffsetDateTime;
 
@@ -21,8 +25,10 @@ use crate::error::ApiError;
 use crate::extractors::EditorExtractor;
 use crate::pages::audit::page_event;
 use crate::pages::dto::{
-    CreatePageRequest, ListPagesQuery, PageListItem, PageListResponse, PageView, UpdatePageRequest,
+    BacklinkItem, BacklinkListResponse, CreatePageRequest, ListBacklinksQuery, ListPagesQuery,
+    PageListItem, PageListResponse, PageView, UpdatePageRequest,
 };
+use crate::render as page_render;
 use crate::state::{AppState, AppStorage};
 
 /// Default namespace slug used when a request doesn't carry one.
@@ -132,7 +138,11 @@ pub(super) async fn resolve_namespace<S: AppStorage>(
 }
 
 /// Build a [`PageView`] for a freshly-loaded page, joining in the namespace
-/// slug and the current revision's body.
+/// slug, the current revision's body, and the rendered HTML (`content_html`).
+///
+/// Rendering goes through [`crate::render::render_markdown`] so wikilinks
+/// are resolved against the page repository — missing targets render with
+/// `class="redlink"` so the SPA can style them without a second round-trip.
 pub(super) async fn hydrate_page_view<S: AppStorage>(
     state: &AppState<S>,
     page: Page,
@@ -151,6 +161,21 @@ pub(super) async fn hydrate_page_view<S: AppStorage>(
             .unwrap_or_default(),
         None => String::new(),
     };
+    let content_html = if content.trim().is_empty() {
+        String::new()
+    } else {
+        let renderer = MarkdownRenderer::new();
+        page_render::render_markdown(
+            state.storage.as_ref(),
+            &renderer,
+            page.namespace_id,
+            &namespace_slug,
+            &page.slug,
+            &content,
+        )
+        .await?
+        .html
+    };
     Ok(PageView {
         id: page.id,
         namespace_id: page.namespace_id,
@@ -159,9 +184,55 @@ pub(super) async fn hydrate_page_view<S: AppStorage>(
         title: page.title,
         current_revision_id: page.current_revision_id,
         content,
+        content_html,
         created_at: page.created_at,
         updated_at: page.updated_at,
     })
+}
+
+/// Extract every `[[Target]]` wikilink from `source` and persist the set as
+/// rows in `page_links` for the source page.
+///
+/// We treat every reference as `(namespace_slug, target_slug)` against the
+/// **source page's** namespace — M0 is single-namespace (#28 lights up
+/// cross-namespace addressing). Targets are stored verbatim so a wikilink
+/// to a not-yet-created page (a redlink) still produces a row and the
+/// backlink will appear the moment the target is created.
+async fn update_page_links<S: AppStorage>(
+    state: &AppState<S>,
+    source_page_id: PageId,
+    namespace_id: NamespaceId,
+    namespace_slug: &str,
+    body: &str,
+) -> Result<(), ApiError> {
+    let _ = namespace_id;
+    let renderer = MarkdownRenderer::new();
+    let links = renderer.extract_links(body);
+    // De-duplicate by `(namespace_slug, target_slug)` — a page that links
+    // to the same target multiple times still maps to one row.
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let rows: Vec<PageLink> = links
+        .into_iter()
+        .filter(|l| !l.target.trim().is_empty())
+        .filter_map(|l| {
+            let key = (namespace_slug.to_string(), l.target.clone());
+            if seen.insert(key) {
+                Some(PageLink {
+                    source_page_id,
+                    target_namespace_slug: namespace_slug.to_string(),
+                    target_page_slug: l.target,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+    state
+        .storage
+        .page_links()
+        .replace_for_source(source_page_id, &rows)
+        .await?;
+    Ok(())
 }
 
 /// `POST /api/v1/pages` — create a page plus its initial revision.
@@ -255,6 +326,7 @@ pub async fn create_page<S: AppStorage>(
         format!("{namespace_label}/{}", page.slug),
         metadata,
     );
+    let live_revision_body = revision.body.clone();
     state
         .storage
         .commit_page_audit(
@@ -265,6 +337,20 @@ pub async fn create_page<S: AppStorage>(
             audit,
         )
         .await?;
+
+    // Replace the outbound wikilink set for this page. We do this only on
+    // the live-publish branch — queued edits don't change the page's
+    // current revision so they don't change its outbound graph either.
+    if live {
+        update_page_links(
+            &state,
+            page.id,
+            namespace.id,
+            namespace_label.as_str(),
+            &live_revision_body,
+        )
+        .await?;
+    }
 
     let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
     Ok((status, Json(view)))
@@ -390,6 +476,7 @@ pub async fn update_page<S: AppStorage>(
         format!("{namespace_label}/{}", page.slug),
         metadata,
     );
+    let live_revision_body = revision.body.clone();
     let mutation = if live {
         PageAuditMutation::CommitRevision {
             page: page.clone(),
@@ -399,6 +486,19 @@ pub async fn update_page<S: AppStorage>(
         PageAuditMutation::AuditOnly
     };
     state.storage.commit_page_audit(mutation, audit).await?;
+
+    // Refresh the outbound wikilink set whenever the page is republished
+    // live. Queued edits keep the old set until they're promoted.
+    if live {
+        update_page_links(
+            &state,
+            page.id,
+            namespace.id,
+            namespace_label.as_str(),
+            &live_revision_body,
+        )
+        .await?;
+    }
 
     let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
     Ok((status, Json(view)))
@@ -507,6 +607,68 @@ pub async fn list_pages<S: AppStorage>(
         .collect();
 
     Ok(Json(PageListResponse {
+        items,
+        next_cursor: slice.next.map(|c| c.0),
+    }))
+}
+
+/// `GET /api/v1/pages/{slug}/backlinks` — list the pages that link to
+/// `{slug}` via a `[[WikiLink]]`.
+///
+/// Source of truth is the `page_links` table populated on every live page
+/// create / update (#30). Reads are open like the other page reads; the
+/// response surface mirrors [`PageListResponse`] for paging consistency.
+///
+/// Returns an empty list when the target has no inbound links. We do **not**
+/// 404 on missing targets — a redlink with backlinks is a legitimate state
+/// (the editor can create the page knowing who references it).
+#[utoipa::path(
+    get,
+    path = "/{slug}/backlinks",
+    params(
+        ("slug" = String, Path, description = "URL slug within the default namespace"),
+        ListBacklinksQuery,
+    ),
+    responses(
+        (status = 200, description = "Backlinks list", body = BacklinkListResponse),
+        (status = 404, description = "Namespace not found", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
+    ),
+    tag = "pages",
+)]
+pub async fn list_backlinks<S: AppStorage>(
+    State(state): State<AppState<S>>,
+    Path(slug): Path<String>,
+    Query(query): Query<ListBacklinksQuery>,
+) -> Result<Json<BacklinkListResponse>, ApiError> {
+    let namespace_slug = parse_namespace_slug(None)?;
+    // 404 on missing namespace, but not on missing target — see doc comment.
+    let _ns = resolve_namespace(&state, &namespace_slug).await?;
+
+    let limit = match query.limit {
+        Some(0) | None => state.route_config.default_page_size,
+        Some(n) => n,
+    };
+    let cursor = query.cursor.map(Cursor);
+
+    let slice: PageSlice<BacklinkRow> = state
+        .storage
+        .page_links()
+        .list_backlinks_to(namespace_slug.as_str(), &slug, cursor, limit)
+        .await?;
+
+    let items = slice
+        .items
+        .into_iter()
+        .map(|row| BacklinkItem {
+            page_id: row.source_page_id,
+            namespace_slug: row.source_namespace_slug,
+            page_slug: row.source_page_slug,
+            title: row.source_page_title,
+        })
+        .collect();
+
+    Ok(Json(BacklinkListResponse {
         items,
         next_cursor: slice.next.map(|c| c.0),
     }))

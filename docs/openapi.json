@@ -1025,6 +1025,79 @@
         ]
       }
     },
+    "/api/v1/pages/{slug}/backlinks": {
+      "get": {
+        "tags": [
+          "pages"
+        ],
+        "summary": "`GET /api/v1/pages/{slug}/backlinks` — list the pages that link to\n`{slug}` via a `[[WikiLink]]`.",
+        "description": "Source of truth is the `page_links` table populated on every live page\ncreate / update (#30). Reads are open like the other page reads; the\nresponse surface mirrors [`PageListResponse`] for paging consistency.\n\nReturns an empty list when the target has no inbound links. We do **not**\n404 on missing targets — a redlink with backlinks is a legitimate state\n(the editor can create the page knowing who references it).",
+        "operationId": "list_backlinks",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "URL slug within the default namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call. Omit to start from the\nbeginning.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to\n[`thewiki_storage::repo::MAX_PAGE_SIZE`]. `0`/missing falls back to\nthe route-level default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Backlinks list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacklinkListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/pages/{slug}/diff": {
       "get": {
         "tags": [
@@ -1509,6 +1582,57 @@
           }
         }
       },
+      "BacklinkItem": {
+        "type": "object",
+        "description": "A single inbound link surfaced by\n`GET /api/v1/pages/{slug}/backlinks` (#30).",
+        "required": [
+          "page_id",
+          "namespace_slug",
+          "page_slug",
+          "title"
+        ],
+        "properties": {
+          "namespace_slug": {
+            "type": "string",
+            "description": "Namespace slug the source page lives in."
+          },
+          "page_id": {
+            "$ref": "#/components/schemas/PageId",
+            "description": "Stable identifier of the source page."
+          },
+          "page_slug": {
+            "type": "string",
+            "description": "URL slug of the source page."
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable title of the source page."
+          }
+        }
+      },
+      "BacklinkListResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/pages/{slug}/backlinks` (#30).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BacklinkItem"
+            },
+            "description": "Pages that link to the queried target, ordered `(source_page_id ASC)`."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Token to fetch the next page, or `None` if the listing is exhausted."
+          }
+        }
+      },
       "CreatePageRequest": {
         "type": "object",
         "description": "Body of `POST /api/v1/pages`.",
@@ -1744,7 +1868,7 @@
       },
       "PageView": {
         "type": "object",
-        "description": "A single page returned by the read endpoints.\n\n`content` is the body of the current revision (joined in for convenience).\nListing endpoints use the lighter [`PageListItem`] instead so they don't\nhave to ship every page's full body.",
+        "description": "A single page returned by the read endpoints.\n\n`content` is the body of the current revision (joined in for\nconvenience); `content_html` is the same body rendered through\n[`thewiki_render::MarkdownRenderer`] with all `[[WikiLink]]`s resolved\nagainst the page repository (so missing targets are styled as redlinks)\nand the result sanitised by ammonia. The HTML is safe to embed.\n`content_html` was added in #30 — before that the API returned only the\nraw body and the SPA rendered it client-side.\n\nListing endpoints use the lighter [`PageListItem`] instead so they don't\nhave to ship every page's full body.",
         "required": [
           "id",
           "namespace_id",
@@ -1752,6 +1876,7 @@
           "slug",
           "title",
           "content",
+          "content_html",
           "created_at",
           "updated_at"
         ],
@@ -1759,6 +1884,10 @@
           "content": {
             "type": "string",
             "description": "Body of the current revision, or empty string if no revision exists."
+          },
+          "content_html": {
+            "type": "string",
+            "description": "Rendered, sanitised HTML of [`Self::content`].\n\nEmpty when `content` is empty. Wikilinks are resolved against the\npage repository: missing targets render with `class=\"redlink\"` and\na URL pointing at the create form (`/wiki/.../edit?new=1`)."
           },
           "created_at": {
             "type": "string",

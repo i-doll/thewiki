@@ -41,7 +41,14 @@ pub struct UpdatePageRequest {
 
 /// A single page returned by the read endpoints.
 ///
-/// `content` is the body of the current revision (joined in for convenience).
+/// `content` is the body of the current revision (joined in for
+/// convenience); `content_html` is the same body rendered through
+/// [`thewiki_render::MarkdownRenderer`] with all `[[WikiLink]]`s resolved
+/// against the page repository (so missing targets are styled as redlinks)
+/// and the result sanitised by ammonia. The HTML is safe to embed.
+/// `content_html` was added in #30 — before that the API returned only the
+/// raw body and the SPA rendered it client-side.
+///
 /// Listing endpoints use the lighter [`PageListItem`] instead so they don't
 /// have to ship every page's full body.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -63,6 +70,12 @@ pub struct PageView {
     pub current_revision_id: Option<RevisionId>,
     /// Body of the current revision, or empty string if no revision exists.
     pub content: String,
+    /// Rendered, sanitised HTML of [`Self::content`].
+    ///
+    /// Empty when `content` is empty. Wikilinks are resolved against the
+    /// page repository: missing targets render with `class="redlink"` and
+    /// a URL pointing at the create form (`/wiki/.../edit?new=1`).
+    pub content_html: String,
     /// When the page row was first created.
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
@@ -111,6 +124,44 @@ pub struct ListPagesQuery {
     /// Namespace prefix routing lands with #28.
     #[serde(default)]
     pub namespace: Option<String>,
+    /// Opaque cursor returned by a previous call. Omit to start from the
+    /// beginning.
+    #[serde(default)]
+    pub cursor: Option<String>,
+    /// Page size. Clamped to
+    /// [`thewiki_storage::repo::MAX_PAGE_SIZE`]. `0`/missing falls back to
+    /// the route-level default.
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// A single inbound link surfaced by
+/// `GET /api/v1/pages/{slug}/backlinks` (#30).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct BacklinkItem {
+    /// Stable identifier of the source page.
+    pub page_id: PageId,
+    /// Namespace slug the source page lives in.
+    pub namespace_slug: String,
+    /// URL slug of the source page.
+    pub page_slug: String,
+    /// Human-readable title of the source page.
+    pub title: String,
+}
+
+/// Response from `GET /api/v1/pages/{slug}/backlinks` (#30).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct BacklinkListResponse {
+    /// Pages that link to the queried target, ordered `(source_page_id ASC)`.
+    pub items: Vec<BacklinkItem>,
+    /// Token to fetch the next page, or `None` if the listing is exhausted.
+    pub next_cursor: Option<String>,
+}
+
+/// Query parameters for `GET /api/v1/pages/{slug}/backlinks`.
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListBacklinksQuery {
     /// Opaque cursor returned by a previous call. Omit to start from the
     /// beginning.
     #[serde(default)]

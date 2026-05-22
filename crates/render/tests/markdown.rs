@@ -174,15 +174,21 @@ fn task_list_renders_checkboxes() {
 }
 
 #[test]
-fn extract_links_returns_empty_for_v1() {
-    // `[[WikiLink]]` extraction lands in M1; v1 contract is an empty Vec.
+fn extract_links_ignores_non_wikilink_syntax() {
+    // Plain text and standard `[label](url)` Markdown links never count as
+    // wikilinks. The dedicated `[[Target]]` extraction is exercised in the
+    // `tests/wikilinks.rs` suite added by #30.
     let r = MarkdownRenderer::new();
-    assert!(r.extract_links("[[Foo]] and [[Bar|baz]]").is_empty());
     assert!(r.extract_links("plain text").is_empty());
+    assert!(
+        r.extract_links("[ext](https://example.com)").is_empty(),
+        "standard Markdown links must not count as wikilinks"
+    );
 }
 
 #[test]
-fn outbound_links_are_empty_for_v1() {
+fn outbound_links_skip_standard_markdown_links() {
+    // Standard `[label](url)` links never count as outbound wikilinks.
     let doc = render("[ext](https://example.com) and a paragraph");
     assert!(doc.outbound_links.is_empty());
 }

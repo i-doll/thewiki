@@ -2323,6 +2323,7 @@ dependencies = [
  "sqlx",
  "subtle",
  "thewiki-core",
+ "thewiki-render",
  "thewiki-storage",
  "thiserror",
  "time",

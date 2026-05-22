@@ -10,7 +10,9 @@
 //!   figures, super/subscript, and the `s`/`del`/`ins` strikethrough crew.
 //!   No `<style>`, no `<iframe>`, no `<script>`.
 //! - **Attributes**:
-//!   - `a` — `href`, `title` (`rel` is force-set by `link_rel`)
+//!   - `a` — `href`, `title`, `class` (`rel` is force-set by `link_rel`).
+//!     The `class` allowance is what makes the `redlink` styling for missing
+//!     wikilinks survive sanitisation (#30).
 //!   - `img` — `src`, `alt`, `title`, `width`, `height`
 //!   - `code` — `class` (language hints from fenced code blocks)
 //!   - `td`/`th` — `align` (table-column alignment)
@@ -83,7 +85,11 @@ fn build() -> Builder<'static> {
     // We also do not allow `target` — it's unnecessary for a wiki and lets
     // authors break out of the tab without us getting a say (rel=noopener
     // would still apply, but the UX surprise is the actual issue).
-    tag_attributes.insert("a", ["href", "title"].into_iter().collect());
+    // `class` is permitted so the `redlink` styling applied to missing
+    // wikilinks (#30) survives the sanitiser. Aside from that, the wiki has
+    // no use for `<a>` classes — authors writing raw HTML get the class
+    // stripped on every other element by the generic allowlist below.
+    tag_attributes.insert("a", ["href", "title", "class"].into_iter().collect());
     tag_attributes.insert(
         "img",
         ["src", "alt", "title", "width", "height"]

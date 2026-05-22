@@ -34,6 +34,7 @@ pub fn router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
             routes::update_page,
             routes::delete_page,
         ))
+        .routes(routes!(routes::list_backlinks))
         .routes(routes!(revisions::list_revisions))
         .routes(routes!(revisions::diff_revisions))
         .routes(routes!(revert::revert_page))

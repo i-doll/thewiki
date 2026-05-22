@@ -20,8 +20,9 @@ use std::sync::Arc;
 use axum::extract::FromRef;
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
-    AuditLogRepository, NamespaceRepository, NewAuditLogEntry, PageAuditMutation, PageRepository,
-    RecentChangesRepository, RevisionRepository, UserRepository,
+    AuditLogRepository, NamespaceRepository, NewAuditLogEntry, PageAuditMutation,
+    PageLinkRepository, PageRepository, RecentChangesRepository, RevisionRepository,
+    UserRepository,
 };
 
 use crate::auth::AuthState;
@@ -59,6 +60,10 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     type Users<'a>: UserRepository + 'a
     where
         Self: 'a;
+    /// Page-link (wikilink graph) repository borrowed from this handle.
+    type PageLinks<'a>: PageLinkRepository + 'a
+    where
+        Self: 'a;
 
     /// Borrow a [`PageRepository`].
     fn pages(&self) -> Self::Pages<'_>;
@@ -72,6 +77,8 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     fn audit_log(&self) -> Self::AuditLog<'_>;
     /// Borrow a [`UserRepository`].
     fn users(&self) -> Self::Users<'_>;
+    /// Borrow a [`PageLinkRepository`] (powers backlinks API, #30).
+    fn page_links(&self) -> Self::PageLinks<'_>;
 
     /// Commit a page mutation and its required audit row atomically.
     fn commit_page_audit(
@@ -88,6 +95,7 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     type RecentChanges<'a> = thewiki_storage::sqlite::SqliteRecentChangesRepository<'a>;
     type AuditLog<'a> = thewiki_storage::sqlite::SqliteAuditLogRepository<'a>;
     type Users<'a> = thewiki_storage::sqlite::SqliteUserRepository<'a>;
+    type PageLinks<'a> = thewiki_storage::sqlite::SqlitePageLinkRepository<'a>;
 
     fn pages(&self) -> Self::Pages<'_> {
         Self::pages(self)
@@ -106,6 +114,9 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     }
     fn users(&self) -> Self::Users<'_> {
         Self::users(self)
+    }
+    fn page_links(&self) -> Self::PageLinks<'_> {
+        Self::page_links(self)
     }
 
     fn commit_page_audit(
