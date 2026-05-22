@@ -17,6 +17,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -26,17 +27,28 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use thewiki_api::AppState;
 use thewiki_api::app;
+use thewiki_api::auth::password::Argon2Hasher;
+use thewiki_api::auth::state::AuthState;
+use thewiki_api::config::Argon2Config;
 use thewiki_core::{EmailAddress, Namespace, NamespaceId, NamespaceSlug, User, UserId, Username};
-use thewiki_storage::repo::{NamespaceRepository, RevisionRepository, UserRepository};
+use thewiki_storage::repo::{
+    NamespaceRepository, RevisionRepository, SessionRepository, UserRepository,
+};
 use thewiki_storage::sqlite::{SqliteOptions, SqliteStorage};
 use time::OffsetDateTime;
 use tower::ServiceExt;
 
 /// Bring up a fresh router + storage handle backed by in-memory SQLite, with
-/// the `Main` namespace + a tester user pre-seeded. The storage handle is
-/// returned alongside the router so tests can assert against the database
-/// directly (e.g. revision parent pointers).
-async fn fresh_app() -> (Router, UserId, SqliteStorage) {
+/// the `Main` namespace + a tester user pre-seeded. The handle is returned
+/// alongside the router so tests can assert against the database directly
+/// (e.g. revision parent pointers), and a session cookie value for the tester
+/// is returned so requests can authenticate.
+///
+/// The revert endpoint is gated on [`thewiki_api::extractors::RequireAuth`],
+/// which after the configurable-auth wiring (#14) demands a real session
+/// cookie — anonymous edits stay disabled (the safe default), so tests drive a
+/// pre-seeded session rather than the retired `X-User-Id` header.
+async fn fresh_app() -> (Router, String, SqliteStorage) {
     let storage = SqliteStorage::new(
         "sqlite::memory:",
         SqliteOptions {
@@ -73,9 +85,38 @@ async fn fresh_app() -> (Router, UserId, SqliteStorage) {
         .await
         .expect("seed test user");
 
-    let state = AppState::new(storage.clone());
+    let auth_cfg = thewiki_api::config::Config::defaults().auth;
+    let hasher = Arc::new(
+        Argon2Hasher::new(Argon2Config {
+            memory_kib: 19_456,
+            iterations: 2,
+            parallelism: 1,
+        })
+        .expect("hasher"),
+    );
+    let auth_state = AuthState::new(
+        storage.clone(),
+        hasher,
+        Duration::from_secs(60 * 60),
+        false,
+        auth_cfg.clone(),
+    );
+    let state = AppState::new(storage.clone(), auth_cfg).with_auth_state(auth_state);
     let router = app::build_with_state(state);
-    (router, user.id, storage)
+    let session = seed_session(&storage, user.id).await;
+    (router, session, storage)
+}
+
+/// Pre-create a session row for `user_id` and return the cookie value to send
+/// on subsequent requests. Bypasses the login handler so tests don't have to
+/// hash a password.
+async fn seed_session(storage: &SqliteStorage, user_id: UserId) -> String {
+    let session = storage
+        .sessions()
+        .create(user_id, Duration::from_secs(60 * 60), None, None)
+        .await
+        .expect("seed session");
+    session.id.into_uuid().to_string()
 }
 
 /// Send a JSON request and parse the response. Asserts nothing about the
@@ -84,12 +125,12 @@ async fn json_request(
     router: Router,
     method: &str,
     uri: &str,
-    user_id: Option<UserId>,
+    session_cookie: Option<&str>,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
     let mut builder = Request::builder().method(method).uri(uri);
-    if let Some(uid) = user_id {
-        builder = builder.header("x-user-id", uid.to_string());
+    if let Some(cookie) = session_cookie {
+        builder = builder.header(header::COOKIE, format!("thewiki_session={cookie}"));
     }
     let request = if let Some(body) = body {
         builder
@@ -119,12 +160,12 @@ async fn json_request(
 
 /// Seed a 3-revision history (A -> B -> C) on slug `home`. Returns the
 /// revision ids in order (rev_a, rev_b, rev_c).
-async fn seed_three_revisions(router: &Router, user_id: UserId) -> (String, String, String) {
+async fn seed_three_revisions(router: &Router, session: &str) -> (String, String, String) {
     let (status, created) = json_request(
         router.clone(),
         "POST",
         "/api/v1/pages",
-        Some(user_id),
+        Some(session),
         Some(json!({
             "namespace_slug": "Main",
             "slug": "home",
@@ -143,7 +184,7 @@ async fn seed_three_revisions(router: &Router, user_id: UserId) -> (String, Stri
         router.clone(),
         "PUT",
         "/api/v1/pages/home",
-        Some(user_id),
+        Some(session),
         Some(json!({
             "content": "alpha\nbeta\n",
             "edit_summary": "add beta"
@@ -160,7 +201,7 @@ async fn seed_three_revisions(router: &Router, user_id: UserId) -> (String, Stri
         router.clone(),
         "PUT",
         "/api/v1/pages/home",
-        Some(user_id),
+        Some(session),
         Some(json!({
             "content": "alpha\nbeta\ngamma\n",
             "edit_summary": "add gamma"
@@ -180,14 +221,14 @@ async fn seed_three_revisions(router: &Router, user_id: UserId) -> (String, Stri
 
 #[tokio::test]
 async fn revert_to_a_creates_new_revision_with_a_body() {
-    let (router, user_id, storage) = fresh_app().await;
-    let (rev_a, _rev_b, rev_c) = seed_three_revisions(&router, user_id).await;
+    let (router, session, storage) = fresh_app().await;
+    let (rev_a, _rev_b, rev_c) = seed_three_revisions(&router, &session).await;
 
     let (status, body) = json_request(
         router.clone(),
         "POST",
         "/api/v1/pages/home/revert",
-        Some(user_id),
+        Some(&session),
         Some(json!({ "from_revision": rev_a })),
     )
     .await;
@@ -254,14 +295,14 @@ async fn revert_to_a_creates_new_revision_with_a_body() {
 
 #[tokio::test]
 async fn revert_with_custom_message_uses_it_as_edit_summary() {
-    let (router, user_id, storage) = fresh_app().await;
-    let (rev_a, _rev_b, _rev_c) = seed_three_revisions(&router, user_id).await;
+    let (router, session, storage) = fresh_app().await;
+    let (rev_a, _rev_b, _rev_c) = seed_three_revisions(&router, &session).await;
 
     let (status, body) = json_request(
         router.clone(),
         "POST",
         "/api/v1/pages/home/revert",
-        Some(user_id),
+        Some(&session),
         Some(json!({ "from_revision": rev_a, "message": "vandalism" })),
     )
     .await;
@@ -284,17 +325,17 @@ async fn revert_with_custom_message_uses_it_as_edit_summary() {
 
 #[tokio::test]
 async fn revert_with_unknown_revision_id_returns_404() {
-    let (router, user_id, _storage) = fresh_app().await;
+    let (router, session, _storage) = fresh_app().await;
     // Build a page so the slug resolves; otherwise we'd be measuring the
     // page-not-found path instead of the revision-not-found path.
-    let _ = seed_three_revisions(&router, user_id).await;
+    let _ = seed_three_revisions(&router, &session).await;
     let bogus = thewiki_core::RevisionId::new();
 
     let (status, body) = json_request(
         router,
         "POST",
         "/api/v1/pages/home/revert",
-        Some(user_id),
+        Some(&session),
         Some(json!({ "from_revision": bogus.to_string() })),
     )
     .await;
@@ -304,15 +345,15 @@ async fn revert_with_unknown_revision_id_returns_404() {
 
 #[tokio::test]
 async fn revert_with_revision_from_other_page_returns_404() {
-    let (router, user_id, _storage) = fresh_app().await;
-    let (rev_a, _rev_b, _rev_c) = seed_three_revisions(&router, user_id).await;
+    let (router, session, _storage) = fresh_app().await;
+    let (rev_a, _rev_b, _rev_c) = seed_three_revisions(&router, &session).await;
 
     // Create a second page with its own revision history.
     let (status, other) = json_request(
         router.clone(),
         "POST",
         "/api/v1/pages",
-        Some(user_id),
+        Some(&session),
         Some(json!({
             "namespace_slug": "Main",
             "slug": "other",
@@ -330,7 +371,7 @@ async fn revert_with_revision_from_other_page_returns_404() {
         router,
         "POST",
         "/api/v1/pages/other/revert",
-        Some(user_id),
+        Some(&session),
         Some(json!({ "from_revision": rev_a })),
     )
     .await;
@@ -339,15 +380,15 @@ async fn revert_with_revision_from_other_page_returns_404() {
 }
 
 #[tokio::test]
-async fn revert_without_user_id_returns_401() {
-    let (router, user_id, _storage) = fresh_app().await;
-    let (rev_a, _rev_b, _rev_c) = seed_three_revisions(&router, user_id).await;
+async fn revert_without_session_returns_401() {
+    let (router, session, _storage) = fresh_app().await;
+    let (rev_a, _rev_b, _rev_c) = seed_three_revisions(&router, &session).await;
 
     let (status, body) = json_request(
         router,
         "POST",
         "/api/v1/pages/home/revert",
-        // Crucially, no `X-User-Id` header.
+        // Crucially, no session cookie.
         None,
         Some(json!({ "from_revision": rev_a })),
     )
