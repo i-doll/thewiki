@@ -122,6 +122,15 @@ pub struct DiffQuery {
     pub to: RevisionId,
 }
 
+/// Public wrapper around [`build_diff`] so non-REST callers can reuse the
+/// same compute path without having to thread `RevisionId`s through a query
+/// type. Returns the structured [`DiffResponse`] used by both the REST
+/// endpoint and the GraphQL `Query::diff` resolver.
+#[must_use]
+pub fn build_diff_for_handler(query: DiffQuery, from_body: &str, to_body: &str) -> DiffResponse {
+    build_diff(query.from, query.to, from_body, to_body)
+}
+
 /// Kind of line in a [`DiffHunk`].
 ///
 /// `#[non_exhaustive]` so we can add new variants (e.g. `ChangeInPlace`,
@@ -303,7 +312,9 @@ pub async fn diff_revisions<S: AppStorage>(
 /// Build a [`DiffResponse`] from two revision bodies.
 ///
 /// Pulled out of the handler for ease of testing — no I/O, no async.
-fn build_diff(
+/// Re-exported as [`build_diff_for_handler`] so non-REST callers (the
+/// GraphQL resolver) can reuse the same logic.
+pub(crate) fn build_diff(
     from_id: RevisionId,
     to_id: RevisionId,
     from_body: &str,

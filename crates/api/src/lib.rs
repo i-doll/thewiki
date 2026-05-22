@@ -12,6 +12,7 @@ pub mod cli;
 pub mod config;
 pub mod error;
 pub mod extractors;
+pub mod graphql;
 pub mod media;
 pub mod pages;
 pub mod rate_limit;

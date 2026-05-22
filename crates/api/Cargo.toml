@@ -112,6 +112,13 @@ futures-util = "0.3"
 dashmap = { workspace = true }
 redis = { workspace = true, optional = true }
 
+# GraphQL surface (#37). See the workspace dependency block for feature
+# rationale. `async-graphql-axum` wires `axum::extract::FromRequest` for
+# `GraphQLRequest` and an `IntoResponse` for `GraphQLResponse`; the handler
+# wiring is in `src/graphql/mod.rs`.
+async-graphql = { workspace = true }
+async-graphql-axum = { workspace = true }
+
 [features]
 default = []
 # Enable the Redis-backed rate-limit store. See

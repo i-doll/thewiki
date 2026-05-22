@@ -151,6 +151,7 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         auth_state,
         config.server.serve_frontend,
         rate_limit_state,
+        config.graphql.clone(),
     );
 
     let listener = tokio::net::TcpListener::bind(&config.server.bind)

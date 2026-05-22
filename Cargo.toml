@@ -179,6 +179,21 @@ redis = { version = "0.27", default-features = false, features = [
     "script",
 ] }
 
+# GraphQL surface (#37). `async-graphql` provides the schema + resolver
+# macros; `async-graphql-axum` is the axum integration that gives us the
+# `GraphQL` extractor + response type. The `time` feature wires `OffsetDateTime`
+# straight through as the `DateTime` scalar so domain types reuse the existing
+# time wiring. `uuid` does the same for `Uuid`. `apollo_persisted_queries`
+# enables the in-memory automatic persisted query cache wired in `graphql/mod.rs`.
+async-graphql = { version = "7", default-features = false, features = [
+    "time",
+    "uuid",
+    "graphiql",
+    "playground",
+    "apollo_persisted_queries",
+] }
+async-graphql-axum = "7"
+
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 unwrap_used = "warn"

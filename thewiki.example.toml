@@ -277,6 +277,38 @@ enabled = true
 retention_days = 365
 
 # ---------------------------------------------------------------------------
+# GraphQL surface (#37).
+#
+# `/api/graphql` mirrors the REST coverage as a GraphQL endpoint. The
+# playground and introspection knobs are enabled by default for
+# developer-friendly bootstrapping; flip both off in production once
+# clients are wired so the schema isn't advertised to anonymous callers.
+#
+# Persisted queries follow the Apollo APQ shape — clients send
+# `extensions.persistedQuery.sha256Hash` and the server caches the matching
+# document on first sight. The cache is in-memory and process-local
+# (1024-entry LRU); multi-replica deploys should leave this off until a
+# shared backend ships.
+# ---------------------------------------------------------------------------
+[graphql]
+# Serve the GraphiQL HTML at `/api/graphql/playground`. Default: true.
+playground_enabled = true
+
+# Allow `__schema` / `__type` introspection queries. Default: true.
+introspection_enabled = true
+
+# Accept persisted-query lookups (Apollo APQ). Default: false.
+persisted_queries_enabled = false
+
+# Cap on selection-set depth. Defends against deeply nested adversarial
+# queries. Default: 15.
+max_query_depth = 15
+
+# Cap on query complexity score. async-graphql adds 1 per selected field by
+# default; resolvers can override the cost individually. Default: 1000.
+max_query_complexity = 1000
+
+# ---------------------------------------------------------------------------
 # Observability.
 # ---------------------------------------------------------------------------
 [telemetry]
