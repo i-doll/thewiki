@@ -14,6 +14,8 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WikiIndexRouteImport } from './routes/wiki.index'
 import { Route as WikiSlugRouteImport } from './routes/wiki.$slug'
+import { Route as TagTagRouteImport } from './routes/tag.$tag'
+import { Route as CategorySlugRouteImport } from './routes/category.$slug'
 import { Route as WikiSlugEditRouteImport } from './routes/wiki_.$slug.edit'
 import { Route as WikiSlugHistoryRouteImport } from './routes/wiki.$slug.history'
 import { Route as WikiSlugDiffRouteImport } from './routes/wiki.$slug.diff'
@@ -45,6 +47,16 @@ const WikiIndexRoute = WikiIndexRouteImport.update({
 const WikiSlugRoute = WikiSlugRouteImport.update({
   id: '/wiki/$slug',
   path: '/wiki/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TagTagRoute = TagTagRouteImport.update({
+  id: '/tag/$tag',
+  path: '/tag/$tag',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CategorySlugRoute = CategorySlugRouteImport.update({
+  id: '/category/$slug',
+  path: '/category/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WikiSlugEditRoute = WikiSlugEditRouteImport.update({
@@ -88,6 +100,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/search': typeof SearchRoute
+  '/category/$slug': typeof CategorySlugRoute
+  '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki/': typeof WikiIndexRoute
   '/wiki/$namespace/$slug': typeof WikiNamespaceSlugRouteWithChildren
@@ -102,6 +116,8 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/search': typeof SearchRoute
+  '/category/$slug': typeof CategorySlugRoute
+  '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki': typeof WikiIndexRoute
   '/wiki/$namespace/$slug': typeof WikiNamespaceSlugRouteWithChildren
@@ -117,6 +133,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/search': typeof SearchRoute
+  '/category/$slug': typeof CategorySlugRoute
+  '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki/': typeof WikiIndexRoute
   '/wiki/$namespace/$slug': typeof WikiNamespaceSlugRouteWithChildren
@@ -133,6 +151,8 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/search'
+    | '/category/$slug'
+    | '/tag/$tag'
     | '/wiki/$slug'
     | '/wiki/'
     | '/wiki/$namespace/$slug'
@@ -147,6 +167,8 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/search'
+    | '/category/$slug'
+    | '/tag/$tag'
     | '/wiki/$slug'
     | '/wiki'
     | '/wiki/$namespace/$slug'
@@ -161,6 +183,8 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/search'
+    | '/category/$slug'
+    | '/tag/$tag'
     | '/wiki/$slug'
     | '/wiki/'
     | '/wiki/$namespace/$slug'
@@ -176,6 +200,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   SearchRoute: typeof SearchRoute
+  CategorySlugRoute: typeof CategorySlugRoute
+  TagTagRoute: typeof TagTagRoute
   WikiSlugRoute: typeof WikiSlugRouteWithChildren
   WikiIndexRoute: typeof WikiIndexRoute
   WikiNamespaceSlugRoute: typeof WikiNamespaceSlugRouteWithChildren
@@ -218,6 +244,20 @@ declare module '@tanstack/react-router' {
       path: '/wiki/$slug'
       fullPath: '/wiki/$slug'
       preLoaderRoute: typeof WikiSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tag/$tag': {
+      id: '/tag/$tag'
+      path: '/tag/$tag'
+      fullPath: '/tag/$tag'
+      preLoaderRoute: typeof TagTagRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/category/$slug': {
+      id: '/category/$slug'
+      path: '/category/$slug'
+      fullPath: '/category/$slug'
+      preLoaderRoute: typeof CategorySlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/wiki_/$slug/edit': {
@@ -303,6 +343,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   SearchRoute: SearchRoute,
+  CategorySlugRoute: CategorySlugRoute,
+  TagTagRoute: TagTagRoute,
   WikiSlugRoute: WikiSlugRouteWithChildren,
   WikiIndexRoute: WikiIndexRoute,
   WikiNamespaceSlugRoute: WikiNamespaceSlugRouteWithChildren,

@@ -550,6 +550,199 @@
         }
       }
     },
+    "/api/v1/categories": {
+      "get": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "`GET /api/v1/categories` — list every category.",
+        "operationId": "list_categories",
+        "responses": {
+          "200": {
+            "description": "Category list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryListResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "`POST /api/v1/categories` — create a new category.",
+        "description": "Requires an authenticated session. Anonymous callers (even with\n`anonymous_edits = true`) cannot mint categories — the taxonomy is an\noperator concern.",
+        "operationId": "create_category",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCategoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Category created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Parent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Slug already exists or cycle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/categories/{slug}": {
+      "get": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "`GET /api/v1/categories/{slug}` — fetch a category and its member pages.",
+        "operationId": "get_category",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Category slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. `0`/missing falls back to the route-level default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Category",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Category not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/media": {
       "post": {
         "tags": [
@@ -2292,6 +2485,131 @@
         }
       }
     },
+    "/api/v1/tags": {
+      "get": {
+        "tags": [
+          "tags"
+        ],
+        "summary": "`GET /api/v1/tags?prefix=...&limit=...` — autocomplete tag list.",
+        "operationId": "list_tags",
+        "parameters": [
+          {
+            "name": "prefix",
+            "in": "query",
+            "description": "Optional prefix to match. An empty / missing prefix lists every\ntag, clamped by `limit`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Max number of tags to return. `0`/missing falls back to the\nroute-level default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tag list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagListResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tags/{tag}": {
+      "get": {
+        "tags": [
+          "tags"
+        ],
+        "summary": "`GET /api/v1/tags/{tag}` — list pages carrying `{tag}`.",
+        "operationId": "get_tag",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "description": "Tag value (case-insensitive)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pages with tag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid tag value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/wiki/{namespace}": {
       "post": {
         "tags": [
@@ -3373,6 +3691,152 @@
           }
         }
       },
+      "CategoryDetailResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/categories/{slug}`.",
+        "required": [
+          "category",
+          "items"
+        ],
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/CategoryView",
+            "description": "The category itself."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryMemberView"
+            },
+            "description": "Member pages in this category, paginated."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next-page cursor, or `None` if exhausted."
+          }
+        }
+      },
+      "CategoryId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier for a [`crate::category::Category`]."
+      },
+      "CategoryListResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/categories`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryView"
+            },
+            "description": "Every defined category, ordered by slug."
+          }
+        }
+      },
+      "CategoryMemberView": {
+        "type": "object",
+        "description": "A page entry surfaced by the \"members of this category / tag\" lists.",
+        "required": [
+          "page_id",
+          "namespace_slug",
+          "slug",
+          "title"
+        ],
+        "properties": {
+          "namespace_slug": {
+            "type": "string",
+            "description": "Namespace slug the page lives in."
+          },
+          "page_id": {
+            "$ref": "#/components/schemas/PageId",
+            "description": "Stable identifier of the member page."
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug of the page."
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable title."
+          }
+        }
+      },
+      "CategoryView": {
+        "type": "object",
+        "description": "A category, flattened for the wire form.",
+        "required": [
+          "id",
+          "slug",
+          "display_name",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the row was created."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Human-readable display name."
+          },
+          "id": {
+            "$ref": "#/components/schemas/CategoryId",
+            "description": "Stable identifier."
+          },
+          "parent_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CategoryId",
+                "description": "Optional parent category id."
+              }
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug, unique across all categories."
+          }
+        }
+      },
+      "CreateCategoryRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/v1/categories`.",
+        "required": [
+          "slug",
+          "display_name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "Human-readable display label."
+          },
+          "parent_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CategoryId",
+                "description": "Optional parent category id. Setting `None` makes this a top-level\ncategory. Mutually checked against the storage layer's cycle check."
+              }
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug. Must be unique across all categories."
+          }
+        }
+      },
       "CreateNamespaceRequest": {
         "type": "object",
         "description": "Body of `POST /api/v1/namespaces`.",
@@ -3393,13 +3857,23 @@
       },
       "CreatePageRequest": {
         "type": "object",
-        "description": "Body of `POST /api/v1/pages` and `POST /api/v1/wiki/{namespace}`.\n\nFor the namespace-aware route (`/api/v1/wiki/{namespace}`, added in #28)\nthe namespace is taken from the URL and `namespace_slug` is ignored if\nprovided. For the legacy `/api/v1/pages` route, `namespace_slug` is\noptional and defaults to `Main`.",
+        "description": "Body of `POST /api/v1/pages`.",
         "required": [
           "slug",
           "title",
           "content"
         ],
         "properties": {
+          "categories": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/CategoryId"
+            },
+            "description": "Optional category ids to assign on create. Omit / empty for no\ncategorisation."
+          },
           "content": {
             "type": "string",
             "description": "Initial body for the page. The first revision is committed with this\ncontent."
@@ -3414,6 +3888,16 @@
           "slug": {
             "type": "string",
             "description": "URL-safe slug, unique within the resolved namespace."
+          },
+          "tags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional flat tag list. Strings are validated and lowercased on the\nserver; rejected with `400` if any tag fails validation."
           },
           "title": {
             "type": "string",
@@ -3735,10 +4219,19 @@
           "content",
           "content_html",
           "protection_level",
+          "categories",
+          "tags",
           "created_at",
           "updated_at"
         ],
         "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryView"
+            },
+            "description": "Categories this page is assigned to (#29)."
+          },
           "content": {
             "type": "string",
             "description": "Body of the current revision, or empty string if no revision exists."
@@ -3782,6 +4275,13 @@
           "slug": {
             "type": "string",
             "description": "URL slug, unique within the namespace."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Flat tag set this page carries (#29). Always lowercased."
           },
           "title": {
             "type": "string",
@@ -4086,6 +4586,50 @@
           }
         }
       },
+      "TagDetailResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/tags/{tag}`.",
+        "required": [
+          "tag",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryMemberView"
+            },
+            "description": "Pages carrying this tag."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next-page cursor, or `None` if exhausted."
+          },
+          "tag": {
+            "type": "string",
+            "description": "The tag value as it would appear on `page_tags.tag`."
+          }
+        }
+      },
+      "TagListResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/tags?prefix=...`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Matching tags, ordered lexicographically."
+          }
+        }
+      },
       "UpdateNamespaceRequest": {
         "type": "object",
         "description": "Body of `PATCH /api/v1/namespaces/{slug}`.\n\nSlug renames are deliberately not supported — they invalidate URLs and\nhave cascading effects on the link graph, search index, and audit log.\nOperators who really need to rename a namespace can create a new one,\nmove pages across via the admin tools (future work), and delete the\nempty original.",
@@ -4106,6 +4650,16 @@
           "content"
         ],
         "properties": {
+          "categories": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/CategoryId"
+            },
+            "description": "New category set. When present the entire set is replaced\n(so passing `[]` clears every assignment). Omit to leave the\nexisting set untouched."
+          },
           "content": {
             "type": "string",
             "description": "New body. Always required — an update commits a new revision."
@@ -4116,6 +4670,16 @@
               "null"
             ],
             "description": "Optional short note describing the edit (think Git commit message)."
+          },
+          "tags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "New tag set. Same replace-on-present semantics as `categories`."
           },
           "title": {
             "type": [
@@ -4229,6 +4793,14 @@
     {
       "name": "search",
       "description": "Full-text search"
+    },
+    {
+      "name": "categories",
+      "description": "Hierarchical categories (#29)"
+    },
+    {
+      "name": "tags",
+      "description": "Flat tags (#29)"
     }
   ]
 }

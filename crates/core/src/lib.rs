@@ -70,6 +70,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod category;
 pub mod content_format;
 pub mod id;
 pub mod media;
@@ -81,11 +82,15 @@ pub mod render;
 pub mod revision;
 pub mod role;
 pub mod session;
+pub mod tag;
 pub mod user;
 pub mod validation;
 
+pub use category::Category;
 pub use content_format::ContentFormat;
-pub use id::{AuditLogId, MediaId, NamespaceId, PageId, RevisionId, RoleId, SessionId, UserId};
+pub use id::{
+    AuditLogId, CategoryId, MediaId, NamespaceId, PageId, RevisionId, RoleId, SessionId, UserId,
+};
 pub use media::{CONTENT_HASH_BYTES, Media};
 pub use namespace::{NAMESPACE_SLUG_MAX_BYTES, Namespace, NamespaceSlug};
 pub use page::Page;
@@ -98,5 +103,6 @@ pub use render::{
 pub use revision::Revision;
 pub use role::{ROLE_NAME_MAX_BYTES, Role, RoleName};
 pub use session::Session;
+pub use tag::{TAG_MAX_BYTES, Tag};
 pub use user::{EmailAddress, USERNAME_MAX_BYTES, User, Username};
 pub use validation::ValidationError;

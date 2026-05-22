@@ -7,7 +7,7 @@
 //! need a second round trip just to render a breadcrumb.
 
 use serde::{Deserialize, Serialize};
-use thewiki_core::{NamespaceId, PageId, ProtectionLevel, RevisionId};
+use thewiki_core::{CategoryId, NamespaceId, PageId, ProtectionLevel, RevisionId};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
@@ -17,6 +17,9 @@ use utoipa::ToSchema;
 /// the namespace is taken from the URL and `namespace_slug` is ignored if
 /// provided. For the legacy `/api/v1/pages` route, `namespace_slug` is
 /// optional and defaults to `Main`.
+use crate::categories::dto::CategoryView;
+
+/// Body of `POST /api/v1/pages`.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreatePageRequest {
     /// Slug of the namespace this page lives in. Optional — the namespace
@@ -33,6 +36,14 @@ pub struct CreatePageRequest {
     /// Initial body for the page. The first revision is committed with this
     /// content.
     pub content: String,
+    /// Optional category ids to assign on create. Omit / empty for no
+    /// categorisation.
+    #[serde(default)]
+    pub categories: Option<Vec<CategoryId>>,
+    /// Optional flat tag list. Strings are validated and lowercased on the
+    /// server; rejected with `400` if any tag fails validation.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
 }
 
 /// Body of `PUT /api/v1/pages/{slug}`.
@@ -46,6 +57,14 @@ pub struct UpdatePageRequest {
     /// Optional short note describing the edit (think Git commit message).
     #[serde(default)]
     pub edit_summary: Option<String>,
+    /// New category set. When present the entire set is replaced
+    /// (so passing `[]` clears every assignment). Omit to leave the
+    /// existing set untouched.
+    #[serde(default)]
+    pub categories: Option<Vec<CategoryId>>,
+    /// New tag set. Same replace-on-present semantics as `categories`.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
 }
 
 /// A single page returned by the read endpoints.
@@ -88,6 +107,10 @@ pub struct PageView {
     /// How protected this page is from edits. Drives the SPA's lock badge
     /// and is enforced server-side on every mutating handler (#34).
     pub protection_level: ProtectionLevel,
+    /// Categories this page is assigned to (#29).
+    pub categories: Vec<CategoryView>,
+    /// Flat tag set this page carries (#29). Always lowercased.
+    pub tags: Vec<String>,
     /// When the page row was first created.
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,

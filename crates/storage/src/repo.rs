@@ -29,8 +29,9 @@ use std::time::Duration;
 
 use serde_json::Value;
 use thewiki_core::{
-    AuditLogId, Media, MediaId, Namespace, NamespaceId, NamespaceSlug, Page, PageId, Revision,
-    RevisionId, Role, RoleId, RoleName, Session, SessionId, User, UserId, Username,
+    AuditLogId, Category, CategoryId, Media, MediaId, Namespace, NamespaceId, NamespaceSlug, Page,
+    PageId, Revision, RevisionId, Role, RoleId, RoleName, Session, SessionId, Tag, User, UserId,
+    Username,
 };
 use time::OffsetDateTime;
 
@@ -952,4 +953,191 @@ pub trait MediaBlobRepository: Send + Sync {
     ///
     /// Propagates lower-level driver failures.
     fn delete(&self, media_id: MediaId) -> impl Future<Output = Result<(), StorageError>> + Send;
+}
+
+/// A `(page_id, namespace_slug, page_slug, title)` tuple surfaced by the
+/// "list pages in category" / "list pages with tag" queries.
+///
+/// Same shape as [`BacklinkRow`] but the source is the category / tag join,
+/// not the wikilink graph. Carved out so the API layer can render a
+/// member-page list without a follow-up lookup per row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageMemberRow {
+    /// Stable identifier of the member page.
+    pub page_id: PageId,
+    /// Namespace ID the page lives in.
+    pub namespace_id: NamespaceId,
+    /// Namespace slug the page lives in (joined for convenience).
+    pub namespace_slug: String,
+    /// URL slug of the page.
+    pub page_slug: String,
+    /// Human-readable title of the page.
+    pub page_title: String,
+}
+
+/// Persistence operations for the [`Category`] aggregate (#29).
+///
+/// Categories form a DAG: each category has at most one explicit parent,
+/// and a page can belong to many categories. Cycle prevention is the
+/// repository's responsibility — `create` and any future `set_parent`
+/// helpers walk the would-be ancestor chain and reject mutations that
+/// would re-introduce the current node as its own ancestor.
+pub trait CategoryRepository: Send + Sync {
+    /// Insert a category row.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::Conflict`] if the slug is already taken or the
+    ///   provided `parent_id` would create a cycle.
+    /// * [`StorageError::NotFound`] if the supplied `parent_id` doesn't
+    ///   resolve to an existing category.
+    fn create(&self, category: &Category) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Fetch a category by primary key.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if no row matches.
+    fn get_by_id(
+        &self,
+        id: CategoryId,
+    ) -> impl Future<Output = Result<Category, StorageError>> + Send;
+
+    /// Resolve a category by its URL slug.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if no row matches.
+    fn get_by_slug(
+        &self,
+        slug: &str,
+    ) -> impl Future<Output = Result<Category, StorageError>> + Send;
+
+    /// List every category, ordered by slug ascending.
+    ///
+    /// The category count is expected to stay small (operator-curated set)
+    /// so pagination is not necessary today.
+    fn list_all(&self) -> impl Future<Output = Result<Vec<Category>, StorageError>> + Send;
+
+    /// List direct children of `parent`. `None` returns top-level
+    /// categories (rows whose `parent_id` is `NULL`).
+    fn list_children(
+        &self,
+        parent: Option<CategoryId>,
+    ) -> impl Future<Output = Result<Vec<Category>, StorageError>> + Send;
+
+    /// Walk the ancestor chain of `id` upwards, starting with the immediate
+    /// parent and ending at the top-level ancestor. Returns an empty vector
+    /// when the category has no parent. Used for cycle prevention and for
+    /// rendering the breadcrumb of the `/category/<slug>` page.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if `id` itself does not exist.
+    fn list_ancestors(
+        &self,
+        id: CategoryId,
+    ) -> impl Future<Output = Result<Vec<Category>, StorageError>> + Send;
+
+    /// Add `(page_id, category_id)` to the membership table. Idempotent
+    /// (re-assigning the same pair is a no-op).
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Database`] if either foreign key doesn't resolve.
+    fn assign_to_page(
+        &self,
+        page_id: PageId,
+        category_id: CategoryId,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Remove `(page_id, category_id)` from the membership table.
+    /// Idempotent.
+    fn unassign_from_page(
+        &self,
+        page_id: PageId,
+        category_id: CategoryId,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Replace the entire category set for `page_id` with `categories`.
+    /// Atomic: the existing rows are dropped and the new set inserted
+    /// inside a single transaction so a reader never sees a half-applied
+    /// edit.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Database`] if any category foreign key doesn't
+    /// resolve. The transaction rolls back on failure so partial
+    /// assignment is impossible.
+    fn replace_for_page(
+        &self,
+        page_id: PageId,
+        categories: &[CategoryId],
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// List the categories `page_id` is assigned to, ordered by slug.
+    fn list_for_page(
+        &self,
+        page_id: PageId,
+    ) -> impl Future<Output = Result<Vec<Category>, StorageError>> + Send;
+
+    /// List the pages assigned to `category_id`, paginated.
+    ///
+    /// Order is `(page_id ASC)` — stable, deterministic, and aligned with
+    /// the UUIDv7 byte prefix so the index walk stays sequential.
+    fn list_pages_in(
+        &self,
+        category_id: CategoryId,
+        cursor: Option<Cursor>,
+        limit: u32,
+    ) -> impl Future<Output = Result<PageSlice<PageMemberRow>, StorageError>> + Send;
+}
+
+/// Persistence operations for page tags (#29).
+///
+/// Tags are flat lowercased strings keyed by [`Tag`] at the validation
+/// boundary. Storage stores them as raw `TEXT` (lowercased) — `Tag` is the
+/// caller-side guarantee that the wire form has been validated.
+pub trait TagRepository: Send + Sync {
+    /// Replace the entire tag set for `page_id` with `tags`. Atomic: the
+    /// existing rows are dropped and the new set inserted inside a single
+    /// transaction so a reader never sees a half-applied edit.
+    ///
+    /// Duplicates inside `tags` are silently coalesced (the join table's
+    /// primary key already deduplicates).
+    fn assign(
+        &self,
+        page_id: PageId,
+        tags: &[Tag],
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// List the tags assigned to `page_id`, ordered lexicographically.
+    fn list_for_page(
+        &self,
+        page_id: PageId,
+    ) -> impl Future<Output = Result<Vec<Tag>, StorageError>> + Send;
+
+    /// List the pages carrying `tag`, paginated.
+    ///
+    /// Order is `(page_id ASC)`. The cursor encodes the last `page_id`
+    /// returned so the next call resumes strictly after it.
+    fn list_pages_with_tag(
+        &self,
+        tag: &Tag,
+        cursor: Option<Cursor>,
+        limit: u32,
+    ) -> impl Future<Output = Result<PageSlice<PageMemberRow>, StorageError>> + Send;
+
+    /// Enumerate the distinct tag values whose lowercase form starts with
+    /// `prefix`, sorted lexicographically. `limit` clamps the result set
+    /// for the autocomplete endpoint.
+    ///
+    /// `prefix` is *not* required to be a fully-validated [`Tag`] — a UI
+    /// autocomplete sends whatever the user has typed so far. Callers
+    /// normalise to lowercase before binding.
+    fn list_all_tags(
+        &self,
+        prefix: &str,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<Tag>, StorageError>> + Send;
 }

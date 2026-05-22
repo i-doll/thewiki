@@ -40,6 +40,19 @@ function wikiPath(namespace: string | undefined | null, slug: string): string {
  */
 export type ProtectionLevel = "none" | "semi_protected" | "protected" | "fully_protected";
 
+/**
+ * A category, as returned by the API.
+ *
+ * Mirrors `CategoryView` from `crates/api/src/categories/dto.rs` (#29).
+ */
+export interface CategoryView {
+	id: string;
+	slug: string;
+	display_name: string;
+	parent_id: string | null;
+	created_at: string;
+}
+
 /** Mirrors `PageView` from `crates/api/src/pages/dto.rs`. */
 export interface PageView {
 	id: string;
@@ -49,7 +62,10 @@ export interface PageView {
 	title: string;
 	current_revision_id: string | null;
 	content: string;
+	content_html?: string;
 	protection_level: ProtectionLevel;
+	categories: CategoryView[];
+	tags: string[];
 	created_at: string;
 	updated_at: string;
 }
@@ -82,6 +98,8 @@ export interface CreatePageRequest {
 	slug: string;
 	title: string;
 	content: string;
+	categories?: string[];
+	tags?: string[];
 }
 
 /** Body for `PUT /api/v1/pages/{slug}`. */
@@ -89,6 +107,8 @@ export interface UpdatePageRequest {
 	title?: string;
 	content: string;
 	edit_summary?: string;
+	categories?: string[];
+	tags?: string[];
 }
 
 /**
@@ -284,6 +304,95 @@ export interface NamespaceListResponse {
  */
 export async function listNamespaces(): Promise<NamespaceListResponse> {
 	return jsonRequest<NamespaceListResponse>("/api/v1/namespaces", { method: "GET" });
+/** Response from `GET /api/v1/categories`. */
+export interface CategoryListResponse {
+	items: CategoryView[];
+}
+
+/** A member entry inside `GET /api/v1/categories/{slug}` / `GET /api/v1/tags/{tag}`. */
+export interface CategoryMemberView {
+	page_id: string;
+	namespace_slug: string;
+	slug: string;
+	title: string;
+}
+
+/** Response from `GET /api/v1/categories/{slug}`. */
+export interface CategoryDetailResponse {
+	category: CategoryView;
+	items: CategoryMemberView[];
+	next_cursor: string | null;
+}
+
+/** Response from `GET /api/v1/tags/{tag}`. */
+export interface TagDetailResponse {
+	tag: string;
+	items: CategoryMemberView[];
+	next_cursor: string | null;
+}
+
+/** Response from `GET /api/v1/tags?prefix=...`. */
+export interface TagListResponse {
+	items: string[];
+}
+
+/** List every defined category. */
+export async function listCategories(): Promise<CategoryListResponse> {
+	return jsonRequest<CategoryListResponse>("/api/v1/categories", { method: "GET" });
+}
+
+/** Fetch a category + its member pages. */
+export async function fetchCategory(
+	slug: string,
+	options?: { cursor?: string | null; limit?: number },
+): Promise<CategoryDetailResponse> {
+	const params = new URLSearchParams();
+	if (options?.cursor) {
+		params.set("cursor", options.cursor);
+	}
+	if (options?.limit !== undefined) {
+		params.set("limit", String(options.limit));
+	}
+	const query = params.toString();
+	const url =
+		query.length > 0
+			? `/api/v1/categories/${encodeURIComponent(slug)}?${query}`
+			: `/api/v1/categories/${encodeURIComponent(slug)}`;
+	return jsonRequest<CategoryDetailResponse>(url, { method: "GET" });
+}
+
+/** Fetch the pages carrying a specific tag. */
+export async function fetchTag(
+	tag: string,
+	options?: { cursor?: string | null; limit?: number },
+): Promise<TagDetailResponse> {
+	const params = new URLSearchParams();
+	if (options?.cursor) {
+		params.set("cursor", options.cursor);
+	}
+	if (options?.limit !== undefined) {
+		params.set("limit", String(options.limit));
+	}
+	const query = params.toString();
+	const url =
+		query.length > 0
+			? `/api/v1/tags/${encodeURIComponent(tag)}?${query}`
+			: `/api/v1/tags/${encodeURIComponent(tag)}`;
+	return jsonRequest<TagDetailResponse>(url, { method: "GET" });
+}
+
+/** Autocomplete tags by prefix. Empty prefix lists every tag, clamped by `limit`. */
+export async function autocompleteTags(prefix: string, limit?: number): Promise<TagListResponse> {
+	const params = new URLSearchParams();
+	if (prefix.length > 0) {
+		params.set("prefix", prefix);
+	}
+	if (limit !== undefined) {
+		params.set("limit", String(limit));
+	}
+	const query = params.toString();
+	const url = query.length > 0 ? `/api/v1/tags?${query}` : "/api/v1/tags";
+	return jsonRequest<TagListResponse>(url, { method: "GET" });
 }
 
 /**
