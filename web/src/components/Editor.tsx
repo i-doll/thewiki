@@ -1,13 +1,21 @@
+import { autocompletion, closeCompletion } from "@codemirror/autocomplete";
 import { markdown } from "@codemirror/lang-markdown";
 import { oneDark } from "@codemirror/theme-one-dark";
 import type { Command, KeyBinding } from "@codemirror/view";
 import { keymap } from "@codemirror/view";
+import { useQueryClient } from "@tanstack/react-query";
 import { Extension } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import CodeMirror from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "tiptap-markdown";
+import {
+	WikiLinkSuggestion,
+	type WikiLinkSuggestionState,
+} from "./editor-extensions/WikiLinkSuggestion";
+import { buildWikiLinkCompletion } from "./editor-extensions/wikiLinkCompletion";
+import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
 
 export type EditorMode = "wysiwyg" | "source";
 
@@ -113,6 +121,7 @@ function buildMarkdownKeymap(onToggleMode: () => void): KeyBinding[] {
 interface TiptapEditorProps {
 	markdown: string;
 	onChange: (next: string) => void;
+	onSuggestionChange: (state: WikiLinkSuggestionState | null) => void;
 }
 
 interface MarkdownStorageLike {
@@ -149,9 +158,20 @@ const LinkShortcut = Extension.create({
 	},
 });
 
-function TiptapEditor({ markdown: markdownValue, onChange }: TiptapEditorProps) {
+function TiptapEditor({
+	markdown: markdownValue,
+	onChange,
+	onSuggestionChange,
+}: TiptapEditorProps) {
 	// Track the last markdown we *emitted* so we don't loop on our own updates.
 	const lastEmittedRef = useRef<string>(markdownValue);
+
+	// `useEditor` is recreated only on mount, so this ref keeps the suggestion
+	// callback "live" even when the parent passes a new closure on every render.
+	const suggestionCallbackRef = useRef(onSuggestionChange);
+	useEffect(() => {
+		suggestionCallbackRef.current = onSuggestionChange;
+	}, [onSuggestionChange]);
 
 	const editor = useEditor({
 		// React 19 + StrictMode can render before the editor instance is ready;
@@ -161,6 +181,9 @@ function TiptapEditor({ markdown: markdownValue, onChange }: TiptapEditorProps) 
 		extensions: [
 			StarterKit,
 			LinkShortcut,
+			WikiLinkSuggestion.configure({
+				onStateChange: (state) => suggestionCallbackRef.current(state),
+			}),
 			Markdown.configure({
 				html: false,
 				tightLists: true,
@@ -214,13 +237,32 @@ interface SourceEditorProps {
 }
 
 function SourceEditor({ value, onChange, onToggleMode }: SourceEditorProps) {
+	const queryClient = useQueryClient();
+
 	// The keymap closes over `onToggleMode`, so rebuild it whenever the toggle
 	// identity changes. Prepended via `Prec.highest`-style ordering: by passing
 	// our keymap *after* the language extension, CodeMirror gives our bindings
 	// priority over any defaults a future extension might register.
+	//
+	// The autocomplete extension is configured to show our wiki-link source
+	// only — `defaultKeymap: true` keeps Up/Down/Enter/Escape bound to the
+	// dropdown when it's open, which is exactly what we want.
 	const extensions = useMemo(
-		() => [markdown(), keymap.of(buildMarkdownKeymap(onToggleMode))],
-		[onToggleMode],
+		() => [
+			markdown(),
+			autocompletion({
+				override: [buildWikiLinkCompletion({ queryClient })],
+				// Keep the popup quiet until the user explicitly types `[[`.
+				activateOnTyping: true,
+				closeOnBlur: true,
+				maxRenderedOptions: 6,
+			}),
+			keymap.of(buildMarkdownKeymap(onToggleMode)),
+			// `closeCompletion` keeps the dropdown reactive to mode-switches
+			// when the user toggles back to WYSIWYG mid-completion.
+			keymap.of([{ key: "Escape", run: closeCompletion }]),
+		],
+		[onToggleMode, queryClient],
 	);
 
 	return (
@@ -245,6 +287,26 @@ export function Editor({ value, onChange, initialMode = "wysiwyg" }: EditorProps
 	// the persisted mode. `useState` initialiser runs once; safe for SSR because
 	// `readStoredMode` returns `null` when `window` is unavailable.
 	const [mode, setMode] = useState<EditorMode>(() => readStoredMode() ?? initialMode);
+
+	// Tiptap-side wiki-link suggestion state. The CodeMirror path uses its own
+	// dropdown (`@codemirror/autocomplete`), so this is only set when the
+	// WYSIWYG editor is the active surface.
+	const [suggestion, setSuggestion] = useState<WikiLinkSuggestionState | null>(null);
+
+	// Recompute the dropdown's viewport anchor on every render — the suggestion
+	// plugin gives us `clientRect`, but it's only meaningful at call time.
+	const suggestionAnchor = useMemo(() => {
+		if (!suggestion?.clientRect) {
+			return null;
+		}
+		const rect = suggestion.clientRect();
+		if (!rect) {
+			return null;
+		}
+		// Offset a few px below the caret so the dropdown doesn't overlap the
+		// text the user is typing.
+		return { top: rect.bottom + 4, left: rect.left };
+	}, [suggestion]);
 
 	const toggleMode = useCallback(() => {
 		setMode((current) => {
@@ -318,9 +380,21 @@ export function Editor({ value, onChange, initialMode = "wysiwyg" }: EditorProps
 			</div>
 
 			{mode === "wysiwyg" ? (
-				<TiptapEditor markdown={value} onChange={onChange} />
+				<TiptapEditor markdown={value} onChange={onChange} onSuggestionChange={setSuggestion} />
 			) : (
 				<SourceEditor value={value} onChange={onChange} onToggleMode={toggleMode} />
+			)}
+
+			{mode === "wysiwyg" && suggestion && suggestionAnchor && (
+				<WikiLinkAutocomplete
+					query={suggestion.query}
+					position={suggestionAnchor}
+					onSelect={(target) => {
+						suggestion.command(target);
+						setSuggestion(null);
+					}}
+					onClose={() => setSuggestion(null)}
+				/>
 			)}
 		</div>
 	);
