@@ -116,6 +116,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260523000000_media_variants",
         include_str!("../../../../migrations/20260523000000_media_variants.sql"),
     ),
+    (
+        "20260523120000_categories_and_tags",
+        include_str!("../../../../migrations/20260523120000_categories_and_tags.sql"),
+    ),
 ];
 
 /// Construction options for [`LibsqlStorage`].

@@ -12,15 +12,18 @@ use axum::http::StatusCode;
 use serde_json::json;
 use thewiki_core::id::NamespaceId;
 use thewiki_core::render::Renderer;
-use thewiki_core::{ContentFormat, NamespaceSlug, Page, PageId, ProtectionLevel, Revision};
+use thewiki_core::{
+    CategoryId, ContentFormat, NamespaceSlug, Page, PageId, ProtectionLevel, Revision, Tag,
+};
 use thewiki_render::MarkdownRenderer;
 use thewiki_search::PageDoc;
 use thewiki_storage::repo::{
-    BacklinkRow, Cursor, NamespaceRepository, PageAuditMutation, PageLink, PageLinkRepository,
-    PageRepository, PageSlice, RevisionRepository,
+    BacklinkRow, CategoryRepository, Cursor, NamespaceRepository, PageAuditMutation, PageLink,
+    PageLinkRepository, PageRepository, PageSlice, RevisionRepository, TagRepository,
 };
 use time::OffsetDateTime;
 
+use crate::categories::routes::category_view;
 use crate::config::ApprovalScope;
 use crate::error::ApiError;
 use crate::extractors::EditorExtractor;
@@ -189,6 +192,22 @@ pub(crate) async fn hydrate_page_view<S: AppStorage>(
         .await?
         .html
     };
+    let categories = state
+        .storage
+        .categories()
+        .list_for_page(page.id)
+        .await?
+        .into_iter()
+        .map(category_view)
+        .collect();
+    let tags = state
+        .storage
+        .tags()
+        .list_for_page(page.id)
+        .await?
+        .into_iter()
+        .map(|t| t.into_string())
+        .collect();
     Ok(PageView {
         id: page.id,
         namespace_id: page.namespace_id,
@@ -199,6 +218,8 @@ pub(crate) async fn hydrate_page_view<S: AppStorage>(
         content,
         content_html,
         protection_level: page.protection_level,
+        categories,
+        tags,
         created_at: page.created_at,
         updated_at: page.updated_at,
     })
@@ -206,9 +227,12 @@ pub(crate) async fn hydrate_page_view<S: AppStorage>(
 
 /// Build the search-indexer document for a freshly-committed live revision.
 ///
-/// Tags are an empty `Vec` until #29 lands the tag aggregate; the schema
-/// already reserves the field so wiring it later is purely additive.
-fn build_search_doc(page: &Page, namespace_slug: &str, body: &str) -> PageDoc {
+/// `tags` carries the page's resolved tag set (#29) so Tantivy's `tags`
+/// field is populated for the `?tag=…` filter the search endpoint passes
+/// through. The list is supplied by the caller (it has already been
+/// validated + atomically replaced via the tag repository) so the build
+/// step here is pure data-shovelling.
+fn build_search_doc(page: &Page, namespace_slug: &str, body: &str, tags: Vec<String>) -> PageDoc {
     PageDoc {
         page_id: page.id,
         namespace_id: page.namespace_id,
@@ -216,9 +240,48 @@ fn build_search_doc(page: &Page, namespace_slug: &str, body: &str) -> PageDoc {
         slug: page.slug.clone(),
         title: page.title.clone(),
         body: body.to_owned(),
-        tags: Vec::new(),
+        tags,
         updated_at: page.updated_at,
     }
+}
+
+/// Validate the optional list of tag strings supplied on a page create /
+/// update request. Empty list = "clear all tags"; whitespace-only entries
+/// and oversize / disallowed-character entries are rejected as `400`.
+fn parse_tag_list(tags: &Option<Vec<String>>) -> Result<Option<Vec<Tag>>, ApiError> {
+    let Some(raw) = tags else { return Ok(None) };
+    let mut out: Vec<Tag> = Vec::with_capacity(raw.len());
+    for entry in raw {
+        let trimmed = entry.trim();
+        let tag = Tag::new(trimmed.to_owned())
+            .map_err(|err| ApiError::InvalidInput(format!("tags: {err}")))?;
+        // De-duplicate within the input; the storage layer would also drop
+        // the duplicate via OR IGNORE but we'd rather not log it as a
+        // race-condition no-op.
+        if !out.contains(&tag) {
+            out.push(tag);
+        }
+    }
+    Ok(Some(out))
+}
+
+/// Validate the optional category-id list. We don't probe each id against
+/// storage here — `replace_for_page` reports any FK violation as a 500-grade
+/// storage error, which is the safer side: it lets the test suite catch a
+/// malformed UUID before it ever lands in the DB.
+fn parse_category_list(
+    categories: &Option<Vec<CategoryId>>,
+) -> Result<Option<Vec<CategoryId>>, ApiError> {
+    let Some(list) = categories else {
+        return Ok(None);
+    };
+    let mut out: Vec<CategoryId> = Vec::with_capacity(list.len());
+    for id in list {
+        if !out.contains(id) {
+            out.push(*id);
+        }
+    }
+    Ok(Some(out))
 }
 
 /// Extract every `[[Target]]` wikilink from `source` and persist the set as
@@ -324,6 +387,9 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
     if req.title.trim().is_empty() {
         return Err(ApiError::InvalidInput("title must not be empty".into()));
     }
+    // Validate up-front so a bad tag never produces a committed page row.
+    let parsed_tags = parse_tag_list(&req.tags)?;
+    let parsed_categories = parse_category_list(&req.categories)?;
 
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();
@@ -395,6 +461,23 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
             &live_revision_body,
         )
         .await?;
+        // #29: assign categories / tags. We do this only on live publish
+        // because the queued-edit path doesn't yet model "pending
+        // categories" (#40 follow-up) — applying them now would diverge
+        // from the page row.
+        if let Some(categories) = parsed_categories.as_deref() {
+            state
+                .storage
+                .categories()
+                .replace_for_page(page.id, categories)
+                .await?;
+        }
+        let assigned_tags: Vec<String> = if let Some(tags) = parsed_tags.as_deref() {
+            state.storage.tags().assign(page.id, tags).await?;
+            tags.iter().map(|t| t.as_str().to_owned()).collect()
+        } else {
+            Vec::new()
+        };
         // Schedule a search-index upsert (#26). The handle is non-blocking
         // and fire-and-forget — search is eventually consistent and an
         // outage there must not regress page CRUD.
@@ -402,6 +485,7 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
             &page,
             namespace_label.as_str(),
             &live_revision_body,
+            assigned_tags,
         ));
     }
 
@@ -488,7 +572,7 @@ pub async fn update_page<S: AppStorage>(
 /// `PUT /api/v1/wiki/{namespace}/{slug}`.
 pub(crate) async fn update_page_in_namespace<S: AppStorage>(
     state: AppState<S>,
-    namespace_slug: NamespaceSlug,
+    _namespace_slug: NamespaceSlug,
     slug: String,
     editor: EditorExtractor,
     req: UpdatePageRequest,
@@ -502,6 +586,9 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
         }
         other => other,
     };
+    let parsed_tags = parse_tag_list(&req.tags)?;
+    let parsed_categories = parse_category_list(&req.categories)?;
+    let namespace_slug = parse_namespace_slug(None)?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();
     let mut page = state
@@ -577,6 +664,31 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
             &live_revision_body,
         )
         .await?;
+        // #29: replace category / tag sets when the caller supplied a new
+        // one. `None` means "leave the assignments alone"; `Some([])`
+        // means "clear all assignments". Both are required for tooling.
+        if let Some(categories) = parsed_categories.as_deref() {
+            state
+                .storage
+                .categories()
+                .replace_for_page(page.id, categories)
+                .await?;
+        }
+        let indexable_tags: Vec<String> = if let Some(tags) = parsed_tags.as_deref() {
+            state.storage.tags().assign(page.id, tags).await?;
+            tags.iter().map(|t| t.as_str().to_owned()).collect()
+        } else {
+            // Read the current tag set so the search doc isn't silently
+            // emptied when an update doesn't include the `tags` field.
+            state
+                .storage
+                .tags()
+                .list_for_page(page.id)
+                .await?
+                .into_iter()
+                .map(|t| t.into_string())
+                .collect()
+        };
         // Search-index upsert (#26). Same fire-and-forget semantics as the
         // create path — the indexer applies a delete-then-add so this is
         // also the right shape for "page renamed in body".
@@ -584,6 +696,7 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
             &page,
             namespace_label.as_str(),
             &live_revision_body,
+            indexable_tags,
         ));
     }
 

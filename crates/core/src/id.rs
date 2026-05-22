@@ -127,6 +127,11 @@ define_id! {
     MediaId
 }
 
+define_id! {
+    /// Identifier for a [`crate::category::Category`].
+    CategoryId
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, reason = "ergonomic tests")]
 mod tests {

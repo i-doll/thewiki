@@ -207,6 +207,44 @@ function PageViewComponent() {
 							<p className="mt-1 text-xs text-neutral-500">{protection.hint}</p>
 						)}
 					</div>
+					{page.categories.length > 0 && (
+						<div>
+							<h2 className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+								Categories
+							</h2>
+							<ul className="mt-1 flex flex-wrap gap-1.5">
+								{page.categories.map((cat) => (
+									<li key={cat.id}>
+										<Link
+											to="/category/$slug"
+											params={{ slug: cat.slug }}
+											className="inline-flex items-center rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700 hover:bg-neutral-200"
+										>
+											{cat.display_name}
+										</Link>
+									</li>
+								))}
+							</ul>
+						</div>
+					)}
+					{page.tags.length > 0 && (
+						<div>
+							<h2 className="text-xs font-medium uppercase tracking-wide text-neutral-500">Tags</h2>
+							<ul className="mt-1 flex flex-wrap gap-1.5">
+								{page.tags.map((tag) => (
+									<li key={tag}>
+										<Link
+											to="/tag/$tag"
+											params={{ tag }}
+											className="inline-flex items-center rounded-full border border-neutral-200 bg-white px-2 py-0.5 text-xs font-mono text-neutral-700 hover:bg-neutral-100"
+										>
+											#{tag}
+										</Link>
+									</li>
+								))}
+							</ul>
+						</div>
+					)}
 					<div>
 						<h2 className="text-xs font-medium uppercase tracking-wide text-neutral-500">
 							Last edited

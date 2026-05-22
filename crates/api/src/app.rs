@@ -43,6 +43,7 @@ use uuid::Uuid;
 
 use crate::audit_log;
 use crate::auth::{self, AuthState, csrf};
+use crate::categories;
 use crate::config::{Config, GraphQLConfig, RateLimitConfig};
 use crate::graphql::{self, GraphQLState};
 use crate::media;
@@ -90,6 +91,8 @@ const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
         (name = "audit-log", description = "Administrative audit trail"),
         (name = "media", description = "Content-addressed media uploads"),
         (name = "search", description = "Full-text search"),
+        (name = "categories", description = "Hierarchical categories (#29)"),
+        (name = "tags", description = "Flat tags (#29)"),
     )
 )]
 pub struct ApiDoc;
@@ -104,6 +107,8 @@ fn api_router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
         .nest("/api/v1/audit-log", audit_log::router::<S>())
         .nest("/api/v1/media", media::router::<S>())
         .nest("/api/v1/search", search::router::<S>())
+        .nest("/api/v1/categories", categories::categories_router::<S>())
+        .nest("/api/v1/tags", categories::tags_router::<S>())
 }
 
 /// Generate the full public REST OpenAPI document.

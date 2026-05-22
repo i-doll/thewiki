@@ -21,9 +21,10 @@ use axum::extract::FromRef;
 use thewiki_search::{IndexerHandle, Searcher};
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
-    AuditLogRepository, MediaBlobRepository, MediaRepository, MediaVariantRepository,
-    NamespaceRepository, NewAuditLogEntry, PageAuditMutation, PageLinkRepository, PageRepository,
-    RecentChangesRepository, RevisionRepository, UserRepository,
+    AuditLogRepository, CategoryRepository, MediaBlobRepository, MediaRepository,
+    MediaVariantRepository, NamespaceRepository, NewAuditLogEntry, PageAuditMutation,
+    PageLinkRepository, PageRepository, RecentChangesRepository, RevisionRepository, TagRepository,
+    UserRepository,
 };
 
 use crate::auth::AuthState;
@@ -79,6 +80,14 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     type MediaVariants<'a>: MediaVariantRepository + 'a
     where
         Self: 'a;
+    /// Category repository borrowed from this handle (#29).
+    type Categories<'a>: CategoryRepository + 'a
+    where
+        Self: 'a;
+    /// Tag repository borrowed from this handle (#29).
+    type Tags<'a>: TagRepository + 'a
+    where
+        Self: 'a;
 
     /// Borrow a [`PageRepository`].
     fn pages(&self) -> Self::Pages<'_>;
@@ -100,6 +109,10 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     fn media_blobs(&self) -> Self::MediaBlobs<'_>;
     /// Borrow a [`MediaVariantRepository`] (powers thumbnails, #33).
     fn media_variants(&self) -> Self::MediaVariants<'_>;
+    /// Borrow a [`CategoryRepository`] (#29).
+    fn categories(&self) -> Self::Categories<'_>;
+    /// Borrow a [`TagRepository`] (#29).
+    fn tags(&self) -> Self::Tags<'_>;
 
     /// Commit a page mutation and its required audit row atomically.
     fn commit_page_audit(
@@ -120,6 +133,8 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     type Media<'a> = thewiki_storage::sqlite::SqliteMediaRepository<'a>;
     type MediaBlobs<'a> = thewiki_storage::sqlite::SqliteMediaBlobRepository<'a>;
     type MediaVariants<'a> = thewiki_storage::sqlite::SqliteMediaVariantRepository<'a>;
+    type Categories<'a> = thewiki_storage::sqlite::SqliteCategoryRepository<'a>;
+    type Tags<'a> = thewiki_storage::sqlite::SqliteTagRepository<'a>;
 
     fn pages(&self) -> Self::Pages<'_> {
         Self::pages(self)
@@ -150,6 +165,12 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     }
     fn media_variants(&self) -> Self::MediaVariants<'_> {
         Self::media_variants(self)
+    }
+    fn categories(&self) -> Self::Categories<'_> {
+        Self::categories(self)
+    }
+    fn tags(&self) -> Self::Tags<'_> {
+        Self::tags(self)
     }
 
     fn commit_page_audit(
