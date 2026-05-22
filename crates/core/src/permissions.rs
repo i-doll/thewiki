@@ -43,6 +43,8 @@ bitflags! {
         const MANAGE_ROLES      = 1 << 7;
         /// Create, edit and delete namespaces.
         const MANAGE_NAMESPACES = 1 << 8;
+        /// View the administrative audit log.
+        const VIEW_AUDIT_LOG    = 1 << 9;
     }
 }
 
@@ -116,6 +118,7 @@ mod tests {
             Permissions::MANAGE_USERS,
             Permissions::MANAGE_ROLES,
             Permissions::MANAGE_NAMESPACES,
+            Permissions::VIEW_AUDIT_LOG,
         ] {
             assert!(all.contains(flag), "missing {flag:?}");
         }

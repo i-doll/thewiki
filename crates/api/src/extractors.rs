@@ -109,7 +109,7 @@ pub async fn ensure_anonymous_user<S: AppStorage>(storage: &S) -> Result<UserId,
 /// `is_anonymous` is preserved alongside the resolved `UserId` so downstream
 /// approval-queue gating can match on the original caller class without
 /// re-reading the cookie or the auth config.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct EditorExtractor {
     /// The user id to credit the edit to. Either the authenticated user or
     /// the lazily-provisioned anonymous user (see [`anonymous_user_id`]).
@@ -122,6 +122,8 @@ pub struct EditorExtractor {
     /// anonymous path. Used by the approval-queue wiring to decide whether
     /// the user counts as "new".
     pub user_created_at: Option<OffsetDateTime>,
+    /// Username snapshot to store on audit rows.
+    pub username: String,
 }
 
 impl<S: AppStorage> FromRequestParts<AppState<S>> for EditorExtractor {
@@ -150,6 +152,7 @@ impl<S: AppStorage> FromRequestParts<AppState<S>> for EditorExtractor {
                 user_id: session.user.id,
                 is_anonymous: false,
                 user_created_at: Some(session.user.created_at),
+                username: session.user.username.as_str().to_owned(),
             }),
             Err(AuthError::MissingSession | AuthError::ExpiredSession) => {
                 if state.auth_config.anonymous_edits {
@@ -158,6 +161,7 @@ impl<S: AppStorage> FromRequestParts<AppState<S>> for EditorExtractor {
                         user_id: uid,
                         is_anonymous: true,
                         user_created_at: None,
+                        username: ANONYMOUS_USERNAME.to_owned(),
                     })
                 } else {
                     Err(ApiError::Unauthenticated)
@@ -179,8 +183,13 @@ impl<S: AppStorage> FromRequestParts<AppState<S>> for EditorExtractor {
 /// [`AuthConfig::anonymous_edits`]. Use for endpoints that must never accept
 /// anonymous callers (admin tools, account management). Page CRUD goes
 /// through [`EditorExtractor`] instead.
-#[derive(Debug, Clone, Copy)]
-pub struct RequireAuth(pub UserId);
+#[derive(Debug, Clone)]
+pub struct RequireAuth {
+    /// Authenticated user ID.
+    pub user_id: UserId,
+    /// Username snapshot to store on audit rows.
+    pub username: String,
+}
 
 impl<S: AppStorage> FromRequestParts<AppState<S>> for RequireAuth {
     type Rejection = ApiError;
@@ -193,7 +202,10 @@ impl<S: AppStorage> FromRequestParts<AppState<S>> for RequireAuth {
             return Err(ApiError::Unauthenticated);
         }
         match AuthSession::from_request_parts(parts, state).await {
-            Ok(session) => Ok(Self(session.user.id)),
+            Ok(session) => Ok(Self {
+                user_id: session.user.id,
+                username: session.user.username.as_str().to_owned(),
+            }),
             Err(AuthError::MissingSession | AuthError::ExpiredSession) => {
                 Err(ApiError::Unauthenticated)
             }

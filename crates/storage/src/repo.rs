@@ -27,9 +27,10 @@
 
 use std::time::Duration;
 
+use serde_json::Value;
 use thewiki_core::{
-    Namespace, NamespaceId, NamespaceSlug, Page, PageId, Revision, RevisionId, Role, RoleId,
-    RoleName, Session, SessionId, User, UserId, Username,
+    AuditLogId, Namespace, NamespaceId, NamespaceSlug, Page, PageId, Revision, RevisionId, Role,
+    RoleId, RoleName, Session, SessionId, User, UserId, Username,
 };
 use time::OffsetDateTime;
 
@@ -486,6 +487,130 @@ pub trait RecentChangesRepository: Send + Sync {
         cursor: Option<Cursor>,
         limit: u32,
     ) -> impl Future<Output = Result<PageSlice<RecentChange>, StorageError>> + Send;
+}
+
+/// A persistent administrative audit-log row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditLogEntry {
+    /// Primary key for this audit row.
+    pub id: AuditLogId,
+    /// Actor snapshot.
+    pub actor_id: UserId,
+    /// Actor username snapshot, retained even if the user is later renamed.
+    pub actor_username: String,
+    /// Stable machine action, e.g. `page.create`.
+    pub action: String,
+    /// Target kind, e.g. `page` or `user`.
+    pub target_kind: String,
+    /// Target identifier. Stored without FK so audit rows survive deletion.
+    pub target_id: uuid::Uuid,
+    /// Human-readable target label at event time.
+    pub target_label: Option<String>,
+    /// JSON metadata. Keep this small and never include page bodies or secrets.
+    pub metadata: Value,
+    /// Event timestamp.
+    pub created_at: OffsetDateTime,
+}
+
+/// Input for inserting an audit-log row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewAuditLogEntry {
+    /// Actor snapshot.
+    pub actor_id: UserId,
+    /// Actor username snapshot.
+    pub actor_username: String,
+    /// Stable machine action.
+    pub action: String,
+    /// Target kind.
+    pub target_kind: String,
+    /// Target identifier.
+    pub target_id: uuid::Uuid,
+    /// Human-readable target label.
+    pub target_label: Option<String>,
+    /// JSON metadata.
+    pub metadata: Value,
+}
+
+/// Page mutation paired with a required audit-log write.
+///
+/// Backends should commit the mutation and audit row atomically so callers do
+/// not report a successful privileged action without a durable audit record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PageAuditMutation {
+    /// Insert a new page. When `live_revision` is present, also append that
+    /// revision and promote the page to it.
+    CreatePage {
+        /// Page row to store. For live revisions its `current_revision_id`
+        /// must match `live_revision.id`; for queued edits it must be `None`.
+        page: Page,
+        /// Initial revision, present only when the edit publishes live.
+        live_revision: Option<Revision>,
+    },
+    /// Append a revision to an existing page and promote the page to it.
+    CommitRevision {
+        /// Page row after promotion. Its `current_revision_id` must match
+        /// `revision.id`.
+        page: Page,
+        /// Revision to append.
+        revision: Revision,
+    },
+    /// Delete an existing page.
+    DeletePage {
+        /// Page ID to delete.
+        page_id: PageId,
+    },
+    /// Only write the audit row. Used for queued edits where no page row is
+    /// mutated yet.
+    AuditOnly,
+}
+
+/// Filter passed to [`AuditLogRepository::list`].
+#[derive(Debug, Clone, Default)]
+pub struct AuditLogFilter {
+    /// Only include entries for this actor username.
+    pub actor_username: Option<String>,
+    /// Only include this action.
+    pub action: Option<String>,
+    /// Only include entries at or after this timestamp.
+    pub since: Option<OffsetDateTime>,
+    /// Only include entries at or before this timestamp.
+    pub until: Option<OffsetDateTime>,
+}
+
+/// Persistence operations for the administrative audit log.
+pub trait AuditLogRepository: Send + Sync {
+    /// Insert an audit row and return the stored entry.
+    ///
+    /// # Errors
+    ///
+    /// Lower-level failures propagate as [`StorageError::Database`].
+    fn create(
+        &self,
+        entry: NewAuditLogEntry,
+    ) -> impl Future<Output = Result<AuditLogEntry, StorageError>> + Send;
+
+    /// List audit rows, newest first, cursor paginated.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::InvalidInput`] if `cursor` is malformed for this
+    /// backend. Lower-level failures propagate as [`StorageError::Database`].
+    fn list(
+        &self,
+        filter: AuditLogFilter,
+        cursor: Option<Cursor>,
+        limit: u32,
+    ) -> impl Future<Output = Result<PageSlice<AuditLogEntry>, StorageError>> + Send;
+
+    /// Delete rows older than `cutoff`. Returns the number of rows removed.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures.
+    fn prune_before(
+        &self,
+        cutoff: OffsetDateTime,
+    ) -> impl Future<Output = Result<u64, StorageError>> + Send;
 }
 
 /// Clamp a caller-supplied `limit` to the configured page-size bounds.

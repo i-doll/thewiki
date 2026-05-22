@@ -81,6 +81,7 @@ toml = "0.8"
 
 # Test helpers (collecting axum response bodies in integration tests).
 http-body-util = "0.1"
+roxmltree = "0.20"
 
 # Single-binary deploy (#16): bake the SPA build (`web/dist/`) into the Rust
 # binary in release mode, fall through to it from the on-disk path in debug

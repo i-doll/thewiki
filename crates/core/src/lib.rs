@@ -84,7 +84,7 @@ pub mod user;
 pub mod validation;
 
 pub use content_format::ContentFormat;
-pub use id::{NamespaceId, PageId, RevisionId, RoleId, SessionId, UserId};
+pub use id::{AuditLogId, NamespaceId, PageId, RevisionId, RoleId, SessionId, UserId};
 pub use namespace::{NAMESPACE_SLUG_MAX_BYTES, Namespace, NamespaceSlug};
 pub use page::Page;
 pub use permissions::Permissions;

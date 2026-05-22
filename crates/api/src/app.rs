@@ -41,6 +41,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
 
+use crate::audit_log;
 use crate::auth::{self, AuthState, csrf};
 use crate::config::{Config, RateLimitConfig};
 use crate::pages;
@@ -79,6 +80,7 @@ const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
         (name = "revisions", description = "Revision history + diffs"),
         (name = "auth", description = "Sessions, login, /me"),
         (name = "recent-changes", description = "Wiki-wide chronological edit feed"),
+        (name = "audit-log", description = "Administrative audit trail"),
     )
 )]
 pub struct ApiDoc;
@@ -88,6 +90,7 @@ fn api_router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
     OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api/v1/pages", pages::router::<S>())
         .nest("/api/v1/recent-changes", recent_changes::router::<S>())
+        .nest("/api/v1/audit-log", audit_log::router::<S>())
 }
 
 /// Generate the full public REST OpenAPI document.
@@ -144,6 +147,18 @@ fn add_operation_security(api_doc: &mut OpenApiDoc) {
     set_operation_security(
         api_doc,
         "/api/v1/auth/me",
+        HttpMethod::Get,
+        vec![session_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/audit-log",
+        HttpMethod::Get,
+        vec![session_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/audit-log/atom",
         HttpMethod::Get,
         vec![session_requirement()],
     );

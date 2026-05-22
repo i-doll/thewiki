@@ -13,6 +13,258 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/audit-log": {
+      "get": {
+        "tags": [
+          "audit-log"
+        ],
+        "summary": "`GET /api/v1/audit-log` — list administrative audit events.",
+        "operationId": "list_audit_log",
+        "parameters": [
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Filter by actor username.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Filter by stable action code, e.g. `page.create`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Include entries at or after this RFC 3339 timestamp.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "description": "Include entries at or before this RFC 3339 timestamp.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped by storage defaults.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit log entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks VIEW_AUDIT_LOG",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/audit-log/atom": {
+      "get": {
+        "tags": [
+          "audit-log"
+        ],
+        "summary": "`GET /api/v1/audit-log/atom` — syndicate audit events as Atom.",
+        "operationId": "audit_log_atom",
+        "parameters": [
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Filter by actor username.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Filter by stable action code, e.g. `page.create`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Include entries at or after this RFC 3339 timestamp.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "description": "Include entries at or before this RFC 3339 timestamp.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped by storage defaults.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Atom feed",
+            "content": {
+              "application/atom+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks VIEW_AUDIT_LOG",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -850,7 +1102,7 @@
           "revisions"
         ],
         "summary": "`POST /api/v1/pages/{slug}/revert` — revert a page to a historical revision.",
-        "description": "Steps:\n1. Resolve the page by slug in the default namespace (404 if missing).\n2. Load the historical revision by id (404 if missing).\n3. Verify the revision belongs to this page; if not, **also 404**. We\n   deliberately do not surface a 403 here — leaking the existence of\n   revision ids belonging to other pages would be a cross-page oracle.\n4. Commit a new revision with the historical body. Its `parent_id` is the\n   page's *current* head (not the revision being reverted to) so the\n   history graph stays linear and the audit trail captures both endpoints.\n5. Advance `page.current_revision_id` to the new revision.\n6. Emit a `tracing::info!` on the `audit` target. TODO(#36) wires this\n   into a proper persistent audit log.\n\nReturns the now-current [`PageView`].",
+        "description": "Steps:\n1. Resolve the page by slug in the default namespace (404 if missing).\n2. Load the historical revision by id (404 if missing).\n3. Verify the revision belongs to this page; if not, **also 404**. We\n   deliberately do not surface a 403 here — leaking the existence of\n   revision ids belonging to other pages would be a cross-page oracle.\n4. Commit a new revision with the historical body. Its `parent_id` is the\n   page's *current* head (not the revision being reverted to) so the\n   history graph stays linear and the audit trail captures both endpoints.\n5. Advance `page.current_revision_id` to the new revision.\n6. Write a persistent audit-log row for operators.\n\nReturns the now-current [`PageView`].",
         "operationId": "revert_page",
         "parameters": [
           {
@@ -1138,6 +1390,89 @@
   },
   "components": {
     "schemas": {
+      "AuditLogEntryView": {
+        "type": "object",
+        "description": "JSON representation of one audit-log entry.",
+        "required": [
+          "id",
+          "actor_id",
+          "actor_username",
+          "action",
+          "target_kind",
+          "target_id",
+          "metadata",
+          "created_at"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Stable machine action."
+          },
+          "actor_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Actor user ID."
+          },
+          "actor_username": {
+            "type": "string",
+            "description": "Actor username snapshot."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Event timestamp."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Audit entry ID."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Small structured metadata payload.",
+            "additionalProperties": true
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Target ID."
+          },
+          "target_kind": {
+            "type": "string",
+            "description": "Target kind, e.g. `page`."
+          },
+          "target_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human target label at event time."
+          }
+        }
+      },
+      "AuditLogListResponse": {
+        "type": "object",
+        "description": "Paginated audit-log response.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditLogEntryView"
+            },
+            "description": "Entries ordered newest first."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor for the next page, if any."
+          }
+        }
+      },
       "AuthErrorBody": {
         "type": "object",
         "description": "Wire form returned by auth endpoints on failure.",
@@ -1770,6 +2105,10 @@
     {
       "name": "recent-changes",
       "description": "Wiki-wide chronological edit feed"
+    },
+    {
+      "name": "audit-log",
+      "description": "Administrative audit trail"
     }
   ]
 }

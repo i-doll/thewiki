@@ -41,6 +41,8 @@ pub struct Config {
     pub auth: AuthConfig,
     /// Abuse protection for public endpoints.
     pub rate_limit: RateLimitConfig,
+    /// Administrative audit-log retention.
+    pub audit_log: AuditLogConfig,
     /// Observability (log format and filter).
     pub telemetry: TelemetryConfig,
 }
@@ -249,6 +251,14 @@ pub enum RateLimitBackendConfig {
     InMemory,
 }
 
+/// Audit-log storage policy.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditLogConfig {
+    /// Number of days to retain audit rows. Defaults to 365.
+    pub retention_days: u32,
+}
+
 /// Observability configuration consumed by [`crate::telemetry`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -347,6 +357,9 @@ impl Config {
                 client_ip_header: None,
                 trusted_proxies: Vec::new(),
                 backend: RateLimitBackendConfig::InMemory,
+            },
+            audit_log: AuditLogConfig {
+                retention_days: 365,
             },
             telemetry: TelemetryConfig {
                 log_format: LogFormat::Json,
@@ -461,6 +474,11 @@ impl Config {
         {
             return Err(ConfigError::Invalid(
                 "rate_limit.client_ip_header requires at least one trusted proxy".to_string(),
+            ));
+        }
+        if self.audit_log.retention_days == 0 {
+            return Err(ConfigError::Invalid(
+                "audit_log.retention_days must be > 0".to_string(),
             ));
         }
 

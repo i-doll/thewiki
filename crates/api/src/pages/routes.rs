@@ -9,13 +9,17 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use serde_json::json;
 use thewiki_core::{ContentFormat, NamespaceSlug, Page, PageId, ProtectionLevel, Revision};
-use thewiki_storage::repo::{Cursor, NamespaceRepository, PageRepository, RevisionRepository};
+use thewiki_storage::repo::{
+    Cursor, NamespaceRepository, PageAuditMutation, PageRepository, RevisionRepository,
+};
 use time::OffsetDateTime;
 
 use crate::config::ApprovalScope;
 use crate::error::ApiError;
 use crate::extractors::EditorExtractor;
+use crate::pages::audit::page_event;
 use crate::pages::dto::{
     CreatePageRequest, ListPagesQuery, PageListItem, PageListResponse, PageView, UpdatePageRequest,
 };
@@ -64,10 +68,10 @@ fn needs_approval(scope: ApprovalScope, editor: &EditorExtractor) -> bool {
     }
 }
 
-/// Commit a revision either to the live history or to the approval queue
+/// Decide whether a revision should publish live or land in the approval queue
 /// (M2 — currently a no-op stub).
 ///
-/// Returns `true` when the revision was committed live and the caller should
+/// Returns `true` when the revision should be committed live and the caller should
 /// proceed to flip `pages.current_revision_id`; `false` when it landed in
 /// the (stubbed) approval queue and the page should keep its existing head.
 ///
@@ -95,7 +99,6 @@ async fn queue_or_publish<S: AppStorage>(
         );
         Ok(false)
     } else {
-        state.storage.revisions().create(revision).await?;
         Ok(true)
     }
 }
@@ -207,6 +210,7 @@ pub async fn create_page<S: AppStorage>(
 
     let namespace_slug = parse_namespace_slug(Some(&req.namespace_slug))?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
+    let namespace_label = namespace.slug.as_str().to_owned();
 
     let now = OffsetDateTime::now_utc();
     let mut page = Page {
@@ -221,15 +225,12 @@ pub async fn create_page<S: AppStorage>(
         updated_at: now,
     };
 
-    state.storage.pages().create(&page).await?;
-
     let revision = Revision::new(page.id, None, editor.user_id, req.content, None);
     let live = queue_or_publish(&state, &revision, &editor).await?;
 
     let status = if live {
         page.current_revision_id = Some(revision.id);
         page.updated_at = OffsetDateTime::now_utc();
-        state.storage.pages().update(&page).await?;
         StatusCode::CREATED
     } else {
         // 202 Accepted: the request was understood and queued, but the page
@@ -237,6 +238,33 @@ pub async fn create_page<S: AppStorage>(
         // page row (no current revision) so the client can correlate.
         StatusCode::ACCEPTED
     };
+
+    let mut metadata = json!({
+        "namespace": namespace_label,
+        "slug": page.slug.as_str(),
+        "live": live,
+    });
+    if live {
+        metadata["revision_id"] = json!(revision.id.into_uuid());
+    }
+    let audit = page_event(
+        editor.user_id,
+        &editor.username,
+        "page.create",
+        page.id,
+        format!("{namespace_label}/{}", page.slug),
+        metadata,
+    );
+    state
+        .storage
+        .commit_page_audit(
+            PageAuditMutation::CreatePage {
+                page: page.clone(),
+                live_revision: live.then_some(revision),
+            },
+            audit,
+        )
+        .await?;
 
     let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
     Ok((status, Json(view)))
@@ -312,9 +340,9 @@ pub async fn update_page<S: AppStorage>(
         }
         other => other,
     };
-
     let namespace_slug = parse_namespace_slug(None)?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
+    let namespace_label = namespace.slug.as_str().to_owned();
     let mut page = state
         .storage
         .pages()
@@ -329,6 +357,10 @@ pub async fn update_page<S: AppStorage>(
         req.edit_summary,
     );
     let live = queue_or_publish(&state, &revision, &editor).await?;
+    let title_changed = live
+        && new_title
+            .as_deref()
+            .is_some_and(|title| title != page.title);
 
     let status = if live {
         if let Some(title) = new_title {
@@ -336,11 +368,37 @@ pub async fn update_page<S: AppStorage>(
         }
         page.current_revision_id = Some(revision.id);
         page.updated_at = OffsetDateTime::now_utc();
-        state.storage.pages().update(&page).await?;
         StatusCode::OK
     } else {
         StatusCode::ACCEPTED
     };
+
+    let mut metadata = json!({
+        "namespace": namespace_label,
+        "slug": page.slug.as_str(),
+        "live": live,
+        "title_changed": title_changed,
+    });
+    if live {
+        metadata["revision_id"] = json!(revision.id.into_uuid());
+    }
+    let audit = page_event(
+        editor.user_id,
+        &editor.username,
+        "page.update",
+        page.id,
+        format!("{namespace_label}/{}", page.slug),
+        metadata,
+    );
+    let mutation = if live {
+        PageAuditMutation::CommitRevision {
+            page: page.clone(),
+            revision,
+        }
+    } else {
+        PageAuditMutation::AuditOnly
+    };
+    state.storage.commit_page_audit(mutation, audit).await?;
 
     let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
     Ok((status, Json(view)))
@@ -376,16 +434,31 @@ pub async fn delete_page<S: AppStorage>(
     // TODO(#14): replace this placeholder check with a real role-gated
     // extractor — `RequireRole(Role::Admin)` or similar. Today
     // [`EditorExtractor`] covers the 401-vs-anonymous distinction.
-    _editor: EditorExtractor,
+    editor: EditorExtractor,
 ) -> Result<StatusCode, ApiError> {
     let namespace_slug = parse_namespace_slug(None)?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
+    let namespace_label = namespace.slug.as_str().to_owned();
     let page = state
         .storage
         .pages()
         .get_by_namespace_and_slug(namespace.id, &slug)
         .await?;
-    state.storage.pages().delete(page.id).await?;
+    let audit = page_event(
+        editor.user_id,
+        &editor.username,
+        "page.delete",
+        page.id,
+        format!("{namespace_label}/{}", page.slug),
+        json!({
+            "namespace": namespace_label,
+            "slug": page.slug.as_str(),
+        }),
+    );
+    state
+        .storage
+        .commit_page_audit(PageAuditMutation::DeletePage { page_id: page.id }, audit)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -451,6 +524,7 @@ mod tests {
             is_anonymous,
             user_created_at: user_age_secs
                 .map(|s| OffsetDateTime::now_utc() - time::Duration::seconds(s)),
+            username: "editor".to_string(),
         }
     }
 
