@@ -30,6 +30,7 @@
 		"dompurify": "^3.4.5",
 		"marked": "^18.0.4",
 		"react": "^19.2.6",
+		"react-diff-viewer-continued": "^4.2.2",
 		"react-dom": "^19.2.6",
 		"react-hot-toast": "^2.6.0",
 		"tiptap-markdown": "^0.9.0"
