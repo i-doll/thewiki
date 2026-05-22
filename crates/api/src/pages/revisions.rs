@@ -99,6 +99,7 @@ pub struct RevisionListResponse {
 
 /// Query parameters for `GET /api/v1/pages/{slug}/revisions`.
 #[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListRevisionsQuery {
     /// Opaque cursor returned by a previous call. Omit to start from the
     /// newest revision.
@@ -113,6 +114,7 @@ pub struct ListRevisionsQuery {
 
 /// Query parameters for `GET /api/v1/pages/{slug}/diff`.
 #[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct DiffQuery {
     /// Revision the diff is computed *from* — shown as `-` lines.
     pub from: RevisionId,
@@ -225,6 +227,7 @@ async fn resolve_page<S: AppStorage>(
     responses(
         (status = 200, description = "Revision history", body = RevisionListResponse),
         (status = 404, description = "Page not found", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
     ),
     tag = "revisions",
 )]
@@ -274,6 +277,7 @@ pub async fn list_revisions<S: AppStorage>(
     responses(
         (status = 200, description = "Diff between two revisions", body = DiffResponse),
         (status = 404, description = "Page or revision not found", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
     ),
     tag = "revisions",
 )]

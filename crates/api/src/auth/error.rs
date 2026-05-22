@@ -11,9 +11,17 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
+use serde::Serialize;
 use thewiki_storage::StorageError;
 use thiserror::Error;
+use utoipa::ToSchema;
+
+/// Wire form returned by auth endpoints on failure.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AuthErrorBody {
+    /// Stable machine-readable error code.
+    pub error: String,
+}
 
 /// What can go wrong on the authentication path.
 #[derive(Debug, Error)]
@@ -88,7 +96,9 @@ impl IntoResponse for AuthError {
         let code = self.wire_code();
         // Log the typed variant for operators; the wire payload stays generic.
         tracing::debug!(error = %self, code, status = %status, "auth error");
-        let body = Json(json!({ "error": code }));
+        let body = Json(AuthErrorBody {
+            error: code.to_owned(),
+        });
         (status, body).into_response()
     }
 }

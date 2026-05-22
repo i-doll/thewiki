@@ -29,6 +29,7 @@ use crate::state::{AppState, AppStorage};
         (status = 200, description = "Recent changes", body = RecentChangesResponse),
         (status = 400, description = "Malformed query", body = crate::error::ErrorBody),
         (status = 404, description = "Namespace or actor not found", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
     ),
     tag = "recent-changes",
 )]

@@ -105,6 +105,7 @@ pub struct PageListResponse {
 
 /// Query parameters for `GET /api/v1/pages`.
 #[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListPagesQuery {
     /// Namespace slug to list pages from. Defaults to `Main` if absent.
     /// Namespace prefix routing lands with #28.

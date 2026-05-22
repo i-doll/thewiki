@@ -13,17 +13,25 @@ use axum::extract::{ConnectInfo, Extension, Request};
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
+use serde::Serialize;
 use thewiki_core::{SessionId, UserId};
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::SessionRepository;
 use tower_cookies::Cookies;
+use utoipa::ToSchema;
 
 use crate::auth::AuthState;
 use crate::auth::session::{SESSION_COOKIE, decode_session_id};
 use crate::config::{
     ClientIpHeader, RateLimitBackendConfig, RateLimitBucketConfig, RateLimitConfig,
 };
+
+/// Wire form returned when a request exceeds its configured rate limit.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RateLimitErrorBody {
+    /// Stable machine-readable error code.
+    pub error: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BucketKind {
@@ -365,7 +373,9 @@ fn parse_forwarded_ip(raw: &str) -> Option<IpAddr> {
 fn rate_limited_response(retry_after: Duration) -> Response {
     let mut response = (
         StatusCode::TOO_MANY_REQUESTS,
-        Json(json!({ "error": "rate_limited" })),
+        Json(RateLimitErrorBody {
+            error: "rate_limited".to_owned(),
+        }),
     )
         .into_response();
     let retry_after_secs = retry_after.as_secs().max(1).to_string();

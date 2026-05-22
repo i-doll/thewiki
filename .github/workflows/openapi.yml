@@ -1,0 +1,44 @@
+name: OpenAPI
+
+# Manual-only while repo CI is intentionally gated during pre-alpha. Restore
+# pull_request paths when CI is re-enabled broadly.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: openapi-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+
+jobs:
+  schema:
+    name: OpenAPI / schema drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable branch pin
+        with:
+          toolchain: "1.92"
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@400e7407cfd7a091e5fbb6afec01ec146c432b7c # v2.7.7
+        with:
+          shared-key: openapi
+
+      - name: Regenerate OpenAPI schema
+        run: cargo run --locked -p thewiki-api -- openapi > docs/openapi.json
+
+      - name: Check committed schema is current
+        run: git diff --exit-code
