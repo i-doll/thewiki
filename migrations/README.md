@@ -36,14 +36,22 @@ incident.
 ## Dialect-specific variants
 
 The default location (`migrations/<name>.sql`) holds **portable SQL** that
-works on every backend `thewiki` supports. SQLite is the only backend at M0,
-so the portable file is also the SQLite file in practice.
+works on every backend `thewiki` supports. The SQLite adapter loads from
+that directory directly.
 
-When a migration genuinely needs dialect-specific syntax (e.g. Postgres'
-`DEFERRABLE INITIALLY DEFERRED`, or `JSONB` columns), place a parallel
-Postgres-flavour file under `migrations/postgres/<name>.sql`. The libsql/
-Postgres adapters land in M1 (#24, #25) and will pick the right directory at
-build time via separate `sqlx::migrate!` invocations.
+Postgres-flavoured copies live under `migrations/postgres/<name>.sql` —
+native `UUID`, `TIMESTAMPTZ`, `JSONB`, and the
+`pages.current_revision_id` FK marked `DEFERRABLE INITIALLY DEFERRED` so a
+single transaction can insert a page that forward-references a revision
+not yet appended. The Postgres adapter (`storage::postgres::PostgresStorage`)
+runs `sqlx::migrate!("../../migrations/postgres")` instead of the portable
+set.
+
+Filenames must stay in sync across the two directories — the migrator tracks
+applied migrations by their numeric prefix, so a Postgres-only addition with
+a fresh timestamp is fine, but renaming an existing migration on one side
+without the other will skew schema history. The libsql adapter (#24) is
+expected to reuse the portable directory.
 
 ## Adding a new migration
 

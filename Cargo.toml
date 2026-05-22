@@ -107,6 +107,7 @@ sqlx = { version = "0.8", default-features = false, features = [
     "time",
     "json",
     "sqlite",
+    "postgres",
 ] }
 
 # libsql / Turso adapter (#24). Embedded SQLite-compatible engine with optional
