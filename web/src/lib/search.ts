@@ -35,6 +35,8 @@ export interface SearchOptions {
 	limit?: number;
 	/** Optional namespace bias. Today the backend treats this as a strict filter. */
 	namespace?: string;
+	/** Opaque cursor returned by a previous call. Reserved for the next pagination PR. */
+	cursor?: string | null;
 	/** Abort signal for query cancellation when the caller is unmounted. */
 	signal?: AbortSignal;
 }
@@ -61,6 +63,9 @@ export async function searchPages(
 	}
 	if (options.namespace && options.namespace.length > 0) {
 		params.set("namespace", options.namespace);
+	}
+	if (options.cursor) {
+		params.set("cursor", options.cursor);
 	}
 
 	const res = await fetch(`/api/v1/search?${params.toString()}`, {

@@ -49,6 +49,7 @@ use crate::media;
 use crate::pages;
 use crate::rate_limit::{self, RateLimitState};
 use crate::recent_changes;
+use crate::search;
 use crate::state::{AppState, AppStorage};
 use crate::static_assets;
 
@@ -84,6 +85,7 @@ const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
         (name = "recent-changes", description = "Wiki-wide chronological edit feed"),
         (name = "audit-log", description = "Administrative audit trail"),
         (name = "media", description = "Content-addressed media uploads"),
+        (name = "search", description = "Full-text search"),
     )
 )]
 pub struct ApiDoc;
@@ -95,6 +97,7 @@ fn api_router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
         .nest("/api/v1/recent-changes", recent_changes::router::<S>())
         .nest("/api/v1/audit-log", audit_log::router::<S>())
         .nest("/api/v1/media", media::router::<S>())
+        .nest("/api/v1/search", search::router::<S>())
 }
 
 /// Generate the full public REST OpenAPI document.

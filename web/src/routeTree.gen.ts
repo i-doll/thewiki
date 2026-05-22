@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SearchRouteImport } from './routes/search'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WikiIndexRouteImport } from './routes/wiki.index'
@@ -17,6 +18,11 @@ import { Route as WikiSlugEditRouteImport } from './routes/wiki_.$slug.edit'
 import { Route as WikiSlugHistoryRouteImport } from './routes/wiki.$slug.history'
 import { Route as WikiSlugDiffRouteImport } from './routes/wiki.$slug.diff'
 
+const SearchRoute = SearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -56,6 +62,7 @@ const WikiSlugDiffRoute = WikiSlugDiffRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/search': typeof SearchRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki/': typeof WikiIndexRoute
   '/wiki/$slug/diff': typeof WikiSlugDiffRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/search': typeof SearchRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki': typeof WikiIndexRoute
   '/wiki/$slug/diff': typeof WikiSlugDiffRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/search': typeof SearchRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
   '/wiki/': typeof WikiIndexRoute
   '/wiki/$slug/diff': typeof WikiSlugDiffRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/search'
     | '/wiki/$slug'
     | '/wiki/'
     | '/wiki/$slug/diff'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/search'
     | '/wiki/$slug'
     | '/wiki'
     | '/wiki/$slug/diff'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/login'
+    | '/search'
     | '/wiki/$slug'
     | '/wiki/'
     | '/wiki/$slug/diff'
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  SearchRoute: typeof SearchRoute
   WikiSlugRoute: typeof WikiSlugRouteWithChildren
   WikiIndexRoute: typeof WikiIndexRoute
   WikiSlugEditRoute: typeof WikiSlugEditRoute
@@ -121,6 +134,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -190,6 +210,7 @@ const WikiSlugRouteWithChildren = WikiSlugRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  SearchRoute: SearchRoute,
   WikiSlugRoute: WikiSlugRouteWithChildren,
   WikiIndexRoute: WikiIndexRoute,
   WikiSlugEditRoute: WikiSlugEditRoute,

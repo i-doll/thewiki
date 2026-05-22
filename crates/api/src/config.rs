@@ -453,6 +453,17 @@ pub struct SearchConfig {
     pub commit_interval_ms: u64,
     /// Per-commit job-count threshold. Default: 100.
     pub batch_size: u32,
+    /// Multiplier applied to the `title` field during BM25 ranking. Values
+    /// above 1.0 promote title matches; `0.0` disables the boost (every
+    /// field weighted equally). Default: `2.0`.
+    #[serde(default = "default_title_boost")]
+    pub title_boost: f32,
+}
+
+/// `serde` default for [`SearchConfig::title_boost`].
+#[must_use]
+fn default_title_boost() -> f32 {
+    2.0
 }
 
 impl Default for SearchConfig {
@@ -461,6 +472,7 @@ impl Default for SearchConfig {
             index_path: PathBuf::from("data/search"),
             commit_interval_ms: 200,
             batch_size: 100,
+            title_boost: default_title_boost(),
         }
     }
 }
@@ -770,6 +782,11 @@ impl Config {
         if self.search.batch_size == 0 {
             return Err(ConfigError::Invalid(
                 "search.batch_size must be > 0".to_string(),
+            ));
+        }
+        if !self.search.title_boost.is_finite() || self.search.title_boost < 0.0 {
+            return Err(ConfigError::Invalid(
+                "search.title_boost must be a finite non-negative number".to_string(),
             ));
         }
 

@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use axum::extract::FromRef;
-use thewiki_search::IndexerHandle;
+use thewiki_search::{IndexerHandle, Searcher};
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
     AuditLogRepository, MediaBlobRepository, MediaRepository, MediaVariantRepository,
@@ -211,6 +211,14 @@ pub struct AppState<S: AppStorage> {
     /// page-CRUD handlers still call the handle but the no-op variant
     /// drops every job.
     pub search: IndexerHandle,
+    /// Read-side handle to the same Tantivy index the indexer writes to
+    /// (#27). Cloneable; disabled in tests / callers that don't stand up
+    /// the index — queries against a disabled handle return an empty
+    /// result set rather than an error.
+    pub searcher: Searcher,
+    /// Title-field boost passed through to the Tantivy `QueryParser`.
+    /// Pulled from [`crate::config::SearchConfig::title_boost`].
+    pub search_title_boost: f32,
     /// Tuning for the media upload endpoint (size cap, type allowlist).
     /// Pulled from [`crate::config::StorageConfig::media`].
     pub media_config: crate::config::MediaConfig,
@@ -233,6 +241,8 @@ impl<S: AppStorage> AppState<S> {
             auth_config,
             auth_state: None,
             search: IndexerHandle::disabled(),
+            searcher: Searcher::disabled(),
+            search_title_boost: 2.0,
             media_config: crate::config::MediaConfig::default(),
             media_backend: None,
         }
@@ -244,6 +254,25 @@ impl<S: AppStorage> AppState<S> {
     #[must_use]
     pub fn with_search(mut self, search: IndexerHandle) -> Self {
         self.search = search;
+        self
+    }
+
+    /// Replace the [`Searcher`] used by the read-side search endpoint.
+    ///
+    /// Production code constructs this with the same `Arc<SearchIndex>` the
+    /// indexer worker writes against, so committed updates are visible
+    /// through the reader as Tantivy's commit-reload window expires.
+    #[must_use]
+    pub fn with_searcher(mut self, searcher: Searcher) -> Self {
+        self.searcher = searcher;
+        self
+    }
+
+    /// Override the title-field boost applied to BM25 ranking. Wired from
+    /// [`crate::config::SearchConfig::title_boost`].
+    #[must_use]
+    pub fn with_search_title_boost(mut self, boost: f32) -> Self {
+        self.search_title_boost = boost;
         self
     }
 
@@ -292,6 +321,8 @@ impl<S: AppStorage> Clone for AppState<S> {
             auth_config: self.auth_config.clone(),
             auth_state: self.auth_state.clone(),
             search: self.search.clone(),
+            searcher: self.searcher.clone(),
+            search_title_boost: self.search_title_boost,
             media_config: self.media_config.clone(),
             media_backend: self.media_backend.clone(),
         }

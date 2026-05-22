@@ -46,6 +46,7 @@ pub mod indexer;
 pub mod query;
 pub mod results;
 pub mod schema;
+pub mod searcher;
 
 pub use error::SearchError;
 pub use index::{PageDoc, SearchIndex};
@@ -53,3 +54,4 @@ pub use indexer::{IndexJob, Indexer, IndexerHandle};
 pub use query::SearchQuery;
 pub use results::{SearchHit, SearchResults};
 pub use schema::SearchSchema;
+pub use searcher::Searcher;

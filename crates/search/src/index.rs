@@ -210,7 +210,14 @@ impl SearchIndex {
     pub fn search(&self, query: &SearchQuery) -> Result<SearchResults, SearchError> {
         let searcher = self.reader.searcher();
         let s = &self.schema;
-        let qp = QueryParser::for_index(&self.index, vec![s.title, s.body, s.tags]);
+        let mut qp = QueryParser::for_index(&self.index, vec![s.title, s.body, s.tags]);
+        // Apply the operator-tunable title boost. Tantivy expects a strictly
+        // positive score; clamp anything <= 0 to 1.0 (i.e. "boost disabled").
+        // The default the API layer passes is 2.0 — meaningfully promoting
+        // title hits while keeping body matches in the running.
+        if query.title_boost > 0.0 {
+            qp.set_field_boost(s.title, query.title_boost);
+        }
         let mut text = query.text.trim().to_string();
         // Apply optional filters via a `+` prefix using Tantivy's classic
         // query syntax. Cheap, avoids hand-rolling a BooleanQuery for the

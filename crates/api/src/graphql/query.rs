@@ -276,7 +276,7 @@ impl<S: AppStorage> Query<S> {
     ) -> Result<SearchResults, Error> {
         let gctx = ctx_storage::<S>(ctx)?;
         let state = &gctx.state;
-        if !state.search.is_enabled() {
+        if !state.searcher.is_enabled() {
             // Search is disabled in this deployment / test fixture; return
             // an empty result rather than a misleading error.
             return Ok(SearchResults {
@@ -284,16 +284,32 @@ impl<S: AppStorage> Query<S> {
                 total_estimate: 0,
             });
         }
-        let _ = (query, namespace, limit);
-        // The current indexer handle exposes only write hooks; reads go
-        // through `SearchIndex::search` which is not on the handle today.
-        // Surface that explicitly so clients know the operation isn't yet
-        // wired into the GraphQL surface (it's a known gap tracked alongside
-        // the broader search-endpoint follow-up).
-        Err(
-            Error::new("search is not wired into the GraphQL surface yet; use the REST endpoint")
-                .extend_with(|_, e| e.set("code", "NOT_IMPLEMENTED")),
-        )
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return Ok(SearchResults {
+                hits: Vec::new(),
+                total_estimate: 0,
+            });
+        }
+        // Mirror the REST limit-clamp so REST + GraphQL behave identically.
+        let limit = match limit {
+            0 => crate::search::routes::DEFAULT_LIMIT,
+            n => n.min(crate::search::routes::MAX_LIMIT),
+        };
+        let sq = thewiki_search::SearchQuery {
+            text: trimmed.to_string(),
+            namespace_id: None,
+            namespace_slug: namespace,
+            tag: None,
+            limit,
+            cursor: None,
+            title_boost: state.search_title_boost,
+        };
+        let results = state
+            .searcher
+            .search(&sq)
+            .map_err(|e| Error::new(format!("search: {e}")))?;
+        Ok(SearchResults::from(results))
     }
 
     /// Administrative audit log. Requires the `VIEW_AUDIT_LOG` permission.

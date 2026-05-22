@@ -1837,6 +1837,107 @@
           }
         }
       }
+    },
+    "/api/v1/search": {
+      "get": {
+        "tags": [
+          "search"
+        ],
+        "summary": "`GET /api/v1/search` — ranked full-text search across every indexed page.",
+        "description": "Returns `400 invalid_input` when `q` is missing or whitespace-only.\nOtherwise responds with a hit list ordered by Tantivy BM25 score\n(with the configured title-boost applied to title-field matches).\nSnippets carry HTML highlights wrapped in `<mark>…</mark>`; clients must\nsanitise before rendering.",
+        "operationId": "search",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Free-text query. Empty / whitespace-only values are rejected with\n`400 invalid_input`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "description": "Optional namespace filter (slug). Unknown namespaces simply return\nno hits — we deliberately do not 404 here because the index may\nlag the canonical namespace list.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "description": "Optional tag filter. Currently matches against the empty multi-valued\n`tags` field, so always returns nothing until #29 lands.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. `0` / missing falls back to the route default (10).\nClamped to the route maximum (50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call. Reserved for a follow-up\n— accepted today but ignored, so clients can pass it through\nwithout breaking when pagination lands.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ranked hits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty / malformed query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2588,6 +2689,83 @@
           }
         }
       },
+      "SearchHitView": {
+        "type": "object",
+        "description": "One ranked hit returned by the search endpoint.\n\nConstructed from a [`thewiki_search::SearchHit`] in the handler. The\nsnippet carries HTML — clients are expected to sanitise it before\nrendering (the SPA pipes it through DOMPurify).",
+        "required": [
+          "page_id",
+          "namespace_slug",
+          "slug",
+          "title",
+          "snippet",
+          "score"
+        ],
+        "properties": {
+          "namespace_slug": {
+            "type": "string",
+            "description": "Slug of the namespace the hit lives in."
+          },
+          "page_id": {
+            "$ref": "#/components/schemas/PageId",
+            "description": "Page primary key (UUIDv7)."
+          },
+          "score": {
+            "type": "number",
+            "format": "float",
+            "description": "BM25-derived relevance score (higher is better). Useful only as a\nrelative ranking within the same response."
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug of the matched page."
+          },
+          "snippet": {
+            "type": "string",
+            "description": "HTML snippet of the body with matched terms wrapped in\n`<mark>…</mark>`. May be empty when the match only touched the\ntitle — the SPA renders the title alone in that case."
+          },
+          "title": {
+            "type": "string",
+            "description": "Page title."
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Last-edited timestamp of the matched page."
+          }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "description": "Response body for `GET /api/v1/search`.\n\n`next_cursor` is reserved for relevance-cursor pagination; today every\nresponse carries `null` and `total_estimate` reflects the number of hits\nmaterialised in this response. The shape stays stable so a follow-up\ncan wire cursors without changing the wire surface.",
+        "required": [
+          "items",
+          "total_estimate"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchHitView"
+            },
+            "description": "Ranked hits, descending by score."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque cursor for the next batch — currently always `null`."
+          },
+          "total_estimate": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Best-effort estimate of the total matching document count.",
+            "minimum": 0
+          }
+        }
+      },
       "UpdatePageRequest": {
         "type": "object",
         "description": "Body of `PUT /api/v1/pages/{slug}`.",
@@ -2706,6 +2884,10 @@
     {
       "name": "media",
       "description": "Content-addressed media uploads"
+    },
+    {
+      "name": "search",
+      "description": "Full-text search"
     }
   ]
 }
