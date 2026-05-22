@@ -62,7 +62,9 @@ mod session;
 mod user;
 
 pub use audit_log::PostgresAuditLogRepository;
-pub use media::{PostgresMediaBlobRepository, PostgresMediaRepository};
+pub use media::{
+    PostgresMediaBlobRepository, PostgresMediaRepository, PostgresMediaVariantRepository,
+};
 pub use namespace::PostgresNamespaceRepository;
 pub use page::PostgresPageRepository;
 pub use recent_changes::PostgresRecentChangesRepository;
@@ -205,6 +207,13 @@ impl PostgresStorage {
     #[must_use]
     pub fn media_blobs(&self) -> PostgresMediaBlobRepository<'_> {
         PostgresMediaBlobRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`MediaVariantRepository`](crate::repo::MediaVariantRepository) (#33).
+    #[must_use]
+    pub fn media_variants(&self) -> PostgresMediaVariantRepository<'_> {
+        PostgresMediaVariantRepository::new(&self.pool)
     }
 
     /// Apply the embedded Postgres migration set to an arbitrary pool.

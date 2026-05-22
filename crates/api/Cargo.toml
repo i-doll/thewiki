@@ -95,6 +95,16 @@ ammonia = { workspace = true }
 # `async fn` in trait dyn-compatible without help, so `async_trait` is the
 # pragmatic choice for this one trait.
 async-trait = { workspace = true }
+# Image processing for the thumbnail pipeline (#33). Decoding the upload,
+# resizing it via Lanczos3, and re-encoding to WebP all live in
+# `crates/api/src/media/thumbnail.rs`. Re-encoding strips EXIF as a side
+# effect (the `image` encoders never carry the EXIF block through), which
+# is the privacy property the issue calls for.
+image = { workspace = true }
+# Used by the S3 backend's `delete_variants` path to walk the bucket
+# `media/<id>/` prefix. `axum` already pulls `futures-util` in
+# transitively, but declaring the dep keeps the import obvious.
+futures-util = "0.3"
 # Rate limiting (#35). `dashmap` is the sharded concurrent map under the
 # in-memory backend; `async-trait` lets the pluggable store trait stay async
 # without leaking the future type. The `redis` crate is optional — it ships
@@ -120,6 +130,14 @@ serde_json = { workspace = true }
 sqlx = { workspace = true }
 time = { workspace = true }
 uuid = { workspace = true }
+# Used by the thumbnail integration tests to parse EXIF out of the served
+# variant bytes and assert the encoder dropped it. Never reached at
+# runtime.
+kamadak-exif = { workspace = true }
+# Used in the animated-GIF test to encode a tiny 2-frame GIF without
+# pulling in a heavier image-construction crate. `image` itself depends
+# on `gif` so the lockfile already carries it.
+gif = "0.14"
 
 [lints]
 workspace = true

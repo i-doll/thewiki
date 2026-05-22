@@ -8,10 +8,12 @@
 pub mod dto;
 pub mod routes;
 pub mod storage;
+pub mod thumbnail;
 
 pub use storage::{
     DbMediaBackend, MediaBackend, MediaBackendError, S3MediaBackend, build_media_backend,
 };
+pub use thumbnail::{VARIANT_LARGE, VARIANT_MEDIUM, VARIANT_SMALL, VARIANTS};
 
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;

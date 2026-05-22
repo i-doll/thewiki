@@ -62,6 +62,13 @@ fn build() -> Builder<'static> {
         "li",
         "ol",
         "p",
+        // `<picture>` + `<source>` carry the responsive variants emitted by
+        // the Markdown renderer when a `![]()` points at `/api/v1/media/<id>`
+        // (#33). Limiting `<source>` attributes to `srcset` / `sizes` /
+        // `type` keeps the surface tight — no `media=`-driven UA detection,
+        // no `srcdoc` injection.
+        "picture",
+        "source",
         "pre",
         "s",
         "span",
@@ -92,10 +99,13 @@ fn build() -> Builder<'static> {
     tag_attributes.insert("a", ["href", "title", "class"].into_iter().collect());
     tag_attributes.insert(
         "img",
-        ["src", "alt", "title", "width", "height"]
-            .into_iter()
-            .collect(),
+        [
+            "src", "alt", "title", "width", "height", "loading", "decoding",
+        ]
+        .into_iter()
+        .collect(),
     );
+    tag_attributes.insert("source", ["srcset", "sizes", "type"].into_iter().collect());
     tag_attributes.insert("code", ["class"].into_iter().collect());
     tag_attributes.insert("td", ["align"].into_iter().collect());
     tag_attributes.insert("th", ["align"].into_iter().collect());

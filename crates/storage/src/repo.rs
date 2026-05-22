@@ -769,6 +769,94 @@ pub trait MediaRepository: Send + Sync {
     ///
     /// [`StorageError::NotFound`] if the row didn't exist.
     fn delete(&self, id: MediaId) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Stream every media row, ordered by id ascending (`(created_at, id)`
+    /// in practice — UUIDv7 sorts lexicographically by creation time).
+    ///
+    /// Used by the `regen-thumbnails` CLI to walk the table without
+    /// holding the whole result set in memory. `cursor` is the last id
+    /// returned by the previous call; pass `None` to start fresh.
+    /// Backends clamp `limit` via [`clamp_limit`].
+    ///
+    /// # Errors
+    ///
+    /// Lower-level driver failures propagate as [`StorageError::Database`].
+    fn list_all(
+        &self,
+        cursor: Option<MediaId>,
+        limit: u32,
+    ) -> impl Future<Output = Result<PageSlice<Media>, StorageError>> + Send;
+}
+
+/// A thumbnail variant row from `media_variants` (#33).
+///
+/// The `data` column is populated only for the in-DB blob backend; for the
+/// S3 backend the variant payload lives in the bucket and `data` is `None`.
+/// Variants are content-addressed under the parent `media_id` — the row is
+/// dropped automatically via `ON DELETE CASCADE` when the parent media row
+/// is removed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaVariant {
+    /// Parent media row.
+    pub media_id: MediaId,
+    /// Variant label — `"small"`, `"medium"`, or `"large"`.
+    pub variant: String,
+    /// IANA media type of the variant bytes (e.g. `image/webp`).
+    pub content_type: String,
+    /// Stored variant length in bytes.
+    pub byte_size: u64,
+    /// Rendered width in pixels.
+    pub width: u32,
+    /// Rendered height in pixels.
+    pub height: u32,
+    /// Variant payload. `None` when the S3 backend owns the bytes.
+    pub data: Option<bytes::Bytes>,
+    /// When the variant was generated.
+    pub created_at: OffsetDateTime,
+}
+
+/// Persistence operations for the thumbnail variants table (#33).
+///
+/// The trait covers metadata-and-bytes together because the in-DB backend
+/// stores both in the same row, and the S3 backend keeps the metadata row
+/// even when the payload lives in the bucket. Callers consult `data` to
+/// decide whether to serve the row directly or fetch from the object
+/// store.
+pub trait MediaVariantRepository: Send + Sync {
+    /// Insert or replace a variant row. Idempotent on `(media_id, variant)`
+    /// so the regen-thumbnails CLI can re-run safely.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::Database`] if `media_id` doesn't reference an
+    ///   existing media row, or on any driver failure.
+    fn put(&self, variant: &MediaVariant) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Fetch a specific variant for `media_id`.
+    ///
+    /// Returns `Ok(None)` if the variant doesn't exist (the caller's
+    /// fallback is to serve the original).
+    ///
+    /// # Errors
+    ///
+    /// Lower-level driver failures propagate as [`StorageError::Database`].
+    fn get(
+        &self,
+        media_id: MediaId,
+        variant: &str,
+    ) -> impl Future<Output = Result<Option<MediaVariant>, StorageError>> + Send;
+
+    /// Drop every variant for `media_id`. Called by the regen-thumbnails
+    /// path before re-inserting fresh rows so we don't keep stale data
+    /// around with the wrong dimensions.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures.
+    fn delete_for_media(
+        &self,
+        media_id: MediaId,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 }
 
 /// Persistence operations for the in-database blob backend.

@@ -21,8 +21,8 @@ use axum::extract::FromRef;
 use thewiki_search::IndexerHandle;
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
-    AuditLogRepository, MediaBlobRepository, MediaRepository, NamespaceRepository,
-    NewAuditLogEntry, PageAuditMutation, PageLinkRepository, PageRepository,
+    AuditLogRepository, MediaBlobRepository, MediaRepository, MediaVariantRepository,
+    NamespaceRepository, NewAuditLogEntry, PageAuditMutation, PageLinkRepository, PageRepository,
     RecentChangesRepository, RevisionRepository, UserRepository,
 };
 
@@ -75,6 +75,10 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     type MediaBlobs<'a>: MediaBlobRepository + 'a
     where
         Self: 'a;
+    /// Media variant (thumbnail) repository borrowed from this handle (#33).
+    type MediaVariants<'a>: MediaVariantRepository + 'a
+    where
+        Self: 'a;
 
     /// Borrow a [`PageRepository`].
     fn pages(&self) -> Self::Pages<'_>;
@@ -94,6 +98,8 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     fn media(&self) -> Self::Media<'_>;
     /// Borrow a [`MediaBlobRepository`] (powers the in-DB media backend, #32).
     fn media_blobs(&self) -> Self::MediaBlobs<'_>;
+    /// Borrow a [`MediaVariantRepository`] (powers thumbnails, #33).
+    fn media_variants(&self) -> Self::MediaVariants<'_>;
 
     /// Commit a page mutation and its required audit row atomically.
     fn commit_page_audit(
@@ -113,6 +119,7 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     type PageLinks<'a> = thewiki_storage::sqlite::SqlitePageLinkRepository<'a>;
     type Media<'a> = thewiki_storage::sqlite::SqliteMediaRepository<'a>;
     type MediaBlobs<'a> = thewiki_storage::sqlite::SqliteMediaBlobRepository<'a>;
+    type MediaVariants<'a> = thewiki_storage::sqlite::SqliteMediaVariantRepository<'a>;
 
     fn pages(&self) -> Self::Pages<'_> {
         Self::pages(self)
@@ -140,6 +147,9 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     }
     fn media_blobs(&self) -> Self::MediaBlobs<'_> {
         Self::media_blobs(self)
+    }
+    fn media_variants(&self) -> Self::MediaVariants<'_> {
+        Self::media_variants(self)
     }
 
     fn commit_page_audit(

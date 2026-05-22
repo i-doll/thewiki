@@ -7,8 +7,11 @@ use thewiki_core::{Media, MediaId};
 
 use crate::codec::media_from_row;
 use crate::error::StorageError;
-use crate::repo::{MediaBlobRepository, MediaRepository};
-use crate::sqlite::codec::{format_ts, map_unique_violation, uuid_bytes};
+use crate::repo::{
+    MediaBlobRepository, MediaRepository, MediaVariant, MediaVariantRepository, PageSlice,
+    clamp_limit,
+};
+use crate::sqlite::codec::{format_ts, map_unique_violation, parse_ts, uuid_bytes};
 
 /// Raw row shape for the `media` table.
 type MediaRow = (
@@ -125,6 +128,51 @@ impl MediaRepository for SqliteMediaRepository<'_> {
             Ok(())
         }
     }
+
+    async fn list_all(
+        &self,
+        cursor: Option<MediaId>,
+        limit: u32,
+    ) -> Result<PageSlice<Media>, StorageError> {
+        let limit = clamp_limit(limit);
+        let rows: Vec<MediaRow> = if let Some(cursor) = cursor {
+            let id_bytes = uuid_bytes(cursor.into_uuid());
+            sqlx::query_as(
+                "SELECT id, content_hash, content_type, byte_size, original_filename,
+                        uploaded_by, created_at
+                 FROM media WHERE id > ?1 ORDER BY id ASC LIMIT ?2",
+            )
+            .bind(id_bytes.as_slice())
+            .bind(i64::from(limit))
+            .fetch_all(self.pool)
+            .await?
+        } else {
+            sqlx::query_as(
+                "SELECT id, content_hash, content_type, byte_size, original_filename,
+                        uploaded_by, created_at
+                 FROM media ORDER BY id ASC LIMIT ?1",
+            )
+            .bind(i64::from(limit))
+            .fetch_all(self.pool)
+            .await?
+        };
+        let items: Vec<Media> = rows
+            .into_iter()
+            .map(row_to_media)
+            .collect::<Result<_, _>>()?;
+        // We encode the cursor as the last id's hyphenated UUID string so the
+        // wire form lines up with the other cursor-paginated endpoints. The
+        // regen-thumbnails CLI doesn't ship the cursor over a wire — it just
+        // wants the last id back — so the encoding is opaque to it.
+        let next = if items.len() as u32 == limit {
+            items
+                .last()
+                .map(|m| crate::repo::Cursor(m.id.into_uuid().to_string()))
+        } else {
+            None
+        };
+        Ok(PageSlice { items, next })
+    }
 }
 
 /// SQLite-backed [`MediaBlobRepository`] — stores blob bytes in
@@ -175,6 +223,111 @@ impl MediaBlobRepository for SqliteMediaBlobRepository<'_> {
         // way the operation is idempotent — a missing row is fine.
         sqlx::query("DELETE FROM media_blobs WHERE media_id = ?1")
             .bind(id_bytes.as_slice())
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+/// Raw row shape for the `media_variants` table.
+type MediaVariantRow = (
+    Vec<u8>,         // media_id
+    String,          // variant
+    String,          // content_type
+    i64,             // byte_size
+    i64,             // width
+    i64,             // height
+    Option<Vec<u8>>, // data
+    String,          // created_at
+);
+
+fn row_to_variant(row: MediaVariantRow) -> Result<MediaVariant, StorageError> {
+    let (media_id, variant, content_type, byte_size, width, height, data, created_at) = row;
+    let id_arr: [u8; 16] = media_id
+        .as_slice()
+        .try_into()
+        .map_err(|_| StorageError::invalid_input("media_variants.media_id wrong length"))?;
+    let byte_size = u64::try_from(byte_size).map_err(|_| {
+        StorageError::invalid_input(format!("variant byte_size out of range: {byte_size}"))
+    })?;
+    let width = u32::try_from(width)
+        .map_err(|_| StorageError::invalid_input(format!("variant width out of range: {width}")))?;
+    let height = u32::try_from(height).map_err(|_| {
+        StorageError::invalid_input(format!("variant height out of range: {height}"))
+    })?;
+    Ok(MediaVariant {
+        media_id: MediaId::from_uuid(uuid::Uuid::from_bytes(id_arr)),
+        variant,
+        content_type,
+        byte_size,
+        width,
+        height,
+        data: data.map(Bytes::from),
+        created_at: parse_ts(&created_at)?,
+    })
+}
+
+/// SQLite-backed [`MediaVariantRepository`] — stores variant metadata (and,
+/// for the DB blob backend, the variant bytes) in `media_variants`.
+pub struct SqliteMediaVariantRepository<'a> {
+    pool: &'a SqlitePool,
+}
+
+impl<'a> SqliteMediaVariantRepository<'a> {
+    pub(super) fn new(pool: &'a SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl MediaVariantRepository for SqliteMediaVariantRepository<'_> {
+    async fn put(&self, variant: &MediaVariant) -> Result<(), StorageError> {
+        let id = uuid_bytes(variant.media_id.into_uuid());
+        let created_at = format_ts(variant.created_at)?;
+        let byte_size = i64::try_from(variant.byte_size).map_err(|_| {
+            StorageError::invalid_input(format!("byte_size {} exceeds i64::MAX", variant.byte_size))
+        })?;
+        let width = i64::from(variant.width);
+        let height = i64::from(variant.height);
+        let data_slice: Option<&[u8]> = variant.data.as_ref().map(|b| b.as_ref());
+        sqlx::query(
+            "INSERT OR REPLACE INTO media_variants
+                (media_id, variant, content_type, byte_size, width, height, data, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )
+        .bind(id.as_slice())
+        .bind(&variant.variant)
+        .bind(&variant.content_type)
+        .bind(byte_size)
+        .bind(width)
+        .bind(height)
+        .bind(data_slice)
+        .bind(&created_at)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get(
+        &self,
+        media_id: MediaId,
+        variant: &str,
+    ) -> Result<Option<MediaVariant>, StorageError> {
+        let id = uuid_bytes(media_id.into_uuid());
+        let row: Option<MediaVariantRow> = sqlx::query_as(
+            "SELECT media_id, variant, content_type, byte_size, width, height, data, created_at
+             FROM media_variants WHERE media_id = ?1 AND variant = ?2",
+        )
+        .bind(id.as_slice())
+        .bind(variant)
+        .fetch_optional(self.pool)
+        .await?;
+        row.map(row_to_variant).transpose()
+    }
+
+    async fn delete_for_media(&self, media_id: MediaId) -> Result<(), StorageError> {
+        let id = uuid_bytes(media_id.into_uuid());
+        sqlx::query("DELETE FROM media_variants WHERE media_id = ?1")
+            .bind(id.as_slice())
             .execute(self.pool)
             .await?;
         Ok(())

@@ -181,6 +181,59 @@ impl Renderer for MarkdownRenderer {
             }
         }
 
+        // ---- Pass 2b: rewrite Markdown image events whose `src` points
+        // at a `/api/v1/media/<uuid>` URL into a `<picture>` with a
+        // `<source srcset=…>` carrying the three thumbnail variants (#33).
+        // The fallback `<img>` keeps the original URL so a browser
+        // without `<picture>` support (or a feed reader) gets a usable
+        // image. Off-domain `![](https://example.com/img.png)` is left
+        // untouched — we don't have variants for it and the renderer
+        // does not have access to a thumbnail service for arbitrary
+        // hosts.
+        {
+            let mut start_idx: Option<usize> = None;
+            let mut image_index: usize = 0;
+            let mut i = 0;
+            while i < events.len() {
+                match &events[i] {
+                    Event::Start(Tag::Image { .. }) => {
+                        start_idx = Some(i);
+                        i += 1;
+                    }
+                    Event::End(TagEnd::Image) => {
+                        let end_i = i;
+                        if let Some(start_i) = start_idx.take()
+                            && let Some(img) = images.get(image_index)
+                        {
+                            if let Some(media_id) = parse_media_url(&img.url) {
+                                let title = img.title.as_deref();
+                                let alt = img.alt.as_deref().unwrap_or("");
+                                let html = build_picture_html(media_id, alt, title);
+                                events[start_i] = Event::Html(CowStr::Boxed(html.into_boxed_str()));
+                                // Replace every event between Start and End
+                                // (inclusive) so the inner Text events don't
+                                // resurface as stray paragraphs after
+                                // `push_html`. We collapse them to empty
+                                // `Event::Text` rather than `Event::Html("")`
+                                // so the surrounding paragraph indentation
+                                // stays clean.
+                                for slot in events.iter_mut().take(end_i + 1).skip(start_i + 1) {
+                                    *slot = Event::Text(CowStr::Borrowed(""));
+                                }
+                            }
+                            image_index += 1;
+                        } else {
+                            // Belt-and-braces: keep image_index in sync
+                            // even if we couldn't find the metadata.
+                            image_index = image_index.saturating_add(1);
+                        }
+                        i = end_i + 1;
+                    }
+                    _ => i += 1,
+                }
+            }
+        }
+
         // ---- Pass 3: rewrite wikilink events.
         //
         // For every `Tag::Link { link_type: WikiLink { has_pothole } }`:
@@ -373,6 +426,56 @@ fn encode_path_segment(input: &str) -> String {
             out.push_str(&format!("%{byte:02X}"));
         }
     }
+    out
+}
+
+/// Recognise a `/api/v1/media/<uuid>` URL and return the canonical id
+/// part. Allows an optional trailing slash; the renderer never appends
+/// query strings of its own (those land via the variant `srcset`).
+fn parse_media_url(url: &str) -> Option<&str> {
+    let path = url.split(['?', '#']).next()?;
+    let trimmed = path.trim_end_matches('/');
+    let suffix = trimmed.strip_prefix("/api/v1/media/")?;
+    if suffix.is_empty() || suffix.contains('/') {
+        return None;
+    }
+    // Validate the id shape so we don't emit srcset entries for paths
+    // that happen to share the prefix. UUIDs are 36 hyphenated chars.
+    let bytes = suffix.as_bytes();
+    if bytes.len() != 36 {
+        return None;
+    }
+    for (i, b) in bytes.iter().enumerate() {
+        let ok = match i {
+            8 | 13 | 18 | 23 => *b == b'-',
+            _ => b.is_ascii_hexdigit(),
+        };
+        if !ok {
+            return None;
+        }
+    }
+    Some(suffix)
+}
+
+/// Build the `<picture>` HTML for a media-served image (#33).
+///
+/// The `<source>` carries the three responsive variants; the fallback
+/// `<img>` points at the original. `loading="lazy"` and
+/// `decoding="async"` keep above-the-fold pages fast without scripting.
+fn build_picture_html(media_id: &str, alt: &str, title: Option<&str>) -> String {
+    let base = format!("/api/v1/media/{media_id}");
+    let mut out = String::with_capacity(512);
+    out.push_str("<picture>");
+    out.push_str(&format!(
+        "<source srcset=\"{base}?size=small 320w, {base}?size=medium 768w, {base}?size=large 1280w\" \
+         sizes=\"(max-width: 768px) 100vw, 768px\">",
+    ));
+    out.push_str(&format!("<img src=\"{base}\" alt=\"{}\"", escape_attr(alt)));
+    if let Some(t) = title {
+        out.push_str(&format!(" title=\"{}\"", escape_attr(t)));
+    }
+    out.push_str(" loading=\"lazy\" decoding=\"async\">");
+    out.push_str("</picture>");
     out
 }
 
