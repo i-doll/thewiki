@@ -33,6 +33,10 @@ build/
 .vite/
 *.tsbuildinfo
 
+# Local config (committed example lives at thewiki.example.toml)
+dev.toml
+*.local.toml
+
 # Env / secrets
 .env
 .env.*
