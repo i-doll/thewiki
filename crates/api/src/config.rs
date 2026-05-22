@@ -39,6 +39,8 @@ pub struct Config {
     pub storage: StorageConfig,
     /// Auth model defaults (anonymous edits, registration, hashing parameters).
     pub auth: AuthConfig,
+    /// Full-text search (Tantivy) index location and commit cadence.
+    pub search: SearchConfig,
     /// Abuse protection for public endpoints.
     pub rate_limit: RateLimitConfig,
     /// Administrative audit-log retention.
@@ -274,6 +276,39 @@ pub enum RateLimitBackendConfig {
     InMemory,
 }
 
+/// Full-text search (Tantivy) configuration (#26).
+///
+/// `index_path` is where the Tantivy segments live on disk. The default
+/// (`./data/search/`) keeps the index next to the SQLite database for
+/// single-binary deploys. Operators running on a separate disk (or a
+/// network mount) typically override this.
+///
+/// `commit_interval_ms` / `batch_size` tune the async indexer worker —
+/// lowering either improves freshness at the cost of write amplification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchConfig {
+    /// Where the Tantivy index lives on disk. The directory is created on
+    /// first boot.
+    pub index_path: PathBuf,
+    /// Commit cadence, in milliseconds. The worker commits every
+    /// `commit_interval_ms` or every `batch_size` jobs, whichever comes
+    /// first. Default: 200 ms.
+    pub commit_interval_ms: u64,
+    /// Per-commit job-count threshold. Default: 100.
+    pub batch_size: u32,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            index_path: PathBuf::from("data/search"),
+            commit_interval_ms: 200,
+            batch_size: 100,
+        }
+    }
+}
+
 /// Audit-log storage policy.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -366,6 +401,7 @@ impl Config {
                     parallelism: 1,
                 },
             },
+            search: SearchConfig::default(),
             rate_limit: RateLimitConfig {
                 enabled: true,
                 read: RateLimitBucketConfig {
@@ -503,6 +539,22 @@ impl Config {
         if self.audit_log.retention_days == 0 {
             return Err(ConfigError::Invalid(
                 "audit_log.retention_days must be > 0".to_string(),
+            ));
+        }
+
+        if self.search.index_path.as_os_str().is_empty() {
+            return Err(ConfigError::Invalid(
+                "search.index_path must be non-empty".to_string(),
+            ));
+        }
+        if self.search.commit_interval_ms == 0 {
+            return Err(ConfigError::Invalid(
+                "search.commit_interval_ms must be > 0".to_string(),
+            ));
+        }
+        if self.search.batch_size == 0 {
+            return Err(ConfigError::Invalid(
+                "search.batch_size must be > 0".to_string(),
             ));
         }
 

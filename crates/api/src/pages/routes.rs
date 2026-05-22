@@ -14,6 +14,7 @@ use thewiki_core::id::NamespaceId;
 use thewiki_core::render::Renderer;
 use thewiki_core::{ContentFormat, NamespaceSlug, Page, PageId, ProtectionLevel, Revision};
 use thewiki_render::MarkdownRenderer;
+use thewiki_search::PageDoc;
 use thewiki_storage::repo::{
     BacklinkRow, Cursor, NamespaceRepository, PageAuditMutation, PageLink, PageLinkRepository,
     PageRepository, PageSlice, RevisionRepository,
@@ -190,6 +191,23 @@ pub(super) async fn hydrate_page_view<S: AppStorage>(
     })
 }
 
+/// Build the search-indexer document for a freshly-committed live revision.
+///
+/// Tags are an empty `Vec` until #29 lands the tag aggregate; the schema
+/// already reserves the field so wiring it later is purely additive.
+fn build_search_doc(page: &Page, namespace_slug: &str, body: &str) -> PageDoc {
+    PageDoc {
+        page_id: page.id,
+        namespace_id: page.namespace_id,
+        namespace_slug: namespace_slug.to_owned(),
+        slug: page.slug.clone(),
+        title: page.title.clone(),
+        body: body.to_owned(),
+        tags: Vec::new(),
+        updated_at: page.updated_at,
+    }
+}
+
 /// Extract every `[[Target]]` wikilink from `source` and persist the set as
 /// rows in `page_links` for the source page.
 ///
@@ -350,6 +368,14 @@ pub async fn create_page<S: AppStorage>(
             &live_revision_body,
         )
         .await?;
+        // Schedule a search-index upsert (#26). The handle is non-blocking
+        // and fire-and-forget — search is eventually consistent and an
+        // outage there must not regress page CRUD.
+        state.search.upsert(build_search_doc(
+            &page,
+            namespace_label.as_str(),
+            &live_revision_body,
+        ));
     }
 
     let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
@@ -498,6 +524,14 @@ pub async fn update_page<S: AppStorage>(
             &live_revision_body,
         )
         .await?;
+        // Search-index upsert (#26). Same fire-and-forget semantics as the
+        // create path — the indexer applies a delete-then-add so this is
+        // also the right shape for "page renamed in body".
+        state.search.upsert(build_search_doc(
+            &page,
+            namespace_label.as_str(),
+            &live_revision_body,
+        ));
     }
 
     let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
@@ -559,6 +593,10 @@ pub async fn delete_page<S: AppStorage>(
         .storage
         .commit_page_audit(PageAuditMutation::DeletePage { page_id: page.id }, audit)
         .await?;
+    // Tell the indexer to drop the document. Fire-and-forget; the index
+    // is allowed to lag, but a stale hit on a deleted page is the most
+    // visible kind of search bug, so we still try.
+    state.search.delete(page.id);
     Ok(StatusCode::NO_CONTENT)
 }
 

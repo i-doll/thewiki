@@ -34,7 +34,21 @@ pub enum Command {
     /// Inspect or validate configuration without booting the server.
     #[command(subcommand)]
     Config(ConfigCommand),
+    /// Rebuild the search index from scratch (#26).
+    ///
+    /// Drops every document and replays the authoritative state from the
+    /// database. Useful after a crash, a schema bump, or simply to verify
+    /// the index has not drifted.
+    Reindex(ReindexArgs),
     // TODO(storage): `Migrate { Run, Status }` once `thewiki-storage` is wired.
+}
+
+/// Arguments for the `reindex` subcommand.
+#[derive(Debug, clap::Args)]
+pub struct ReindexArgs {
+    /// Path to a `thewiki.toml` configuration file.
+    #[arg(short = 'c', long = "config", env = "THEWIKI_CONFIG_PATH")]
+    pub config: Option<PathBuf>,
 }
 
 /// Arguments for the `serve` subcommand.

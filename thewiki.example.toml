@@ -183,6 +183,33 @@ refill_interval_secs = 60
 kind = "in-memory"
 
 # ---------------------------------------------------------------------------
+# Full-text search (#26).
+#
+# Tantivy embeds the index in-process. On every page commit the API layer
+# enqueues an indexing job; a dedicated worker drains the queue and commits
+# every `commit_interval_ms` or every `batch_size` jobs, whichever first —
+# so the index stays at most ~`commit_interval_ms` milliseconds behind the
+# database. After every successful commit the worker writes a small
+# `.last_indexed` marker inside `index_path`; if the marker is missing on
+# startup the binary triggers a full rebuild from storage so a crash never
+# leaves the index silently stale. The `thewiki reindex` subcommand can
+# also be run manually after a schema change.
+# ---------------------------------------------------------------------------
+[search]
+# Directory the Tantivy segments live in. Created on first boot. Default:
+# `data/search`. Operators on a separate disk typically override this.
+index_path = "data/search"
+
+# Commit cadence in milliseconds. Lower means fresher search at higher write
+# amplification. Default: 200 (i.e. the index is at most ~200 ms behind a
+# committed edit).
+commit_interval_ms = 200
+
+# Per-commit job-count threshold. A burst of `batch_size` edits commits
+# immediately instead of waiting for the timer. Default: 100.
+batch_size = 100
+
+# ---------------------------------------------------------------------------
 # Observability.
 # ---------------------------------------------------------------------------
 [telemetry]

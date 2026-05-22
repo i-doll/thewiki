@@ -18,6 +18,7 @@ use axum::extract::{Path, State};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thewiki_core::{Revision, RevisionId};
+use thewiki_search::PageDoc;
 use thewiki_storage::repo::{PageAuditMutation, PageRepository, RevisionRepository};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
@@ -138,6 +139,7 @@ pub async fn revert_page<S: AppStorage>(
             "new_revision_id": new_revision.id.into_uuid(),
         }),
     );
+    let indexed_body = new_revision.body.clone();
     state
         .storage
         .commit_page_audit(
@@ -148,6 +150,20 @@ pub async fn revert_page<S: AppStorage>(
             audit,
         )
         .await?;
+
+    // Re-index the page with the reverted body. From the search layer's
+    // perspective a revert is just another upsert — the schema doesn't
+    // care that the content matches an older revision.
+    state.search.upsert(PageDoc {
+        page_id: page.id,
+        namespace_id: page.namespace_id,
+        namespace_slug: namespace_label,
+        slug: page.slug.clone(),
+        title: page.title.clone(),
+        body: indexed_body,
+        tags: Vec::new(),
+        updated_at: page.updated_at,
+    });
 
     let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
     Ok(Json(view))
