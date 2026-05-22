@@ -65,6 +65,21 @@ pub enum ApiError {
     #[error("forbidden")]
     Forbidden,
 
+    /// The target page is protected at a level the caller's role cannot
+    /// satisfy (#34). Renders as `403 Forbidden` with a `page_protected`
+    /// machine code and a message naming the protection tier and required
+    /// permission, so the SPA can surface a useful "log in" / "ask an
+    /// admin" prompt without re-reading the page row.
+    #[error("page is {level}; requires {required}")]
+    PageProtected {
+        /// Protection level on the page, as the stable wire string
+        /// (`"semi_protected"`, `"protected"`, `"fully_protected"`).
+        level: &'static str,
+        /// Permission (or membership tier) the caller would need to mutate
+        /// the page (`"authenticated"`, `"EDIT"`, `"PROTECT"`).
+        required: &'static str,
+    },
+
     /// The request body exceeded the operator-configured size cap. Renders
     /// as `413 Payload Too Large`. Used by the media upload endpoint when
     /// the field length exceeds `storage.media.max_upload_bytes`.
@@ -95,7 +110,7 @@ impl ApiError {
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::InvalidInput(_) => StatusCode::BAD_REQUEST,
             Self::Unauthenticated => StatusCode::UNAUTHORIZED,
-            Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::Forbidden | Self::PageProtected { .. } => StatusCode::FORBIDDEN,
             Self::PayloadTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             Self::UnsupportedMediaType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -111,6 +126,7 @@ impl ApiError {
             Self::InvalidInput(_) => "invalid_input",
             Self::Unauthenticated => "unauthenticated",
             Self::Forbidden => "forbidden",
+            Self::PageProtected { .. } => "page_protected",
             Self::PayloadTooLarge { .. } => "payload_too_large",
             Self::UnsupportedMediaType(_) => "unsupported_media_type",
             Self::Internal(_) => "internal_error",
@@ -123,6 +139,7 @@ impl ApiError {
         let message = match self {
             Self::NotFound | Self::Unauthenticated | Self::Forbidden => self.to_string(),
             Self::Conflict(msg) | Self::InvalidInput(msg) => msg.clone(),
+            Self::PageProtected { .. } => self.to_string(),
             Self::PayloadTooLarge { .. } | Self::UnsupportedMediaType(_) => self.to_string(),
             // `Internal` carries the source for logging, but the response
             // surface stays generic so we don't leak details to callers.

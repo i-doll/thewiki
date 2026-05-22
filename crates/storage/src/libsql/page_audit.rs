@@ -51,6 +51,9 @@ async fn run_mutation(tx: &Transaction, mutation: PageAuditMutation) -> Result<(
             insert_revision(tx, &revision).await?;
             update_page(tx, &page).await?;
         }
+        PageAuditMutation::UpdatePage { page } => {
+            update_page(tx, &page).await?;
+        }
         PageAuditMutation::DeletePage { page_id } => {
             let id = uuid_bytes(page_id.into_uuid());
             let rows_affected = into_db(
@@ -108,7 +111,9 @@ fn validate_mutation(mutation: &PageAuditMutation) -> Result<(), StorageError> {
                 ));
             }
         }
-        PageAuditMutation::DeletePage { .. } | PageAuditMutation::AuditOnly => {}
+        PageAuditMutation::UpdatePage { .. }
+        | PageAuditMutation::DeletePage { .. }
+        | PageAuditMutation::AuditOnly => {}
     }
     Ok(())
 }

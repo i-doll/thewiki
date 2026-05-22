@@ -7,7 +7,7 @@
 //! need a second round trip just to render a breadcrumb.
 
 use serde::{Deserialize, Serialize};
-use thewiki_core::{NamespaceId, PageId, RevisionId};
+use thewiki_core::{NamespaceId, PageId, ProtectionLevel, RevisionId};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
@@ -76,6 +76,9 @@ pub struct PageView {
     /// page repository: missing targets render with `class="redlink"` and
     /// a URL pointing at the create form (`/wiki/.../edit?new=1`).
     pub content_html: String,
+    /// How protected this page is from edits. Drives the SPA's lock badge
+    /// and is enforced server-side on every mutating handler (#34).
+    pub protection_level: ProtectionLevel,
     /// When the page row was first created.
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,

@@ -29,8 +29,18 @@ use crate::pages::dto::{
     BacklinkItem, BacklinkListResponse, CreatePageRequest, ListBacklinksQuery, ListPagesQuery,
     PageListItem, PageListResponse, PageView, UpdatePageRequest,
 };
+use crate::pages::protection::{EditorContext, check_protection};
 use crate::render as page_render;
 use crate::state::{AppState, AppStorage};
+
+/// Project an [`EditorExtractor`] into the slimmer [`EditorContext`] the
+/// protection check consumes.
+fn editor_context(editor: &EditorExtractor) -> EditorContext {
+    EditorContext {
+        is_anonymous: editor.is_anonymous,
+        permissions: editor.permissions,
+    }
+}
 
 /// Default namespace slug used when a request doesn't carry one.
 ///
@@ -186,6 +196,7 @@ pub(crate) async fn hydrate_page_view<S: AppStorage>(
         current_revision_id: page.current_revision_id,
         content,
         content_html,
+        protection_level: page.protection_level,
         created_at: page.created_at,
         updated_at: page.updated_at,
     })
@@ -461,6 +472,10 @@ pub async fn update_page<S: AppStorage>(
         .get_by_namespace_and_slug(namespace.id, &slug)
         .await?;
 
+    // Per-page protection check (#34). Anonymous + insufficient roles get a
+    // 403 with the `page_protected` code before any revision row is built.
+    check_protection(page.protection_level, editor_context(&editor))?;
+
     let revision = Revision::new(
         page.id,
         page.current_revision_id,
@@ -578,6 +593,8 @@ pub async fn delete_page<S: AppStorage>(
         .pages()
         .get_by_namespace_and_slug(namespace.id, &slug)
         .await?;
+    // Per-page protection check (#34) — deletion is a mutation, same gate.
+    check_protection(page.protection_level, editor_context(&editor))?;
     let audit = page_event(
         editor.user_id,
         &editor.username,
@@ -725,6 +742,7 @@ mod tests {
             user_created_at: user_age_secs
                 .map(|s| OffsetDateTime::now_utc() - time::Duration::seconds(s)),
             username: "editor".to_string(),
+            permissions: thewiki_core::Permissions::empty(),
         }
     }
 

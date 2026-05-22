@@ -536,6 +536,7 @@ pub struct NewAuditLogEntry {
 /// Backends should commit the mutation and audit row atomically so callers do
 /// not report a successful privileged action without a durable audit record.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PageAuditMutation {
     /// Insert a new page. When `live_revision` is present, also append that
     /// revision and promote the page to it.
@@ -553,6 +554,15 @@ pub enum PageAuditMutation {
         page: Page,
         /// Revision to append.
         revision: Revision,
+    },
+    /// Update mutable columns on an existing page without committing a new
+    /// revision (e.g. a protection-level change, #34). Backends apply the
+    /// full set of mutable columns from `page`; the caller is responsible
+    /// for bumping `updated_at` before passing the row in.
+    UpdatePage {
+        /// Page row with the desired final state. Identity columns are
+        /// immutable; everything else is overwritten.
+        page: Page,
     },
     /// Delete an existing page.
     DeletePage {

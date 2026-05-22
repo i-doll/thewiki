@@ -100,6 +100,9 @@ pub struct Page {
     /// Rendered, sanitised HTML for [`Self::content`].
     #[graphql(name = "contentHtml")]
     pub content_html: String,
+    /// How protected this page is from edits (#34).
+    #[graphql(name = "protectionLevel")]
+    pub protection_level: String,
     /// When the page row was first created.
     #[graphql(name = "createdAt")]
     pub created_at: OffsetDateTime,
@@ -135,6 +138,7 @@ impl Page {
                 .map(|r| ID(r.into_uuid().to_string())),
             content: view.content,
             content_html: view.content_html,
+            protection_level: view.protection_level.as_str().to_owned(),
             created_at: view.created_at,
             updated_at: view.updated_at,
         }
@@ -155,6 +159,7 @@ impl Page {
                 .map(|r| ID(r.into_uuid().to_string())),
             content: String::new(),
             content_html: String::new(),
+            protection_level: page.protection_level.as_str().to_owned(),
             created_at: page.created_at,
             updated_at: page.updated_at,
         }

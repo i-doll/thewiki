@@ -8,6 +8,8 @@
 
 pub mod audit;
 pub mod dto;
+pub mod protect;
+pub mod protection;
 pub mod revert;
 pub mod revisions;
 pub mod routes;
@@ -38,4 +40,5 @@ pub fn router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
         .routes(routes!(revisions::list_revisions))
         .routes(routes!(revisions::diff_revisions))
         .routes(routes!(revert::revert_page))
+        .routes(routes!(protect::protect_page))
 }
