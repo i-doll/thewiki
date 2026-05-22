@@ -16,13 +16,15 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use thewiki_core::{Revision, RevisionId};
-use thewiki_storage::repo::{PageRepository, RevisionRepository};
+use thewiki_storage::repo::{PageAuditMutation, PageRepository, RevisionRepository};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
 use crate::error::ApiError;
 use crate::extractors::RequireAuth;
+use crate::pages::audit::page_event;
 use crate::pages::dto::PageView;
 use crate::pages::routes::{hydrate_page_view, parse_default_namespace_slug, resolve_namespace};
 use crate::state::{AppState, AppStorage};
@@ -50,8 +52,7 @@ pub struct RevertRequest {
 ///    page's *current* head (not the revision being reverted to) so the
 ///    history graph stays linear and the audit trail captures both endpoints.
 /// 5. Advance `page.current_revision_id` to the new revision.
-/// 6. Emit a `tracing::info!` on the `audit` target. TODO(#36) wires this
-///    into a proper persistent audit log.
+/// 6. Write a persistent audit-log row for operators.
 ///
 /// Returns the now-current [`PageView`].
 #[utoipa::path(
@@ -80,11 +81,12 @@ pub async fn revert_page<S: AppStorage>(
     // `RequireRole(Role::Editor)` or `RequirePermission(Permissions::EDIT)` —
     // once configurable auth lands. For now any authenticated caller may
     // revert; the bare `RequireAuth` covers the 401-vs-403 distinction.
-    RequireAuth(author_id): RequireAuth,
+    author: RequireAuth,
     Json(req): Json<RevertRequest>,
 ) -> Result<Json<PageView>, ApiError> {
     let namespace_slug = parse_default_namespace_slug()?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
+    let namespace_label = namespace.slug.as_str().to_owned();
     let mut page = state
         .storage
         .pages()
@@ -116,27 +118,36 @@ pub async fn revert_page<S: AppStorage>(
     let new_revision = Revision::new(
         page.id,
         page.current_revision_id,
-        author_id,
+        author.user_id,
         historical.body.clone(),
         edit_summary,
     );
-    state.storage.revisions().create(&new_revision).await?;
-
     page.current_revision_id = Some(new_revision.id);
     page.updated_at = OffsetDateTime::now_utc();
-    state.storage.pages().update(&page).await?;
 
-    // TODO(#36): replace this with a real persistent audit-log write. For now
-    // the `audit` tracing target gives ops a stable hook to filter on.
-    tracing::info!(
-        target: "audit",
-        action = "revert",
-        page = %page.id,
-        from = %historical.id,
-        to = %new_revision.id,
-        actor = %author_id,
-        "page reverted",
+    let audit = page_event(
+        author.user_id,
+        &author.username,
+        "page.revert",
+        page.id,
+        format!("{namespace_label}/{}", page.slug),
+        json!({
+            "namespace": namespace_label,
+            "slug": page.slug.as_str(),
+            "from_revision_id": historical.id.into_uuid(),
+            "new_revision_id": new_revision.id.into_uuid(),
+        }),
     );
+    state
+        .storage
+        .commit_page_audit(
+            PageAuditMutation::CommitRevision {
+                page: page.clone(),
+                revision: new_revision,
+            },
+            audit,
+        )
+        .await?;
 
     let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
     Ok(Json(view))

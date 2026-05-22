@@ -82,6 +82,7 @@ mime_guess = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }
 http-body-util = { workspace = true }
+roxmltree = { workspace = true }
 # `test` feature pulls in `figment::Jail`, which gives integration tests a
 # sandboxed env + cwd for layered-loader assertions (#8).
 figment = { workspace = true, features = ["test"] }

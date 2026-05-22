@@ -33,6 +33,7 @@ fn defaults_match_documented_values() {
     assert_eq!(cfg.rate_limit.client_ip_header, None);
     assert!(cfg.rate_limit.trusted_proxies.is_empty());
     assert_eq!(cfg.rate_limit.backend, RateLimitBackendConfig::InMemory);
+    assert_eq!(cfg.audit_log.retention_days, 365);
     assert_eq!(cfg.telemetry.log_format, LogFormat::Json);
     assert!(matches!(cfg.storage.backend, StorageBackend::Db));
 
@@ -89,6 +90,9 @@ refill_interval_secs = 4
 [rate_limit.backend]
 kind = "in-memory"
 
+[audit_log]
+retention_days = 30
+
 [telemetry]
 log_format = "pretty"
 log_filter = "debug"
@@ -118,6 +122,7 @@ log_filter = "debug"
         );
         assert_eq!(cfg.rate_limit.trusted_proxies.len(), 1);
         assert_eq!(cfg.rate_limit.backend, RateLimitBackendConfig::InMemory);
+        assert_eq!(cfg.audit_log.retention_days, 30);
         assert_eq!(cfg.telemetry.log_format, LogFormat::Pretty);
         Ok(())
     });
@@ -160,6 +165,7 @@ log_filter = "info"
         jail.set_env("THEWIKI_SERVER__BIND", "127.0.0.1:9000");
         jail.set_env("THEWIKI_DATABASE__MAX_CONNECTIONS", "64");
         jail.set_env("THEWIKI_RATE_LIMIT__WRITE__CAPACITY", "7");
+        jail.set_env("THEWIKI_AUDIT_LOG__RETENTION_DAYS", "90");
 
         let cfg = Config::load(Some(std::path::Path::new("thewiki.toml")))
             .expect("layered load succeeds");
@@ -173,6 +179,7 @@ log_filter = "info"
             "env should override file for nested keys too"
         );
         assert_eq!(cfg.rate_limit.write.capacity, 7);
+        assert_eq!(cfg.audit_log.retention_days, 90);
         // Fields not touched by env keep their file value.
         assert_eq!(cfg.database.url, "sqlite://from-file.db");
         Ok(())
@@ -249,5 +256,15 @@ fn validate_rejects_proxy_header_without_trusted_proxy() {
     let err = cfg
         .validate()
         .expect_err("proxy header without trusted proxies must be rejected");
+    assert!(matches!(err, ConfigError::Invalid(_)));
+}
+
+#[test]
+fn validate_rejects_zero_audit_log_retention() {
+    let mut cfg = Config::defaults();
+    cfg.audit_log.retention_days = 0;
+    let err = cfg
+        .validate()
+        .expect_err("zero audit retention must be rejected");
     assert!(matches!(err, ConfigError::Invalid(_)));
 }

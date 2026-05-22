@@ -18,9 +18,10 @@
 use std::sync::Arc;
 
 use axum::extract::FromRef;
+use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
-    NamespaceRepository, PageRepository, RecentChangesRepository, RevisionRepository,
-    UserRepository,
+    AuditLogRepository, NamespaceRepository, NewAuditLogEntry, PageAuditMutation, PageRepository,
+    RecentChangesRepository, RevisionRepository, UserRepository,
 };
 
 use crate::auth::AuthState;
@@ -50,6 +51,10 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     type RecentChanges<'a>: RecentChangesRepository + 'a
     where
         Self: 'a;
+    /// Audit-log repository borrowed from this handle.
+    type AuditLog<'a>: AuditLogRepository + 'a
+    where
+        Self: 'a;
     /// User repository borrowed from this handle.
     type Users<'a>: UserRepository + 'a
     where
@@ -63,8 +68,17 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     fn namespaces(&self) -> Self::Namespaces<'_>;
     /// Borrow a [`RecentChangesRepository`].
     fn recent_changes(&self) -> Self::RecentChanges<'_>;
+    /// Borrow an [`AuditLogRepository`].
+    fn audit_log(&self) -> Self::AuditLog<'_>;
     /// Borrow a [`UserRepository`].
     fn users(&self) -> Self::Users<'_>;
+
+    /// Commit a page mutation and its required audit row atomically.
+    fn commit_page_audit(
+        &self,
+        mutation: PageAuditMutation,
+        audit: NewAuditLogEntry,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 }
 
 impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
@@ -72,6 +86,7 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     type Revisions<'a> = thewiki_storage::sqlite::SqliteRevisionRepository<'a>;
     type Namespaces<'a> = thewiki_storage::sqlite::SqliteNamespaceRepository<'a>;
     type RecentChanges<'a> = thewiki_storage::sqlite::SqliteRecentChangesRepository<'a>;
+    type AuditLog<'a> = thewiki_storage::sqlite::SqliteAuditLogRepository<'a>;
     type Users<'a> = thewiki_storage::sqlite::SqliteUserRepository<'a>;
 
     fn pages(&self) -> Self::Pages<'_> {
@@ -86,8 +101,19 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     fn recent_changes(&self) -> Self::RecentChanges<'_> {
         Self::recent_changes(self)
     }
+    fn audit_log(&self) -> Self::AuditLog<'_> {
+        Self::audit_log(self)
+    }
     fn users(&self) -> Self::Users<'_> {
         Self::users(self)
+    }
+
+    fn commit_page_audit(
+        &self,
+        mutation: PageAuditMutation,
+        audit: NewAuditLogEntry,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send {
+        Self::commit_page_audit(self, mutation, audit)
     }
 }
 

@@ -117,6 +117,11 @@ define_id! {
     SessionId
 }
 
+define_id! {
+    /// Identifier for an audit-log entry.
+    AuditLogId
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, reason = "ergonomic tests")]
 mod tests {

@@ -54,15 +54,18 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 use crate::error::StorageError;
 
+mod audit_log;
 mod codec;
 mod namespace;
 mod page;
+mod page_audit;
 mod recent_changes;
 mod revision;
 mod role;
 mod session;
 mod user;
 
+pub use audit_log::SqliteAuditLogRepository;
 pub use namespace::SqliteNamespaceRepository;
 pub use page::SqlitePageRepository;
 pub use recent_changes::SqliteRecentChangesRepository;
@@ -207,6 +210,24 @@ impl SqliteStorage {
     #[must_use]
     pub fn recent_changes(&self) -> SqliteRecentChangesRepository<'_> {
         SqliteRecentChangesRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as an [`AuditLogRepository`](crate::repo::AuditLogRepository).
+    #[must_use]
+    pub fn audit_log(&self) -> SqliteAuditLogRepository<'_> {
+        SqliteAuditLogRepository::new(&self.pool)
+    }
+
+    /// Commit a page mutation together with its audit-log row.
+    ///
+    /// The operation runs in a single SQLite transaction so a successful page
+    /// mutation cannot be reported without a matching audit entry.
+    pub async fn commit_page_audit(
+        &self,
+        mutation: crate::repo::PageAuditMutation,
+        audit: crate::repo::NewAuditLogEntry,
+    ) -> Result<(), StorageError> {
+        page_audit::commit_page_audit(&self.pool, mutation, audit).await
     }
 
     /// Apply the embedded migration set to an arbitrary pool.

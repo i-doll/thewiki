@@ -18,8 +18,11 @@ use thewiki_api::{
     config::Config,
     telemetry,
 };
+use thewiki_storage::repo::AuditLogRepository;
 use thewiki_storage::sqlite::{SqliteOptions, SqliteStorage};
-use tracing::{error, info};
+use time::{Duration as TimeDuration, OffsetDateTime};
+use tokio::time::MissedTickBehavior;
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
@@ -58,6 +61,14 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
     )
     .await
     .with_context(|| format!("opening storage at {}", config.database.url))?;
+
+    let pruned = prune_expired_audit_log(&storage, config.audit_log.retention_days)
+        .await
+        .context("pruning expired audit log rows")?;
+    if pruned > 0 {
+        info!(rows = pruned, "pruned expired audit log rows");
+    }
+    spawn_audit_log_pruner(storage.clone(), config.audit_log.retention_days);
 
     let hasher = Arc::new(Argon2Hasher::new(config.auth.argon2).context("building argon2 hasher")?);
     let session_ttl = Duration::from_secs(u64::from(config.auth.session_ttl_hours) * 3600);
@@ -102,6 +113,31 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
     .context("axum server terminated with an error")?;
 
     Ok(())
+}
+
+async fn prune_expired_audit_log(
+    storage: &SqliteStorage,
+    retention_days: u32,
+) -> Result<u64, thewiki_storage::StorageError> {
+    let cutoff = OffsetDateTime::now_utc() - TimeDuration::days(i64::from(retention_days));
+    storage.audit_log().prune_before(cutoff).await
+}
+
+fn spawn_audit_log_pruner(storage: SqliteStorage, retention_days: u32) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60 * 60));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        interval.tick().await;
+
+        loop {
+            interval.tick().await;
+            match prune_expired_audit_log(&storage, retention_days).await {
+                Ok(0) => {}
+                Ok(rows) => info!(rows, "pruned expired audit log rows"),
+                Err(err) => warn!(error = %err, "failed to prune expired audit log rows"),
+            }
+        }
+    });
 }
 
 /// Run a `config` subcommand. Returns the process exit code rather than

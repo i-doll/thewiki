@@ -6,6 +6,7 @@
 //! the matching utoipa [`utoipa_axum::router::OpenApiRouter`] so the OpenAPI
 //! spec stays in sync with what is actually mounted.
 
+pub mod audit;
 pub mod dto;
 pub mod revert;
 pub mod revisions;

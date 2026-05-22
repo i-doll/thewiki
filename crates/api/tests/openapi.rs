@@ -66,6 +66,30 @@ fn public_auth_endpoints_are_documented() {
 }
 
 #[test]
+fn audit_log_endpoints_are_documented() {
+    let doc = schema();
+
+    assert!(doc["paths"]["/api/v1/audit-log"]["get"].is_object());
+    assert!(doc["paths"]["/api/v1/audit-log/atom"]["get"].is_object());
+    assert_eq!(
+        operation_security(&doc, "/api/v1/audit-log", "get").expect("audit log security"),
+        [json!({ "SessionCookie": [] })].as_slice()
+    );
+    assert_eq!(
+        operation_security(&doc, "/api/v1/audit-log/atom", "get").expect("audit atom security"),
+        [json!({ "SessionCookie": [] })].as_slice()
+    );
+    assert_eq!(
+        response_schema_ref(&doc, "/api/v1/audit-log", "get", "200").as_deref(),
+        Some("#/components/schemas/AuditLogListResponse")
+    );
+    let metadata_schema =
+        &doc["components"]["schemas"]["AuditLogEntryView"]["properties"]["metadata"];
+    assert_eq!(metadata_schema["type"], "object");
+    assert_eq!(metadata_schema["additionalProperties"], true);
+}
+
+#[test]
 fn committed_openapi_snapshot_matches_generated_schema() {
     let generated = schema();
     let committed: Value = serde_json::from_str(include_str!("../../../docs/openapi.json"))
