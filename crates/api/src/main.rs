@@ -90,7 +90,6 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         secure_cookies,
         config.auth.clone(),
     );
-
     // Bring up the Tantivy index + indexer worker. Opening the index is
     // synchronous; we run it through `spawn_blocking` so the runtime stays
     // responsive even when the directory is cold. On startup we check the
@@ -118,9 +117,15 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         spawn_startup_rebuild(storage.clone(), indexer_handle.clone());
     }
 
-    let app_state = thewiki_api::state::AppState::new(storage, config.auth.clone())
+    let mut app_state = thewiki_api::state::AppState::new(storage.clone(), config.auth.clone())
         .with_auth_state(auth_state.clone())
         .with_search(indexer_handle);
+    let media_backend = thewiki_api::media::build_media_backend(
+        &config.storage.backend,
+        std::sync::Arc::clone(&app_state.storage),
+    )
+    .map_err(|e| anyhow::anyhow!("media backend init: {e}"))?;
+    app_state = app_state.with_media(config.storage.media.clone(), media_backend);
 
     let router = app::build_full(
         app_state,

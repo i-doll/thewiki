@@ -30,6 +30,9 @@ thiserror = { workspace = true }
 time = { workspace = true }
 uuid = { workspace = true }
 libsql = { workspace = true, optional = true }
+# Used in the `MediaBlobRepository` trait surface so the API layer can move
+# blob payloads through the storage adapters without copying.
+bytes = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

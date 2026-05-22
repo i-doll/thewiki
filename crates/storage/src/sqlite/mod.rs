@@ -56,6 +56,7 @@ use crate::error::StorageError;
 
 mod audit_log;
 mod codec;
+mod media;
 mod namespace;
 mod page;
 mod page_audit;
@@ -67,6 +68,7 @@ mod session;
 mod user;
 
 pub use audit_log::SqliteAuditLogRepository;
+pub use media::{SqliteMediaBlobRepository, SqliteMediaRepository};
 pub use namespace::SqliteNamespaceRepository;
 pub use page::SqlitePageRepository;
 pub use page_link::SqlitePageLinkRepository;
@@ -225,6 +227,21 @@ impl SqliteStorage {
     #[must_use]
     pub fn page_links(&self) -> SqlitePageLinkRepository<'_> {
         SqlitePageLinkRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a [`MediaRepository`](crate::repo::MediaRepository).
+    #[must_use]
+    pub fn media(&self) -> SqliteMediaRepository<'_> {
+        SqliteMediaRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`MediaBlobRepository`](crate::repo::MediaBlobRepository). Only
+    /// useful when the configured storage backend is `Db`; the S3 backend
+    /// uses `object_store` directly.
+    #[must_use]
+    pub fn media_blobs(&self) -> SqliteMediaBlobRepository<'_> {
+        SqliteMediaBlobRepository::new(&self.pool)
     }
 
     /// Commit a page mutation together with its audit-log row.

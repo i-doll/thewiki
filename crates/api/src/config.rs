@@ -128,11 +128,67 @@ pub enum DatabaseDriver {
 /// Object storage backend selector.
 ///
 /// `Db` keeps blobs in the primary database (simple, works out of the box).
-/// `S3` ships in M1 alongside the rest of the media-upload flow.
+/// `S3` is selected by setting `backend = { kind = "s3", … }`. The media
+/// upload pipeline (#32) consults this struct to pick where blob payloads
+/// live; metadata always stays in the primary DB.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
+    /// Where blob payloads land — DB row vs S3-compatible bucket.
     pub backend: StorageBackend,
+    /// Upload validation tuning: size limit and accepted content types.
+    #[serde(default)]
+    pub media: MediaConfig,
+}
+
+/// Tuning for the [`POST /api/v1/media`](crate) upload endpoint.
+///
+/// Operators can tighten the content-type allowlist or shrink the size cap
+/// without touching code. The defaults match the issue spec — common image
+/// types plus a 10 MiB cap.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaConfig {
+    /// Hard ceiling on the byte length of any single upload. Requests over
+    /// this limit get a 413 Payload Too Large before the blob is persisted.
+    ///
+    /// Default: 10 MiB.
+    #[serde(default = "default_max_upload_bytes")]
+    pub max_upload_bytes: u64,
+    /// IANA media types the upload endpoint accepts. Anything outside this
+    /// set is rejected with 415 Unsupported Media Type.
+    ///
+    /// SVGs are allowed but sanitised through `ammonia` before storage —
+    /// see the `<script>` / `on*` handler scrubbing in the media handler.
+    ///
+    /// Default: the set listed in #32.
+    #[serde(default = "default_allowed_content_types")]
+    pub allowed_content_types: Vec<String>,
+}
+
+/// `serde` default for [`MediaConfig::max_upload_bytes`].
+fn default_max_upload_bytes() -> u64 {
+    10 * 1024 * 1024
+}
+
+/// `serde` default for [`MediaConfig::allowed_content_types`].
+fn default_allowed_content_types() -> Vec<String> {
+    vec![
+        "image/png".to_string(),
+        "image/jpeg".to_string(),
+        "image/gif".to_string(),
+        "image/webp".to_string(),
+        "image/svg+xml".to_string(),
+    ]
+}
+
+impl Default for MediaConfig {
+    fn default() -> Self {
+        Self {
+            max_upload_bytes: default_max_upload_bytes(),
+            allowed_content_types: default_allowed_content_types(),
+        }
+    }
 }
 
 /// Available object-storage backends.
@@ -389,6 +445,7 @@ impl Config {
             },
             storage: StorageConfig {
                 backend: StorageBackend::Db,
+                media: MediaConfig::default(),
             },
             auth: AuthConfig {
                 anonymous_edits: false,
@@ -525,6 +582,16 @@ impl Config {
             return Err(ConfigError::Invalid(
                 "storage.backend = s3 requires both `bucket` and `region` to be non-empty"
                     .to_string(),
+            ));
+        }
+        if self.storage.media.max_upload_bytes == 0 {
+            return Err(ConfigError::Invalid(
+                "storage.media.max_upload_bytes must be > 0".to_string(),
+            ));
+        }
+        if self.storage.media.allowed_content_types.is_empty() {
+            return Err(ConfigError::Invalid(
+                "storage.media.allowed_content_types must list at least one MIME type".to_string(),
             ));
         }
 

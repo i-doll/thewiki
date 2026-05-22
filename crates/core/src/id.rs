@@ -122,6 +122,11 @@ define_id! {
     AuditLogId
 }
 
+define_id! {
+    /// Identifier for a [`crate::media::Media`] upload.
+    MediaId
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, reason = "ergonomic tests")]
 mod tests {

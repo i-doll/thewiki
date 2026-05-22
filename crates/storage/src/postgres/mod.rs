@@ -52,6 +52,7 @@ use crate::error::StorageError;
 
 mod audit_log;
 mod codec;
+mod media;
 mod namespace;
 mod page;
 mod recent_changes;
@@ -61,6 +62,7 @@ mod session;
 mod user;
 
 pub use audit_log::PostgresAuditLogRepository;
+pub use media::{PostgresMediaBlobRepository, PostgresMediaRepository};
 pub use namespace::PostgresNamespaceRepository;
 pub use page::PostgresPageRepository;
 pub use recent_changes::PostgresRecentChangesRepository;
@@ -189,6 +191,20 @@ impl PostgresStorage {
     #[must_use]
     pub fn audit_log(&self) -> PostgresAuditLogRepository<'_> {
         PostgresAuditLogRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a [`MediaRepository`](crate::repo::MediaRepository).
+    #[must_use]
+    pub fn media(&self) -> PostgresMediaRepository<'_> {
+        PostgresMediaRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`MediaBlobRepository`](crate::repo::MediaBlobRepository). Only
+    /// useful when the configured storage backend is `Db`.
+    #[must_use]
+    pub fn media_blobs(&self) -> PostgresMediaBlobRepository<'_> {
+        PostgresMediaBlobRepository::new(&self.pool)
     }
 
     /// Apply the embedded Postgres migration set to an arbitrary pool.

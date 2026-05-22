@@ -29,8 +29,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 use thewiki_core::{
-    AuditLogId, Namespace, NamespaceId, NamespaceSlug, Page, PageId, Revision, RevisionId, Role,
-    RoleId, RoleName, Session, SessionId, User, UserId, Username,
+    AuditLogId, Media, MediaId, Namespace, NamespaceId, NamespaceSlug, Page, PageId, Revision,
+    RevisionId, Role, RoleId, RoleName, Session, SessionId, User, UserId, Username,
 };
 use time::OffsetDateTime;
 
@@ -712,4 +712,102 @@ pub trait PageLinkRepository: Send + Sync {
         cursor: Option<Cursor>,
         limit: u32,
     ) -> impl Future<Output = Result<PageSlice<BacklinkRow>, StorageError>> + Send;
+}
+
+/// Persistence operations for the [`Media`] aggregate (#32).
+///
+/// Stores **metadata only** — the blob payload lives in a separate place
+/// (the `media_blobs` table when the DB backend is selected, or an
+/// `object_store`-backed bucket otherwise). The two are kept in separate
+/// traits so the S3 path doesn't have to implement a trait method it never
+/// uses, and so the DB-backed path can plug in a single connection without
+/// dragging an object-store handle through.
+pub trait MediaRepository: Send + Sync {
+    /// Insert a media metadata row.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::Conflict`] if a row with the same `content_hash`
+    ///   already exists. Callers normally call
+    ///   [`get_by_content_hash`](Self::get_by_content_hash) first to
+    ///   deduplicate before reaching this point, but the unique-constraint
+    ///   path stays as a defence in depth.
+    /// * [`StorageError::Database`] for FK / driver failures (e.g. the
+    ///   `uploaded_by` user doesn't exist).
+    fn create(&self, media: &Media) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Fetch a media row by primary key.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if no row matches.
+    fn get_by_id(&self, id: MediaId) -> impl Future<Output = Result<Media, StorageError>> + Send;
+
+    /// Resolve a media row by its content hash, for deduplication.
+    ///
+    /// Returns `Ok(None)` rather than [`StorageError::NotFound`] when no
+    /// row matches — the caller's normal flow is "look up, then insert",
+    /// and a missing row is the expected case.
+    ///
+    /// # Errors
+    ///
+    /// Lower-level driver failures propagate as [`StorageError::Database`].
+    fn get_by_content_hash(
+        &self,
+        content_hash: &[u8; 32],
+    ) -> impl Future<Output = Result<Option<Media>, StorageError>> + Send;
+
+    /// Delete a media row.
+    ///
+    /// Does not touch the blob backend — the API layer is responsible for
+    /// also calling the configured [`MediaBlobRepository::delete`] (or its
+    /// `object_store` equivalent) before / after removing the row. For the
+    /// DB backend the `ON DELETE CASCADE` on `media_blobs` takes care of
+    /// the paired row automatically.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the row didn't exist.
+    fn delete(&self, id: MediaId) -> impl Future<Output = Result<(), StorageError>> + Send;
+}
+
+/// Persistence operations for the in-database blob backend.
+///
+/// Only implemented by adapters that ship the `media_blobs` table. The S3
+/// backend uses `object_store` directly and never reaches for this trait.
+///
+/// Payload is moved as [`bytes::Bytes`] to avoid copying on the way through
+/// — backends `clone()` is a cheap refcount bump.
+pub trait MediaBlobRepository: Send + Sync {
+    /// Store the blob bytes for `media_id`.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::Database`] if `media_id` doesn't reference an
+    ///   existing media row (FK violation) or on any driver failure.
+    fn put(
+        &self,
+        media_id: MediaId,
+        data: bytes::Bytes,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Fetch the blob bytes for `media_id`.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if no row matches.
+    fn get(
+        &self,
+        media_id: MediaId,
+    ) -> impl Future<Output = Result<bytes::Bytes, StorageError>> + Send;
+
+    /// Delete the blob bytes for `media_id`. Idempotent: deleting a row
+    /// that doesn't exist is a no-op (the API layer keeps the media-row
+    /// and blob-row deletes in lockstep, but a stray blob row from a
+    /// half-failed upload should still be reapable).
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures.
+    fn delete(&self, media_id: MediaId) -> impl Future<Output = Result<(), StorageError>> + Send;
 }

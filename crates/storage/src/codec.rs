@@ -13,9 +13,9 @@
 //! value-shuffling lives here so the two adapters share one source of truth.
 
 use thewiki_core::{
-    ContentFormat, Namespace, NamespaceId, NamespaceSlug, Page, PageId, Permissions,
-    ProtectionLevel, Revision, RevisionId, Role, RoleId, RoleName, Session, SessionId, User,
-    UserId, Username,
+    CONTENT_HASH_BYTES, ContentFormat, Media, MediaId, Namespace, NamespaceId, NamespaceSlug, Page,
+    PageId, Permissions, ProtectionLevel, Revision, RevisionId, Role, RoleId, RoleName, Session,
+    SessionId, User, UserId, Username,
 };
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -265,6 +265,43 @@ pub fn session_from_row(
         last_seen_at: parse_ts(&last_seen_at)?,
         user_agent,
         ip_address,
+    })
+}
+
+/// Convert a raw `media` row into a [`Media`].
+///
+/// # Errors
+///
+/// As [`page_from_row`], plus [`StorageError::InvalidInput`] if the
+/// `content_hash` column doesn't hold exactly 32 bytes or `byte_size` is
+/// negative (the column is signed at the SQL level).
+pub fn media_from_row(
+    id: Vec<u8>,
+    content_hash: Vec<u8>,
+    content_type: String,
+    byte_size: i64,
+    original_filename: Option<String>,
+    uploaded_by: Vec<u8>,
+    created_at: String,
+) -> Result<Media, StorageError> {
+    let content_hash: [u8; CONTENT_HASH_BYTES] =
+        content_hash.as_slice().try_into().map_err(|_| {
+            StorageError::invalid_input(format!(
+                "stored content_hash has wrong byte length: expected {CONTENT_HASH_BYTES}, \
+             got {}",
+                content_hash.len()
+            ))
+        })?;
+    let byte_size = u64::try_from(byte_size)
+        .map_err(|_| StorageError::invalid_input(format!("byte_size out of range: {byte_size}")))?;
+    Ok(Media {
+        id: MediaId::from_uuid(decode_uuid(&id)?),
+        content_hash,
+        content_type,
+        byte_size,
+        original_filename,
+        uploaded_by: UserId::from_uuid(decode_uuid(&uploaded_by)?),
+        created_at: parse_ts(&created_at)?,
     })
 }
 
