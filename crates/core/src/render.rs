@@ -75,12 +75,24 @@ pub trait Renderer: Send + Sync {
 /// Renderers receive a `RenderContext` so they know *where* the source is
 /// being rendered: which namespace, which slug, and (M1) a [`LinkResolver`]
 /// that can answer "does the target page exist?" for redlink colouring.
+///
+/// `namespace_slug` is set by callers that need the renderer to construct
+/// URLs (specifically the wikilink machinery shipping in #30 — without a
+/// slug the renderer falls back to `Main`, which is right for tests and the
+/// default-namespace setup but wrong as soon as namespace prefix routing
+/// (#28) lands). Production wiring in the API layer sets it from the
+/// resolved [`Namespace::slug`](crate::Namespace).
 #[derive(Debug)]
 pub struct RenderContext {
     /// Namespace the page being rendered lives in.
     pub namespace: NamespaceId,
     /// URL slug of the page being rendered.
     pub page_slug: String,
+    /// Slug of the namespace, used to construct `/wiki/<namespace>/…` URLs
+    /// for `[[WikiLink]]` rewriting. `None` falls back to `Main` (the M0
+    /// default namespace) — fine for tests and for the current
+    /// pre-namespace-routing API.
+    pub namespace_slug: Option<String>,
     /// Optional resolver used to decide which `[[WikiLink]]`s are red.
     ///
     /// `None` for M0; the API layer wires this in M1.
@@ -94,8 +106,24 @@ impl RenderContext {
         Self {
             namespace,
             page_slug: page_slug.into(),
+            namespace_slug: None,
             link_resolver: None,
         }
+    }
+
+    /// Set the namespace slug used by the renderer to build wikilink URLs.
+    #[must_use]
+    pub fn with_namespace_slug(mut self, slug: impl Into<String>) -> Self {
+        self.namespace_slug = Some(slug.into());
+        self
+    }
+
+    /// Set the [`LinkResolver`] used by the renderer to decide which
+    /// `[[WikiLink]]`s are red.
+    #[must_use]
+    pub fn with_link_resolver(mut self, resolver: Box<dyn LinkResolver>) -> Self {
+        self.link_resolver = Some(resolver);
+        self
     }
 }
 

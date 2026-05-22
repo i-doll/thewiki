@@ -59,6 +59,7 @@ mod codec;
 mod namespace;
 mod page;
 mod page_audit;
+mod page_link;
 mod recent_changes;
 mod revision;
 mod role;
@@ -68,6 +69,7 @@ mod user;
 pub use audit_log::SqliteAuditLogRepository;
 pub use namespace::SqliteNamespaceRepository;
 pub use page::SqlitePageRepository;
+pub use page_link::SqlitePageLinkRepository;
 pub use recent_changes::SqliteRecentChangesRepository;
 pub use revision::SqliteRevisionRepository;
 pub use role::SqliteRoleRepository;
@@ -216,6 +218,13 @@ impl SqliteStorage {
     #[must_use]
     pub fn audit_log(&self) -> SqliteAuditLogRepository<'_> {
         SqliteAuditLogRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`PageLinkRepository`](crate::repo::PageLinkRepository).
+    #[must_use]
+    pub fn page_links(&self) -> SqlitePageLinkRepository<'_> {
+        SqlitePageLinkRepository::new(&self.pool)
     }
 
     /// Commit a page mutation together with its audit-log row.
