@@ -1,0 +1,172 @@
+# Number of thewiki pods to run when autoscaling is disabled.
+replicaCount: 1
+
+image:
+  # Container image published by the Docker workflow.
+  repository: ghcr.io/i-doll/thewiki
+  # The `edge` tag tracks main once the Docker workflow is manually dispatched.
+  tag: edge
+  pullPolicy: IfNotPresent
+
+# Optional image pull secrets for private registries or mirrors.
+imagePullSecrets: []
+
+# Override generated resource names.
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Create a dedicated service account for the pod.
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  # Distroless nonroot image runs as uid/gid 65532. fsGroup makes PVCs writable.
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+
+app:
+  # Container port the thewiki binary listens on.
+  port: 8080
+
+config:
+  server:
+    # The chart always binds inside the pod; expose public hostnames via Ingress.
+    serveFrontend: true
+    requestTimeout: 30s
+  database:
+    maxConnections: 16
+    acquireTimeoutSecs: 10
+  auth:
+    anonymousEdits: false
+    registration: closed
+    approvalRequiredFor: none
+    sessionTtlHours: 24
+    # Set true only for local HTTP testing. Production should use TLS and secure cookies.
+    insecureCookie: false
+    argon2:
+      memoryKib: 65536
+      iterations: 3
+      parallelism: 1
+  telemetry:
+    logFormat: json
+    logFilter: info,thewiki=debug
+
+database:
+  # Direct database URL override. When empty, the chart uses the SQLite PVC below.
+  # The current app image supports SQLite; Postgres URLs become useful once
+  # the M1 Postgres adapter lands.
+  url: ""
+  # Existing secret containing a `database-url` key. When set, the chart will not create one.
+  existingSecret: ""
+  existingSecretKey: database-url
+
+persistence:
+  # PVC for the default SQLite database.
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 2Gi
+  mountPath: /data
+  annotations: {}
+
+storage:
+  s3:
+    # Enables S3-compatible object storage config for media uploads.
+    enabled: false
+    bucket: thewiki-media
+    region: us-east-1
+    # Leave empty with minio.enabled=true to use the in-cluster MinIO service.
+    endpointUrl: ""
+    # Existing secret with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.
+    existingSecret: ""
+    accessKeyId: ""
+    secretAccessKey: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: thewiki.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: thewiki-tls
+  #    hosts:
+  #      - thewiki.example.com
+
+resources: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+postgresql:
+  # Optional bundled Postgres service. The current app image still uses SQLite
+  # unless database.url is explicitly set to a supported non-SQLite backend.
+  enabled: false
+  auth:
+    username: thewiki
+    # Empty lets the Bitnami subchart generate and retain a random password.
+    password: ""
+    database: thewiki
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+minio:
+  # Optional bundled MinIO for S3-compatible media storage.
+  enabled: false
+  global:
+    security:
+      # Bitnami's 17.0.21 chart verifies Docker Hub image names, but the
+      # patched server image below is published through Bitnami's Public ECR
+      # mirror and pinned by digest.
+      allowInsecureImages: true
+  image:
+    registry: public.ecr.aws
+    repository: bitnami/minio
+    tag: 2026.5.12-debian-12-r1
+    digest: sha256:fdfa41d3e43717c95f3c610f0adfb708e90caec36a62c0909d7df8a9094ce4a0
+  auth:
+    rootUser: thewiki
+    # Empty lets the Bitnami subchart generate and retain a random password.
+    rootPassword: ""
+  console:
+    enabled: false
+  defaultBuckets: thewiki-media

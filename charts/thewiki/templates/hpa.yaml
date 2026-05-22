@@ -1,0 +1,23 @@
+{{- if .Values.autoscaling.enabled -}}
+{{- $cpuRequest := required (printf "%s autoscaling requires resources.requests.cpu" (include "thewiki.fullname" .)) (dig "requests" "cpu" "" .Values.resources) -}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "thewiki.fullname" . }}
+  labels:
+    {{- include "thewiki.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "thewiki.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

@@ -1,0 +1,32 @@
+apiVersion: v2
+name: thewiki
+description: A self-hosted single-binary wiki for public reference use.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/i-doll/thewiki
+sources:
+  - https://github.com/i-doll/thewiki
+maintainers:
+  - name: thewiki contributors
+    url: https://github.com/i-doll/thewiki
+keywords:
+  - wiki
+  - knowledge-base
+  - rust
+annotations:
+  artifacthub.io/license: AGPL-3.0-only
+dependencies:
+  - name: postgresql
+    version: 18.6.7
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: postgresql.enabled
+  - name: minio
+    # 17.0.21 is the latest Bitnami MinIO OCI chart available to Helm during
+    # this chart update. values.yaml overrides the server image to a patched
+    # Public ECR digest and disables the stale optional console image; refresh
+    # Chart.lock and the vendored tgz when Bitnami publishes a newer chart.
+    version: 17.0.21
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: minio.enabled

@@ -1,0 +1,43 @@
+name: Helm
+
+# Manual-only while repo CI is intentionally gated during pre-alpha. Restore
+# pull_request paths when CI is re-enabled broadly.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: helm-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Helm / lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+
+      - name: Build chart dependencies
+        run: helm dependency build charts/thewiki
+
+      - name: Lint chart
+        run: helm lint charts/thewiki --with-subcharts
+
+      - name: Render default SQLite install
+        run: helm template thewiki charts/thewiki > /tmp/thewiki-sqlite.yaml
+
+      - name: Render bundled Postgres and MinIO install
+        run: |
+          helm template thewiki charts/thewiki \
+            --set postgresql.enabled=true \
+            --set storage.s3.enabled=true \
+            --set minio.enabled=true \
+            > /tmp/thewiki-postgres-minio.yaml
