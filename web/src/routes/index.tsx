@@ -5,16 +5,14 @@ export const Route = createFileRoute("/")({
 	component: HomeComponent,
 });
 
-interface HealthResponse {
-	status: string;
-}
-
-async function fetchHealth(): Promise<HealthResponse> {
-	const res = await fetch("/api/v1/healthz");
+// The backend liveness probe returns plain-text "ok" (not JSON) — see
+// crates/api/src/app.rs and the health.rs integration test.
+async function fetchHealth(): Promise<string> {
+	const res = await fetch("/healthz");
 	if (!res.ok) {
 		throw new Error(`Health check failed: ${res.status} ${res.statusText}`);
 	}
-	return (await res.json()) as HealthResponse;
+	return (await res.text()).trim();
 }
 
 function HomeComponent() {
@@ -39,9 +37,7 @@ function HomeComponent() {
 				<div className="mt-2 font-mono text-sm">
 					{health.isPending && <span className="text-neutral-500">Loading…</span>}
 					{health.isError && <span className="text-red-600">Error: {health.error.message}</span>}
-					{health.isSuccess && (
-						<span className="text-green-700">status = {health.data.status}</span>
-					)}
+					{health.isSuccess && <span className="text-green-700">status = {health.data}</span>}
 				</div>
 			</section>
 
