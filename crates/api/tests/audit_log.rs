@@ -382,6 +382,121 @@ async fn audit_log_atom_feed_contains_entries() {
 }
 
 #[tokio::test]
+async fn audit_log_rejects_anonymous_callers_with_401() {
+    let app = fresh_app().await;
+    let (status, body) =
+        json_request(app.router.clone(), "GET", "/api/v1/audit-log", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // AuthError wire shape uses `error`, not `code`.
+    assert_eq!(body["error"], "invalid_credentials");
+
+    let (status, _, _) = request(app.router, "GET", "/api/v1/audit-log/atom", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn audit_log_filters_by_since_and_until_window() {
+    let app = fresh_app().await;
+    create_page(app.router.clone(), &app.editor_session, "alpha").await;
+    create_page(app.router.clone(), &app.editor_session, "beta").await;
+
+    // Window covering both creations.
+    let (status, body) = json_request(
+        app.router.clone(),
+        "GET",
+        "/api/v1/audit-log?since=2024-01-01T00:00:00Z",
+        Some(&app.admin_session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"].as_array().expect("items").len(), 2);
+
+    // Until in the deep past wipes the window.
+    let (status, body) = json_request(
+        app.router,
+        "GET",
+        "/api/v1/audit-log?until=2024-01-01T00:00:00Z",
+        Some(&app.admin_session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["items"].as_array().expect("items").is_empty());
+}
+
+#[tokio::test]
+async fn audit_log_cursor_walks_pages() {
+    let app = fresh_app().await;
+    for slug in ["one", "two", "three"] {
+        create_page(app.router.clone(), &app.editor_session, slug).await;
+    }
+
+    // First page (limit=2) returns the two newest entries plus a cursor.
+    let (status, first) = json_request(
+        app.router.clone(),
+        "GET",
+        "/api/v1/audit-log?limit=2",
+        Some(&app.admin_session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["items"].as_array().expect("items").len(), 2);
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("next_cursor on first page")
+        .to_string();
+
+    // Second page yields the final entry; cursor empties out.
+    let encoded = urlencoding(&cursor);
+    let (status, second) = json_request(
+        app.router,
+        "GET",
+        &format!("/api/v1/audit-log?limit=2&cursor={encoded}"),
+        Some(&app.admin_session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second["items"].as_array().expect("items").len(), 1);
+    assert!(second["next_cursor"].is_null());
+
+    // The two pages cover three distinct IDs in total.
+    let mut ids: Vec<String> = first["items"]
+        .as_array()
+        .expect("first items")
+        .iter()
+        .chain(second["items"].as_array().expect("second items").iter())
+        .map(|entry| {
+            entry["id"]
+                .as_str()
+                .expect("entry id is a string")
+                .to_string()
+        })
+        .collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), 3);
+}
+
+fn urlencoding(raw: &str) -> String {
+    // The audit-log cursor is `<rfc3339>|<hex>` — the `|` and `:` characters
+    // need percent-encoding for query strings. Keep this minimal rather than
+    // pulling in a urlencoding dep.
+    let mut out = String::with_capacity(raw.len());
+    for b in raw.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+#[tokio::test]
 async fn revert_writes_audit_row() {
     let app = fresh_app().await;
     let created = create_page(app.router.clone(), &app.editor_session, "home").await;

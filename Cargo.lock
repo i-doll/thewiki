@@ -4375,7 +4375,10 @@ dependencies = [
  "anyhow",
  "clap",
  "dotenvy",
+ "serde_json",
  "sqlx",
+ "thewiki-core",
+ "thewiki-storage",
  "time",
  "tokio",
 ]

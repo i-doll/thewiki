@@ -18,8 +18,13 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 dotenvy = { workspace = true }
 sqlx = { workspace = true }
+thewiki-storage = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+thewiki-core = { workspace = true }
 
 [lints]
 workspace = true

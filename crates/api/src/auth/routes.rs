@@ -21,10 +21,13 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use thewiki_core::Username;
 use thewiki_core::{Permissions, Role, User, UserId};
 use thewiki_storage::StorageError;
-use thewiki_storage::repo::{RoleRepository, SessionRepository, UserRepository};
+use thewiki_storage::repo::{
+    AuditLogRepository, NewAuditLogEntry, RoleRepository, SessionRepository, UserRepository,
+};
 use time::OffsetDateTime;
 use tower_cookies::Cookies;
 use utoipa::ToSchema;
@@ -204,6 +207,17 @@ pub async fn login(
         tracing::warn!(error = %e, "failed to bump last_login_at");
     }
 
+    // Audit-log the login. Best-effort: a failure to persist the audit row
+    // must not invalidate the freshly issued session, so we log and continue.
+    record_auth_event(
+        &state,
+        user.id,
+        user.username.as_str(),
+        "auth.login",
+        json!({ "session_id": session.id.into_uuid() }),
+    )
+    .await;
+
     let roles = state
         .storage
         .roles()
@@ -251,7 +265,47 @@ pub async fn logout(
     }
     cookies.add(build_clearing_cookie(SESSION_COOKIE, state.secure_cookies));
     cookies.add(build_clearing_cookie(CSRF_COOKIE, state.secure_cookies));
+
+    // Audit-log the logout. Best-effort — same rationale as login.
+    record_auth_event(
+        &state,
+        auth.user.id,
+        auth.user.username.as_str(),
+        "auth.logout",
+        json!({ "session_id": auth.session_id.into_uuid() }),
+    )
+    .await;
+
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Persist one auth-related audit row. The actor's own user row is also the
+/// audit target (kind=`user`), since the action targets the actor's session.
+///
+/// Best-effort by design: handlers that call this have already committed the
+/// authoritative state (the session row, or its deletion). Surfacing a
+/// storage error here would force the client into a confusing retry loop
+/// where the session is gone but the response says it failed. We log the
+/// failure and move on so operators see it without harming the live request.
+async fn record_auth_event(
+    state: &AuthState,
+    user_id: UserId,
+    username: &str,
+    action: &str,
+    metadata: Value,
+) {
+    let entry = NewAuditLogEntry {
+        actor_id: user_id,
+        actor_username: username.to_owned(),
+        action: action.to_owned(),
+        target_kind: "user".to_owned(),
+        target_id: user_id.into_uuid(),
+        target_label: Some(username.to_owned()),
+        metadata,
+    };
+    if let Err(err) = state.storage.audit_log().create(entry).await {
+        tracing::warn!(error = %err, action, "failed to write auth audit row");
+    }
 }
 
 /// `GET /api/v1/auth/me` — return the authenticated user payload.

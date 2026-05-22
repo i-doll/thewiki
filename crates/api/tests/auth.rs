@@ -356,6 +356,51 @@ async fn logout_without_csrf_is_rejected_403() {
 }
 
 #[tokio::test]
+async fn login_and_logout_each_write_an_audit_row() {
+    use thewiki_storage::repo::{AuditLogFilter, AuditLogRepository};
+
+    let (state, _uid) = setup().await;
+    let login_resp = login(state.clone(), "alice", "password123").await;
+    assert_eq!(login_resp.status(), StatusCode::OK);
+    let cookies = set_cookie_headers(&login_resp);
+    let session = cookie_value(&cookies, "thewiki_session").expect("session cookie");
+    let csrf = cookie_value(&cookies, "thewiki_csrf").expect("csrf cookie");
+
+    let logout_resp = app::build_auth_app(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/logout")
+                .header(
+                    "cookie",
+                    format!("thewiki_session={session}; thewiki_csrf={csrf}"),
+                )
+                .header("x-csrf-token", csrf.clone())
+                .body(Body::empty())
+                .expect("build req"),
+        )
+        .await
+        .expect("router");
+    assert_eq!(logout_resp.status(), StatusCode::NO_CONTENT);
+
+    // The audit-log repository is shared with the auth state. The login
+    // handler writes one `auth.login` row; logout writes one `auth.logout`.
+    let entries = state
+        .storage
+        .audit_log()
+        .list(AuditLogFilter::default(), None, 50)
+        .await
+        .expect("list audit");
+    let actions: Vec<&str> = entries.items.iter().map(|e| e.action.as_str()).collect();
+    assert!(actions.contains(&"auth.login"), "actions: {actions:?}");
+    assert!(actions.contains(&"auth.logout"), "actions: {actions:?}");
+    for entry in &entries.items {
+        assert_eq!(entry.actor_username, "alice");
+        assert_eq!(entry.target_kind, "user");
+    }
+}
+
+#[tokio::test]
 async fn expired_session_returns_401() {
     let (state, _uid) = setup().await;
     let login_resp = login(state.clone(), "alice", "password123").await;

@@ -183,6 +183,35 @@ refill_interval_secs = 60
 kind = "in-memory"
 
 # ---------------------------------------------------------------------------
+# Administrative audit log (#36).
+#
+# Every privileged action (page CRUD, reverts, login/logout, role changes)
+# writes a row to the `audit_log` table. The full feed is exposed at
+# `GET /api/v1/audit-log` (JSON) and `GET /api/v1/audit-log/atom`
+# (RSS/Atom). Both endpoints require a session that holds the
+# `VIEW_AUDIT_LOG` permission bit.
+#
+# Audit rows are append-only — there is no UPDATE/DELETE API. Storage
+# enforcement is via the retention window below.
+# ---------------------------------------------------------------------------
+[audit_log]
+# Master switch. When `false`, the read endpoints still serve historical rows
+# (so an operator can audit a paused deployment) but the background pruner is
+# skipped and `cargo xtask audit-log-prune` will refuse to run. Default: true.
+enabled = true
+
+# Number of days to retain audit rows. The `serve` binary runs an in-process
+# pruner once an hour. Operators who prefer cron can invoke
+# `cargo xtask audit-log-prune --retention-days 365` instead — e.g. with a
+# nightly crontab entry like:
+#
+#     0 3 * * *  cd /var/lib/thewiki && cargo run -p xtask --release -- \
+#                  audit-log-prune --database-url $DATABASE_URL
+#
+# Must be > 0. Default: 365.
+retention_days = 365
+
+# ---------------------------------------------------------------------------
 # Observability.
 # ---------------------------------------------------------------------------
 [telemetry]

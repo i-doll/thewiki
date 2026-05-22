@@ -1,11 +1,13 @@
 //! Repo-local automation entrypoint.
 //!
-//! Subcommands are dispatched via `clap`. Today only `migrate` is wired up;
-//! future tasks (codegen, release helpers, etc.) attach here.
+//! Subcommands are dispatched via `clap`. `migrate` manages schema migrations;
+//! `audit-log-prune` enforces the `audit_log.retention_days` policy outside the
+//! server process. Future tasks (codegen, release helpers, etc.) attach here.
 
 use anyhow::Result;
 use clap::Parser;
 
+mod audit_log_prune;
 mod migrate;
 
 #[derive(Debug, Parser)]
@@ -20,6 +22,8 @@ enum Command {
     /// Manage database migrations.
     #[command(subcommand)]
     Migrate(migrate::MigrateCommand),
+    /// Delete audit-log rows older than the configured retention window.
+    AuditLogPrune(audit_log_prune::AuditLogPruneArgs),
 }
 
 fn main() -> Result<()> {
@@ -30,5 +34,6 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Migrate(cmd) => migrate::run(cmd),
+        Command::AuditLogPrune(args) => audit_log_prune::run(args),
     }
 }

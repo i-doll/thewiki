@@ -33,6 +33,7 @@ fn defaults_match_documented_values() {
     assert_eq!(cfg.rate_limit.client_ip_header, None);
     assert!(cfg.rate_limit.trusted_proxies.is_empty());
     assert_eq!(cfg.rate_limit.backend, RateLimitBackendConfig::InMemory);
+    assert!(cfg.audit_log.enabled);
     assert_eq!(cfg.audit_log.retention_days, 365);
     assert_eq!(cfg.telemetry.log_format, LogFormat::Json);
     assert!(matches!(cfg.storage.backend, StorageBackend::Db));
