@@ -4,6 +4,7 @@
 //! probes the resulting schema to make sure the tables and the key uniqueness
 //! constraints landed.
 
+#![cfg(feature = "sqlite")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use sqlx::Row;

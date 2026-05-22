@@ -36,8 +36,22 @@ pub enum StorageError {
     /// A lower-level database error escaped without a more specific mapping.
     ///
     /// Typically I/O, connection-pool exhaustion, or a malformed SQL response.
+    /// Carries the original `sqlx::Error` on backends that use sqlx (`sqlite`,
+    /// the future `postgres`); the libsql adapter tunnels through
+    /// `sqlx::Error::Protocol` so this variant stays in the same shape across
+    /// backends and `?` keeps working in the per-aggregate impl modules.
+    #[cfg(feature = "sqlite")]
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
+
+    /// A lower-level driver error in a non-sqlx backend (libsql).
+    ///
+    /// Carries the driver's error rendering as a string so the variant stays
+    /// usable on builds that don't compile `sqlx`. The two variants converge
+    /// at the API layer (`StorageError -> 500`).
+    #[cfg(not(feature = "sqlite"))]
+    #[error("database error: {0}")]
+    Database(String),
 
     /// A migration failed to apply.
     ///

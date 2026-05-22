@@ -109,6 +109,13 @@ sqlx = { version = "0.8", default-features = false, features = [
     "sqlite",
 ] }
 
+# libsql / Turso adapter (#24). Embedded SQLite-compatible engine with optional
+# remote replication. The crate has its own async client (not via sqlx); the
+# `core` feature is enough for in-memory + local-file backends, `remote` adds
+# the Hrana HTTP client used for Turso URLs (`libsql://`), and `replication`
+# powers embedded replicas. Default features pull in all three plus `tls`.
+libsql = { version = "0.9", default-features = true }
+
 # Load `DATABASE_URL` (and friends) from a local `.env` for `xtask migrate run`
 # during development. Production deploys use real env vars.
 dotenvy = "0.15"
