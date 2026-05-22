@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use axum::extract::FromRef;
+use thewiki_search::IndexerHandle;
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
     AuditLogRepository, NamespaceRepository, NewAuditLogEntry, PageAuditMutation,
@@ -173,6 +174,11 @@ pub struct AppState<S: AppStorage> {
     /// Auth state shared with the auth router (cookies, hasher, session TTL).
     /// `None` in test fixtures that don't exercise the auth stack.
     pub auth_state: Option<AuthState>,
+    /// Handle to the async Tantivy indexer (#26). Disabled in tests and in
+    /// `build_with_state` callers that don't stand up the worker; the
+    /// page-CRUD handlers still call the handle but the no-op variant
+    /// drops every job.
+    pub search: IndexerHandle,
 }
 
 impl<S: AppStorage> AppState<S> {
@@ -187,7 +193,17 @@ impl<S: AppStorage> AppState<S> {
             route_config: RouteConfig::default(),
             auth_config,
             auth_state: None,
+            search: IndexerHandle::disabled(),
         }
+    }
+
+    /// Replace the [`IndexerHandle`]. Production code calls this with a
+    /// handle minted by [`thewiki_search::Indexer::spawn`]; tests typically
+    /// leave the default disabled handle in place.
+    #[must_use]
+    pub fn with_search(mut self, search: IndexerHandle) -> Self {
+        self.search = search;
+        self
     }
 
     /// Convenience for tests: build a state with the built-in default
@@ -222,6 +238,7 @@ impl<S: AppStorage> Clone for AppState<S> {
             route_config: self.route_config,
             auth_config: self.auth_config.clone(),
             auth_state: self.auth_state.clone(),
+            search: self.search.clone(),
         }
     }
 }

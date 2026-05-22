@@ -19,6 +19,7 @@ path = "src/lib.rs"
 # Sibling crates.
 thewiki-core = { workspace = true }
 thewiki-render = { workspace = true }
+thewiki-search = { workspace = true }
 thewiki-storage = { workspace = true }
 # Used directly by the auth login handler to read the opaque
 # `users.password_hash` column (the user repository deliberately keeps that

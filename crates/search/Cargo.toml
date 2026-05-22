@@ -1,6 +1,6 @@
 [package]
 name = "thewiki-search"
-description = "Search index wrapper around Tantivy for thewiki."
+description = "Tantivy-backed full-text search for thewiki: schema, async indexer, and query helpers."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,32 @@ authors.workspace = true
 
 [dependencies]
 thewiki-core = { workspace = true }
+
+# Tantivy is the embedded full-text index. It exposes a sync `IndexWriter` /
+# `IndexReader`; the async indexer in `indexer.rs` keeps it off the runtime by
+# pinning all writes to a dedicated `spawn_blocking` worker.
+tantivy = { workspace = true }
+
+# Async indexer machinery (mpsc channel + worker task).
+tokio = { workspace = true }
+
+# Errors + structured logs.
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Timestamps are stored in the schema as Tantivy DateTime values; we accept
+# them from callers as `time::OffsetDateTime` so the API layer can pass page
+# metadata through without conversion gymnastics.
+time = { workspace = true }
+
+# Re-hydrating UUIDv7 bytes from the stored `page_id` field. We don't mint
+# any IDs here — every UUID flowing through the crate originates from
+# `thewiki-core`.
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true
