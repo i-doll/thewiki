@@ -137,6 +137,45 @@ iterations = 3
 parallelism = 1
 
 # ---------------------------------------------------------------------------
+# Rate limiting.
+#
+# Token-bucket middleware is applied to public API routes. Anonymous requests
+# are keyed by peer IP. Authenticated requests with a session cookie first pass
+# a peer IP preflight to cap session lookup spray, then consume a user ID bucket
+# when the session is valid. In-memory buckets are process-local, so
+# multi-replica deploys should switch to a shared backend once one is available.
+# ---------------------------------------------------------------------------
+[rate_limit]
+# Global switch. Default: true.
+enabled = true
+# Optional: when running behind trusted reverse proxies, derive the client IP
+# from one of: "x-forwarded-for", "x-real-ip". The header is ignored unless
+# the socket peer is listed in trusted_proxies, so do not put public client
+# networks here. For X-Forwarded-For, the server selects the closest
+# untrusted address from the right side of the chain; list every internal
+# proxy that may append to the header.
+# client_ip_header = "x-forwarded-for"
+# trusted_proxies = ["127.0.0.1", "::1"]
+
+[rate_limit.read]
+# Safe methods (`GET`, `HEAD`, `OPTIONS`). Defaults allow a burst of 120 reads
+# and refill 120 tokens per minute.
+capacity = 120
+refill_tokens = 120
+refill_interval_secs = 60
+
+[rate_limit.write]
+# Mutating methods (`POST`, `PUT`, `PATCH`, `DELETE`, ...). Defaults allow a
+# burst of 30 writes and refill 30 tokens per minute.
+capacity = 30
+refill_tokens = 30
+refill_interval_secs = 60
+
+[rate_limit.backend]
+# Per-process bucket store. Default: "in-memory".
+kind = "in-memory"
+
+# ---------------------------------------------------------------------------
 # Observability.
 # ---------------------------------------------------------------------------
 [telemetry]

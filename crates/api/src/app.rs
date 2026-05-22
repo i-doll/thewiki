@@ -19,6 +19,7 @@
 use axum::{
     Router,
     http::{HeaderName, HeaderValue, Request},
+    middleware,
     response::IntoResponse,
     routing::{any, get},
 };
@@ -36,7 +37,9 @@ use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
 
 use crate::auth::{self, AuthState, csrf};
+use crate::config::{Config, RateLimitConfig};
 use crate::pages;
+use crate::rate_limit::{self, RateLimitState};
 use crate::recent_changes;
 use crate::state::{AppState, AppStorage};
 use crate::static_assets;
@@ -147,9 +150,23 @@ pub fn build() -> Router {
 /// extractor (#14) can resolve session cookies in tests that wire up
 /// [`AppState::with_auth_state`].
 pub fn build_with_state<S: AppStorage>(state: AppState<S>) -> Router {
+    build_with_state_with_rate_limit(state, Config::defaults().rate_limit)
+}
+
+/// Build the page-CRUD app with a caller-supplied rate-limit config.
+///
+/// Integration tests that are not specifically exercising rate limits should
+/// pass a disabled config so they do not inherit production defaults.
+pub fn build_with_state_with_rate_limit<S: AppStorage>(
+    state: AppState<S>,
+    rate_limit_config: RateLimitConfig,
+) -> Router {
+    let rate_limit_state = RateLimitState::new(rate_limit_config, state.auth_state.clone());
     let api_router: OpenApiRouter<AppState<S>> = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api/v1/pages", pages::router::<S>())
-        .nest("/api/v1/recent-changes", recent_changes::router::<S>());
+        .nest("/api/v1/recent-changes", recent_changes::router::<S>())
+        .layer(middleware::from_fn(rate_limit::rate_limit_layer))
+        .layer(axum::Extension(rate_limit_state));
 
     let (api_router, api_doc) = api_router.split_for_parts();
     let swagger = SwaggerUi::new(SWAGGER_UI_PATH).url(OPENAPI_JSON_PATH, api_doc);
@@ -170,13 +187,30 @@ pub fn build_with_state<S: AppStorage>(state: AppState<S>) -> Router {
 /// Used by the auth integration tests (`tests/auth.rs`). Production callers
 /// want [`build_full`] which combines pages + auth.
 pub fn build_auth_app(state: AuthState) -> Router {
+    build_auth_app_with_rate_limit(state, Config::defaults().rate_limit)
+}
+
+/// Build the auth-only app with a caller-supplied rate-limit config.
+///
+/// This is primarily for integration tests that need tiny buckets. Production
+/// callers should use [`build_full`], which receives the parsed runtime config.
+pub fn build_auth_app_with_rate_limit(
+    state: AuthState,
+    rate_limit_config: RateLimitConfig,
+) -> Router {
     let auth_router = auth::routes::build_router();
+    let rate_limit_state = RateLimitState::new(rate_limit_config, Some(state.clone()));
 
     let router = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        .nest("/api/v1/auth", auth_router)
-        .layer(axum::middleware::from_fn(csrf::csrf_layer))
+        .nest(
+            "/api/v1/auth",
+            auth_router
+                .layer(axum::middleware::from_fn(csrf::csrf_layer))
+                .layer(middleware::from_fn(rate_limit::rate_limit_layer))
+                .layer(axum::Extension(rate_limit_state)),
+        )
         .layer(CookieManagerLayer::new())
         .with_state(state);
 
@@ -196,17 +230,29 @@ pub fn build_full<S: AppStorage>(
     app_state: AppState<S>,
     auth_state: AuthState,
     serve_frontend: bool,
+    rate_limit_config: RateLimitConfig,
 ) -> Router {
+    let rate_limit_state = RateLimitState::new(
+        rate_limit_config,
+        app_state.auth_state.clone().or(Some(auth_state.clone())),
+    );
     // Page CRUD + recent-changes + OpenAPI subrouter.
     let api_router: OpenApiRouter<AppState<S>> = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api/v1/pages", pages::router::<S>())
-        .nest("/api/v1/recent-changes", recent_changes::router::<S>());
+        .nest("/api/v1/recent-changes", recent_changes::router::<S>())
+        .layer(middleware::from_fn(csrf::csrf_layer))
+        .layer(middleware::from_fn(rate_limit::rate_limit_layer))
+        .layer(axum::Extension(rate_limit_state.clone()));
     let (api_router, api_doc) = api_router.split_for_parts();
     let swagger = SwaggerUi::new(SWAGGER_UI_PATH).url(OPENAPI_JSON_PATH, api_doc);
     let stateful_api = api_router.with_state(app_state);
 
     // Auth subrouter.
-    let auth_router = auth::routes::build_router().with_state(auth_state);
+    let auth_router = auth::routes::build_router()
+        .layer(middleware::from_fn(csrf::csrf_layer))
+        .layer(middleware::from_fn(rate_limit::rate_limit_layer))
+        .layer(axum::Extension(rate_limit_state))
+        .with_state(auth_state);
 
     let mut router = Router::new()
         .merge(stateful_api)
@@ -225,9 +271,7 @@ pub fn build_full<S: AppStorage>(
             .fallback_service(static_assets::static_routes());
     }
 
-    let router = router
-        .layer(axum::middleware::from_fn(csrf::csrf_layer))
-        .layer(CookieManagerLayer::new());
+    let router = router.layer(CookieManagerLayer::new());
 
     with_middleware(router)
 }

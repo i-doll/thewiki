@@ -68,7 +68,12 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
     let app_state = thewiki_api::state::AppState::new(storage, config.auth.clone())
         .with_auth_state(auth_state.clone());
 
-    let router = app::build_full(app_state, auth_state, config.server.serve_frontend);
+    let router = app::build_full(
+        app_state,
+        auth_state,
+        config.server.serve_frontend,
+        config.rate_limit,
+    );
 
     let listener = tokio::net::TcpListener::bind(&config.server.bind)
         .await
@@ -79,9 +84,12 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         .with_context(|| "reading listener local address")?;
     info!(bind = %local_addr, "thewiki listening");
 
-    axum::serve(listener, router)
-        .await
-        .context("axum server terminated with an error")?;
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .context("axum server terminated with an error")?;
 
     Ok(())
 }

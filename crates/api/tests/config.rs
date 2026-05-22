@@ -7,7 +7,8 @@
 
 use figment::Jail;
 use thewiki_api::config::{
-    ApprovalScope, Config, ConfigError, LogFormat, RegistrationPolicy, StorageBackend,
+    ApprovalScope, ClientIpHeader, Config, ConfigError, LogFormat, RateLimitBackendConfig,
+    RegistrationPolicy, StorageBackend,
 };
 
 #[test]
@@ -22,6 +23,16 @@ fn defaults_match_documented_values() {
     assert_eq!(cfg.auth.approval_required_for, ApprovalScope::None);
     assert_eq!(cfg.auth.argon2.memory_kib, 65_536);
     assert_eq!(cfg.auth.argon2.iterations, 3);
+    assert!(cfg.rate_limit.enabled);
+    assert_eq!(cfg.rate_limit.read.capacity, 120);
+    assert_eq!(cfg.rate_limit.read.refill_tokens, 120);
+    assert_eq!(cfg.rate_limit.read.refill_interval_secs, 60);
+    assert_eq!(cfg.rate_limit.write.capacity, 30);
+    assert_eq!(cfg.rate_limit.write.refill_tokens, 30);
+    assert_eq!(cfg.rate_limit.write.refill_interval_secs, 60);
+    assert_eq!(cfg.rate_limit.client_ip_header, None);
+    assert!(cfg.rate_limit.trusted_proxies.is_empty());
+    assert_eq!(cfg.rate_limit.backend, RateLimitBackendConfig::InMemory);
     assert_eq!(cfg.telemetry.log_format, LogFormat::Json);
     assert!(matches!(cfg.storage.backend, StorageBackend::Db));
 
@@ -60,6 +71,24 @@ memory_kib = 65536
 iterations = 3
 parallelism = 1
 
+[rate_limit]
+enabled = false
+client_ip_header = "x-forwarded-for"
+trusted_proxies = ["127.0.0.1"]
+
+[rate_limit.read]
+capacity = 10
+refill_tokens = 5
+refill_interval_secs = 2
+
+[rate_limit.write]
+capacity = 3
+refill_tokens = 1
+refill_interval_secs = 4
+
+[rate_limit.backend]
+kind = "in-memory"
+
 [telemetry]
 log_format = "pretty"
 log_filter = "debug"
@@ -76,6 +105,19 @@ log_filter = "debug"
         assert!(cfg.auth.anonymous_edits);
         assert_eq!(cfg.auth.registration, RegistrationPolicy::Open);
         assert_eq!(cfg.auth.approval_required_for, ApprovalScope::Anonymous);
+        assert!(!cfg.rate_limit.enabled);
+        assert_eq!(cfg.rate_limit.read.capacity, 10);
+        assert_eq!(cfg.rate_limit.read.refill_tokens, 5);
+        assert_eq!(cfg.rate_limit.read.refill_interval_secs, 2);
+        assert_eq!(cfg.rate_limit.write.capacity, 3);
+        assert_eq!(cfg.rate_limit.write.refill_tokens, 1);
+        assert_eq!(cfg.rate_limit.write.refill_interval_secs, 4);
+        assert_eq!(
+            cfg.rate_limit.client_ip_header,
+            Some(ClientIpHeader::XForwardedFor)
+        );
+        assert_eq!(cfg.rate_limit.trusted_proxies.len(), 1);
+        assert_eq!(cfg.rate_limit.backend, RateLimitBackendConfig::InMemory);
         assert_eq!(cfg.telemetry.log_format, LogFormat::Pretty);
         Ok(())
     });
@@ -117,6 +159,7 @@ log_filter = "info"
 
         jail.set_env("THEWIKI_SERVER__BIND", "127.0.0.1:9000");
         jail.set_env("THEWIKI_DATABASE__MAX_CONNECTIONS", "64");
+        jail.set_env("THEWIKI_RATE_LIMIT__WRITE__CAPACITY", "7");
 
         let cfg = Config::load(Some(std::path::Path::new("thewiki.toml")))
             .expect("layered load succeeds");
@@ -129,6 +172,7 @@ log_filter = "info"
             cfg.database.max_connections, 64,
             "env should override file for nested keys too"
         );
+        assert_eq!(cfg.rate_limit.write.capacity, 7);
         // Fields not touched by env keep their file value.
         assert_eq!(cfg.database.url, "sqlite://from-file.db");
         Ok(())
@@ -165,5 +209,45 @@ fn validate_rejects_empty_database_url() {
     let mut cfg = Config::defaults();
     cfg.database.url = String::new();
     let err = cfg.validate().expect_err("empty url must be rejected");
+    assert!(matches!(err, ConfigError::Invalid(_)));
+}
+
+#[test]
+fn validate_rejects_zero_rate_limit_capacity() {
+    let mut cfg = Config::defaults();
+    cfg.rate_limit.read.capacity = 0;
+    let err = cfg
+        .validate()
+        .expect_err("zero read capacity must be rejected");
+    assert!(matches!(err, ConfigError::Invalid(_)));
+}
+
+#[test]
+fn validate_rejects_zero_rate_limit_refill_tokens() {
+    let mut cfg = Config::defaults();
+    cfg.rate_limit.write.refill_tokens = 0;
+    let err = cfg
+        .validate()
+        .expect_err("zero write refill tokens must be rejected");
+    assert!(matches!(err, ConfigError::Invalid(_)));
+}
+
+#[test]
+fn validate_rejects_zero_rate_limit_refill_interval() {
+    let mut cfg = Config::defaults();
+    cfg.rate_limit.write.refill_interval_secs = 0;
+    let err = cfg
+        .validate()
+        .expect_err("zero write refill interval must be rejected");
+    assert!(matches!(err, ConfigError::Invalid(_)));
+}
+
+#[test]
+fn validate_rejects_proxy_header_without_trusted_proxy() {
+    let mut cfg = Config::defaults();
+    cfg.rate_limit.client_ip_header = Some(ClientIpHeader::XForwardedFor);
+    let err = cfg
+        .validate()
+        .expect_err("proxy header without trusted proxies must be rejected");
     assert!(matches!(err, ConfigError::Invalid(_)));
 }

@@ -15,7 +15,7 @@
 //!
 //! Configuration is read once at startup; reloading is a v2 concern.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
 use figment::{
@@ -39,6 +39,8 @@ pub struct Config {
     pub storage: StorageConfig,
     /// Auth model defaults (anonymous edits, registration, hashing parameters).
     pub auth: AuthConfig,
+    /// Abuse protection for public endpoints.
+    pub rate_limit: RateLimitConfig,
     /// Observability (log format and filter).
     pub telemetry: TelemetryConfig,
 }
@@ -190,6 +192,63 @@ pub struct Argon2Config {
     pub parallelism: u32,
 }
 
+/// Rate limiting configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimitConfig {
+    /// Global switch. Keep enabled in production; tests and trusted private
+    /// deployments can disable it explicitly.
+    pub enabled: bool,
+    /// Bucket used for safe/read methods (`GET`, `HEAD`, `OPTIONS`).
+    pub read: RateLimitBucketConfig,
+    /// Bucket used for mutating methods (`POST`, `PUT`, `PATCH`, `DELETE`, ...).
+    pub write: RateLimitBucketConfig,
+    /// Optional proxy header used to derive the client IP. Only honored when
+    /// the socket peer is in `trusted_proxies`.
+    #[serde(default)]
+    pub client_ip_header: Option<ClientIpHeader>,
+    /// Proxy IPs that are allowed to supply `client_ip_header`.
+    #[serde(default)]
+    pub trusted_proxies: Vec<IpAddr>,
+    /// Storage backend used for bucket state.
+    pub backend: RateLimitBackendConfig,
+}
+
+/// Token-bucket shape for one request class.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimitBucketConfig {
+    /// Maximum burst size.
+    pub capacity: u32,
+    /// Number of tokens restored every `refill_interval_secs`.
+    pub refill_tokens: u32,
+    /// Refill interval in seconds.
+    pub refill_interval_secs: u64,
+}
+
+/// Reverse-proxy header used for rate-limit client IP extraction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum ClientIpHeader {
+    /// `X-Forwarded-For` chain. When the socket peer is trusted, the limiter
+    /// scans the comma-separated list from right to left and selects the first
+    /// IP that is not listed in `rate_limit.trusted_proxies`.
+    XForwardedFor,
+    /// Single IP in `X-Real-IP`.
+    XRealIp,
+}
+
+/// Rate-limit bucket storage backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+#[non_exhaustive]
+pub enum RateLimitBackendConfig {
+    /// Per-process in-memory buckets. This is the default and is suitable for
+    /// single-binary/single-replica deploys.
+    InMemory,
+}
+
 /// Observability configuration consumed by [`crate::telemetry`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -272,6 +331,22 @@ impl Config {
                     iterations: 3,
                     parallelism: 1,
                 },
+            },
+            rate_limit: RateLimitConfig {
+                enabled: true,
+                read: RateLimitBucketConfig {
+                    capacity: 120,
+                    refill_tokens: 120,
+                    refill_interval_secs: 60,
+                },
+                write: RateLimitBucketConfig {
+                    capacity: 30,
+                    refill_tokens: 30,
+                    refill_interval_secs: 60,
+                },
+                client_ip_header: None,
+                trusted_proxies: Vec::new(),
+                backend: RateLimitBackendConfig::InMemory,
             },
             telemetry: TelemetryConfig {
                 log_format: LogFormat::Json,
@@ -380,8 +455,37 @@ impl Config {
             ));
         }
 
+        validate_rate_limit_bucket("rate_limit.read", &self.rate_limit.read)?;
+        validate_rate_limit_bucket("rate_limit.write", &self.rate_limit.write)?;
+        if self.rate_limit.client_ip_header.is_some() && self.rate_limit.trusted_proxies.is_empty()
+        {
+            return Err(ConfigError::Invalid(
+                "rate_limit.client_ip_header requires at least one trusted proxy".to_string(),
+            ));
+        }
+
         Ok(())
     }
+}
+
+fn validate_rate_limit_bucket(
+    name: &str,
+    bucket: &RateLimitBucketConfig,
+) -> Result<(), ConfigError> {
+    if bucket.capacity == 0 {
+        return Err(ConfigError::Invalid(format!("{name}.capacity must be > 0")));
+    }
+    if bucket.refill_tokens == 0 {
+        return Err(ConfigError::Invalid(format!(
+            "{name}.refill_tokens must be > 0"
+        )));
+    }
+    if bucket.refill_interval_secs == 0 {
+        return Err(ConfigError::Invalid(format!(
+            "{name}.refill_interval_secs must be > 0"
+        )));
+    }
+    Ok(())
 }
 
 impl Default for Config {
