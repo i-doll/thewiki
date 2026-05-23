@@ -97,12 +97,26 @@ pub struct PendingRevisionDetailResponse {
     /// SPA can render a diff against it. `None` when the page didn't have
     /// a head at queue time (the row proposes the initial revision).
     pub parent_body: Option<String>,
+    /// Body of the page's *current* head revision at fetch time. Differs
+    /// from `parent_body` when another edit landed on the page between the
+    /// proposal and the reviewer opening it. `None` if the page still has
+    /// no head.
+    pub head_body: Option<String>,
+    /// `true` if `head_body` differs from the proposal's parent (a
+    /// concurrent edit landed since this row was queued). The reviewer UI
+    /// uses this to render a "head has moved on" warning so approving
+    /// can't silently clobber intermediate work.
+    pub head_moved_since_proposal: bool,
 }
 
 /// Body of `POST /api/v1/pending-revisions/{id}/reject`.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct RejectPendingRevisionRequest {
     /// Operator-visible reason. Stored verbatim and echoed back to the
-    /// (authenticated) author through the in-app inbox.
+    /// (authenticated) author through the in-app inbox. Must be non-empty
+    /// after trimming — the handler returns 400 if the trimmed value is
+    /// empty. The schema-level `minLength: 1` is a coarse pre-validation
+    /// hint for OpenAPI consumers.
+    #[schema(min_length = 1)]
     pub reason: String,
 }

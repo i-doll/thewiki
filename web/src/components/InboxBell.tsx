@@ -23,6 +23,8 @@ interface PendingRevisionPayload {
 	page_slug?: string;
 	page_title?: string;
 	reason?: string;
+	reviewer_username?: string;
+	new_revision_id?: string;
 }
 
 function payloadOf(notif: NotificationView): PendingRevisionPayload {
@@ -36,12 +38,19 @@ function notificationLabel(notif: NotificationView): string {
 	const payload = payloadOf(notif);
 	const title = payload.page_title ?? payload.page_slug ?? "your edit";
 	switch (notif.kind) {
-		case "pending_revision_approved":
-			return `Your edit to ${title} was approved`;
-		case "pending_revision_rejected":
-			return `Your edit to ${title} was rejected${
-				payload.reason ? `: ${payload.reason}` : ""
-			}`;
+		case "pending_revision_approved": {
+			const reviewer = payload.reviewer_username
+				? ` by ${payload.reviewer_username}`
+				: "";
+			return `Your edit to ${title} was approved${reviewer}`;
+		}
+		case "pending_revision_rejected": {
+			const reviewer = payload.reviewer_username
+				? ` by ${payload.reviewer_username}`
+				: "";
+			const reason = payload.reason ? `: ${payload.reason}` : "";
+			return `Your edit to ${title} was rejected${reviewer}${reason}`;
+		}
 		default:
 			return notif.kind;
 	}
@@ -115,6 +124,14 @@ export function InboxBell() {
 						<ul className="max-h-80 overflow-auto">
 							{items.map((item) => {
 								const route = notificationLink(item);
+								const payload = payloadOf(item);
+								// Surface the new revision id (when present) so an
+								// operator can hover for the exact rev that landed
+								// — until a dedicated revision deep-link route exists.
+								const tooltip =
+									item.kind === "pending_revision_approved" && payload.new_revision_id
+										? `New revision: ${payload.new_revision_id}`
+										: undefined;
 								const onClick = () => {
 									if (item.read_at === null) {
 										markRead.mutate(item.id);
@@ -146,6 +163,7 @@ export function InboxBell() {
 												params={route}
 												onClick={onClick}
 												className="block px-3 py-2"
+												title={tooltip}
 											>
 												{body}
 											</Link>
@@ -154,6 +172,7 @@ export function InboxBell() {
 												type="button"
 												onClick={onClick}
 												className="block w-full px-3 py-2 text-left"
+												title={tooltip}
 											>
 												{body}
 											</button>

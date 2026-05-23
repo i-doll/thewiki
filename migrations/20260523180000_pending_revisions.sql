@@ -28,6 +28,18 @@ CREATE TABLE pending_revisions (
     decided_at         TEXT,
     rejection_reason   TEXT,
     created_at         TEXT    NOT NULL,
+    -- Author attribution invariant: a row may carry `author_id`
+    -- (authenticated edit) OR `author_ip` (anonymous edit with the
+    -- client IP plumbed through) but not both — a row with both set
+    -- would be ambiguous for moderation attribution. Both columns
+    -- NULL is permitted for the legacy anonymous-edit path that
+    -- doesn't yet thread the client IP into storage; the application
+    -- layer treats that as "anonymous, no IP captured".
+    CHECK (author_id IS NULL OR author_ip IS NULL),
+    -- When `author_ip` is supplied, require it to be non-blank — the
+    -- moderation UI displays the IP as the author label so a blank
+    -- string is worse than NULL.
+    CHECK (author_ip IS NULL OR length(trim(author_ip)) > 0),
     FOREIGN KEY (page_id)            REFERENCES pages     (id) ON DELETE CASCADE,
     FOREIGN KEY (parent_revision_id) REFERENCES revisions (id) ON DELETE SET NULL,
     FOREIGN KEY (author_id)          REFERENCES users     (id) ON DELETE SET NULL,
@@ -60,3 +72,10 @@ CREATE TABLE notifications (
 -- would table-scan once a user accumulated history.
 CREATE INDEX idx_notifications_user_id_read_at
     ON notifications (user_id, read_at);
+
+-- Newest-first inbox listing: the bell polls every 60s ordering by
+-- `created_at DESC` filtered to a single user. Without this index the
+-- query degrades to a per-user scan+sort once history grows. We include
+-- `id` as a tiebreaker for stable pagination.
+CREATE INDEX idx_notifications_user_id_created_at_id
+    ON notifications (user_id, created_at DESC, id DESC);

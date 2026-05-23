@@ -669,6 +669,18 @@ export interface PendingRevisionListResponse {
 export interface PendingRevisionDetailResponse extends PendingRevisionView {
 	body: string;
 	parent_body: string | null;
+	/**
+	 * Body of the page's current head revision at fetch time. Differs from
+	 * `parent_body` when another edit landed on the page between the
+	 * proposal being queued and the reviewer opening it.
+	 */
+	head_body: string | null;
+	/**
+	 * `true` if the head moved between proposal time and now — approving
+	 * will overwrite intermediate changes. The UI surfaces a warning when
+	 * this is set.
+	 */
+	head_moved_since_proposal: boolean;
 }
 
 /** List pending revisions, defaulting to `status=pending`. */

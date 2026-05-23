@@ -23,12 +23,30 @@ import {
 	rejectPendingRevision,
 } from "../lib/api";
 
+const VALID_STATUSES = new Set<PendingRevisionStatus>([
+	"pending",
+	"approved",
+	"rejected",
+]);
+
+function isPendingRevisionStatus(value: unknown): value is PendingRevisionStatus {
+	return (
+		typeof value === "string" &&
+		VALID_STATUSES.has(value as PendingRevisionStatus)
+	);
+}
+
 export const Route = createFileRoute("/admin/approval-queue")({
 	component: ApprovalQueueComponent,
 	validateSearch: (search: Record<string, unknown>) => {
-		const status = typeof search.status === "string" ? search.status : "pending";
+		// Clamp to known statuses — an arbitrary `?status=` value would
+		// propagate to the API query and produce a 400. Default to the
+		// reviewer's primary view when the input isn't recognised.
+		const status: PendingRevisionStatus = isPendingRevisionStatus(search.status)
+			? search.status
+			: "pending";
 		const selected = typeof search.selected === "string" ? search.selected : "";
-		return { status: status as PendingRevisionStatus, selected };
+		return { status, selected };
 	},
 });
 
@@ -291,8 +309,22 @@ function DetailPanel({ detail }: { detail: PendingRevisionDetailResponse }) {
 				)}
 			</header>
 			<div className="px-6 py-4">
+				{detail.head_moved_since_proposal && (
+					<div
+						role="alert"
+						className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+					>
+						<strong className="font-semibold">Heads up:</strong> the page has
+						been edited since this proposal was made. Approving will replace
+						the current head with the proposal's body and overwrite the
+						intermediate changes.
+					</div>
+				)}
 				<h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-					Proposed diff
+					Proposed diff{" "}
+					<span className="font-normal normal-case text-neutral-500">
+						(parent → proposed)
+					</span>
 				</h3>
 				<ReactDiffViewer
 					oldValue={detail.parent_body ?? ""}
@@ -305,6 +337,30 @@ function DetailPanel({ detail }: { detail: PendingRevisionDetailResponse }) {
 						contentText: { fontSize: "12px", fontFamily: "ui-monospace, monospace" },
 					}}
 				/>
+				{detail.head_moved_since_proposal && detail.head_body !== null && (
+					<div className="mt-6">
+						<h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+							Concurrent drift{" "}
+							<span className="font-normal normal-case text-neutral-500">
+								(parent → current head)
+							</span>
+						</h3>
+						<ReactDiffViewer
+							oldValue={detail.parent_body ?? ""}
+							newValue={detail.head_body}
+							compareMethod={DiffMethod.LINES}
+							splitView
+							useDarkTheme={false}
+							hideLineNumbers={false}
+							styles={{
+								contentText: {
+									fontSize: "12px",
+									fontFamily: "ui-monospace, monospace",
+								},
+							}}
+						/>
+					</div>
+				)}
 			</div>
 			{showReject && (
 				<RejectDialog

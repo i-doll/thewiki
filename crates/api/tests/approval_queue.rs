@@ -35,7 +35,8 @@ use thewiki_api::config::{
 };
 use thewiki_core::{EmailAddress, Permissions, Role, RoleId, RoleName, User, UserId, Username};
 use thewiki_storage::repo::{
-    AuditLogFilter, AuditLogRepository, NamespaceRepository, RoleRepository, SessionRepository,
+    AuditLogFilter, AuditLogRepository, NamespaceRepository, PendingRevisionFilter,
+    PendingRevisionRepository, RevisionRepository, RoleRepository, SessionRepository,
     UserRepository,
 };
 use thewiki_storage::sqlite::{SqliteOptions, SqliteStorage};
@@ -637,4 +638,450 @@ async fn moderation_config_takes_precedence_over_legacy_field() {
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "body: {body}");
     assert_eq!(body["queued"], true);
+}
+
+// ─── Self-review guard ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn reviewer_cannot_approve_own_edit() {
+    let (router, storage) = boot_with(ApprovalScope::All, false).await;
+
+    // One user who is both author and reviewer (REVIEW_EDITS + EDIT).
+    let dual = seed_user(&storage, "dual").await;
+    seed_role_for(
+        &storage,
+        dual.id,
+        "dual",
+        Permissions::EDIT | Permissions::REVIEW_EDITS,
+    )
+    .await;
+    let session = seed_session(&storage, dual.id).await;
+
+    // Queue an edit as `dual`.
+    let (status, body) = json_request(
+        router.clone(),
+        "POST",
+        "/api/v1/pages",
+        Some(&session),
+        Some(json!({
+            "slug": "selfie",
+            "title": "Selfie",
+            "content": "draft",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "body: {body}");
+    let pending_id = body["pending_revision_id"]
+        .as_str()
+        .expect("pending_revision_id")
+        .to_string();
+
+    // Try to approve own row → 403.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/pending-revisions/{pending_id}/approve"),
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "body: {body}");
+    assert_eq!(body["code"], "forbidden");
+}
+
+#[tokio::test]
+async fn reviewer_cannot_reject_own_edit() {
+    let (router, storage) = boot_with(ApprovalScope::All, false).await;
+
+    let dual = seed_user(&storage, "dual").await;
+    seed_role_for(
+        &storage,
+        dual.id,
+        "dual",
+        Permissions::EDIT | Permissions::REVIEW_EDITS,
+    )
+    .await;
+    let session = seed_session(&storage, dual.id).await;
+
+    let (status, body) = json_request(
+        router.clone(),
+        "POST",
+        "/api/v1/pages",
+        Some(&session),
+        Some(json!({
+            "slug": "selfie",
+            "title": "Selfie",
+            "content": "draft",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "body: {body}");
+    let pending_id = body["pending_revision_id"]
+        .as_str()
+        .expect("pending_revision_id")
+        .to_string();
+
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/pending-revisions/{pending_id}/reject"),
+        Some(&session),
+        Some(json!({"reason": "nope"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "body: {body}");
+    assert_eq!(body["code"], "forbidden");
+}
+
+// ─── Partial-failure / retry safety ───────────────────────────────────────
+
+#[tokio::test]
+async fn approve_flips_status_first_so_retries_cannot_duplicate_revisions() {
+    // Regression for the duplicate-revision race: if the live revision
+    // were committed before the pending row is flipped, a transient
+    // failure on the flip would let a retry create a SECOND revision.
+    //
+    // We verify the ordering indirectly: after a successful approve, the
+    // pending row is `approved` AND only one revision exists for the
+    // page. We then simulate the "transient failure leaves an approved
+    // row" recoverable state by manually flipping a fresh row via the
+    // repo and confirming a retry hits 409 (no duplicate revision can
+    // be created).
+    let (router, storage) = boot_with(ApprovalScope::Anonymous, true).await;
+
+    // 1. Queue + approve as normal — should land exactly one revision.
+    let (_, body) = json_request(
+        router.clone(),
+        "POST",
+        "/api/v1/pages",
+        None,
+        Some(json!({
+            "slug": "once",
+            "title": "Once",
+            "content": "first",
+        })),
+    )
+    .await;
+    let pending_id_str = body["pending_revision_id"]
+        .as_str()
+        .expect("pending_revision_id")
+        .to_string();
+
+    let reviewer = seed_user(&storage, "rev").await;
+    seed_role_for(&storage, reviewer.id, "rev", Permissions::REVIEW_EDITS).await;
+    let session = seed_session(&storage, reviewer.id).await;
+
+    let (status, body) = json_request(
+        router.clone(),
+        "POST",
+        &format!("/api/v1/pending-revisions/{pending_id_str}/approve"),
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let page_id_str = body["page_id"].as_str().expect("page_id").to_string();
+    let page_id = thewiki_core::PageId::from_uuid(
+        uuid::Uuid::parse_str(&page_id_str).expect("page id"),
+    );
+
+    let slice = storage
+        .revisions()
+        .list_for_page(page_id, None, 50)
+        .await
+        .expect("list revisions");
+    assert_eq!(
+        slice.items.len(),
+        1,
+        "approve should produce exactly one live revision, got {}",
+        slice.items.len()
+    );
+
+    // 2. A retry on the approved row hits the conflict guard — no extra
+    //    revision is created.
+    let (status, _) = json_request(
+        router.clone(),
+        "POST",
+        &format!("/api/v1/pending-revisions/{pending_id_str}/approve"),
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let slice = storage
+        .revisions()
+        .list_for_page(page_id, None, 50)
+        .await
+        .expect("list revisions");
+    assert_eq!(
+        slice.items.len(),
+        1,
+        "retry must not duplicate the revision"
+    );
+
+    // 3. Simulate the partial-failure recoverable state directly: queue a
+    //    second edit, flip its pending row to `approved` via the repo
+    //    (mimicking "CAS succeeded, commit_page_audit then failed"), and
+    //    confirm a retry through the HTTP layer can't manufacture a
+    //    duplicate revision — it returns 409.
+    let (_, body) = json_request(
+        router.clone(),
+        "POST",
+        "/api/v1/pages",
+        None,
+        Some(json!({
+            "slug": "twice",
+            "title": "Twice",
+            "content": "draft",
+        })),
+    )
+    .await;
+    let pending_id_str2 = body["pending_revision_id"]
+        .as_str()
+        .expect("pending_revision_id")
+        .to_string();
+    let pending_id2 = thewiki_core::PendingRevisionId::from_uuid(
+        uuid::Uuid::parse_str(&pending_id_str2).expect("uuid"),
+    );
+
+    // Flip directly via the repo to mimic the "approved row, no
+    // revision committed yet" recoverable state.
+    let _ = storage
+        .pending_revisions()
+        .approve(pending_id2, reviewer.id, OffsetDateTime::now_utc())
+        .await
+        .expect("manual flip");
+
+    // The HTTP retry now hits the conflict guard immediately — the live
+    // revision count for the `twice` page remains 0 (no duplicate).
+    let (status, _) = json_request(
+        router.clone(),
+        "POST",
+        &format!("/api/v1/pending-revisions/{pending_id_str2}/approve"),
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // No revision should exist for the second page (proves the retry
+    // didn't silently manufacture one).
+    let pending_row = storage
+        .pending_revisions()
+        .get_by_id(pending_id2)
+        .await
+        .expect("read row");
+    let target_page_id = pending_row.page_id;
+    let slice = storage
+        .revisions()
+        .list_for_page(target_page_id, None, 50)
+        .await
+        .expect("list revisions");
+    assert!(
+        slice.items.is_empty(),
+        "no revisions should have been created for the partially-failed approval"
+    );
+
+    // Total pending count remains zero (both rows are decided).
+    let pending_total = storage
+        .pending_revisions()
+        .count(PendingRevisionFilter {
+            status: Some(thewiki_core::pending_revision::PendingRevisionStatus::Pending),
+        })
+        .await
+        .expect("count");
+    assert_eq!(pending_total, 0);
+}
+
+// ─── Head drift surfacing ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn detail_flags_head_moved_when_another_edit_lands_after_queue() {
+    let (router, storage) = boot_with(ApprovalScope::Anonymous, true).await;
+
+    // 1. Authenticated editor lands an initial revision on the page so
+    //    a queued anonymous edit has a parent. The page is created live
+    //    because the author is authenticated and the scope is Anonymous.
+    let editor = seed_user(&storage, "editor").await;
+    seed_role_for(&storage, editor.id, "editor", Permissions::EDIT).await;
+    let editor_session = seed_session(&storage, editor.id).await;
+    let (status, body) = json_request(
+        router.clone(),
+        "POST",
+        "/api/v1/pages",
+        Some(&editor_session),
+        Some(json!({
+            "slug": "drift",
+            "title": "Drift",
+            "content": "v1",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "body: {body}");
+
+    // 2. An anonymous edit lands in the queue against v1.
+    let (status, body) = json_request(
+        router.clone(),
+        "PUT",
+        "/api/v1/pages/drift",
+        None,
+        Some(json!({
+            "title": "Drift",
+            "content": "v2-proposed",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "body: {body}");
+    let pending_id = body["pending_revision_id"]
+        .as_str()
+        .expect("pending_revision_id")
+        .to_string();
+
+    // 3. The editor pushes a second live revision — head moves from v1
+    //    to v3 while the proposal still references v1 as its parent.
+    let (status, _) = json_request(
+        router.clone(),
+        "PUT",
+        "/api/v1/pages/drift",
+        Some(&editor_session),
+        Some(json!({
+            "title": "Drift",
+            "content": "v3-live",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // 4. Reviewer fetches the detail — head_moved_since_proposal is true
+    //    and head_body is the latest live body.
+    let reviewer = seed_user(&storage, "rev").await;
+    seed_role_for(&storage, reviewer.id, "rev", Permissions::REVIEW_EDITS).await;
+    let session = seed_session(&storage, reviewer.id).await;
+    let (status, body) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/pending-revisions/{pending_id}"),
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["head_moved_since_proposal"], true, "body: {body}");
+    assert_eq!(body["head_body"], "v3-live", "body: {body}");
+    assert_eq!(body["parent_body"], "v1", "body: {body}");
+}
+
+#[tokio::test]
+async fn detail_head_not_moved_when_no_concurrent_edit() {
+    let (router, storage) = boot_with(ApprovalScope::Anonymous, true).await;
+
+    // Authenticated editor seeds v1.
+    let editor = seed_user(&storage, "editor").await;
+    seed_role_for(&storage, editor.id, "editor", Permissions::EDIT).await;
+    let editor_session = seed_session(&storage, editor.id).await;
+    let (status, _) = json_request(
+        router.clone(),
+        "POST",
+        "/api/v1/pages",
+        Some(&editor_session),
+        Some(json!({
+            "slug": "stable",
+            "title": "Stable",
+            "content": "v1",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Anonymous queues v2 — no further edits before the reviewer looks.
+    let (status, body) = json_request(
+        router.clone(),
+        "PUT",
+        "/api/v1/pages/stable",
+        None,
+        Some(json!({
+            "title": "Stable",
+            "content": "v2-proposed",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let pending_id = body["pending_revision_id"]
+        .as_str()
+        .expect("pending_revision_id")
+        .to_string();
+
+    let reviewer = seed_user(&storage, "rev").await;
+    seed_role_for(&storage, reviewer.id, "rev", Permissions::REVIEW_EDITS).await;
+    let session = seed_session(&storage, reviewer.id).await;
+    let (status, body) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/pending-revisions/{pending_id}"),
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["head_moved_since_proposal"], false, "body: {body}");
+    assert_eq!(body["head_body"], "v1", "body: {body}");
+}
+
+// ─── Approve notification payload parity ──────────────────────────────────
+
+#[tokio::test]
+async fn approve_notification_payload_includes_reviewer_and_new_revision_id() {
+    let (router, storage) = boot_with(ApprovalScope::All, false).await;
+
+    let author = seed_user(&storage, "author").await;
+    seed_role_for(&storage, author.id, "editor", Permissions::EDIT).await;
+    let author_session = seed_session(&storage, author.id).await;
+
+    let (_, body) = json_request(
+        router.clone(),
+        "POST",
+        "/api/v1/pages",
+        Some(&author_session),
+        Some(json!({
+            "slug": "notif",
+            "title": "Notif",
+            "content": "body",
+        })),
+    )
+    .await;
+    let pending_id = body["pending_revision_id"]
+        .as_str()
+        .expect("pending_revision_id")
+        .to_string();
+
+    let reviewer = seed_user(&storage, "rev").await;
+    seed_role_for(&storage, reviewer.id, "rev", Permissions::REVIEW_EDITS).await;
+    let reviewer_session = seed_session(&storage, reviewer.id).await;
+    let (status, _) = json_request(
+        router.clone(),
+        "POST",
+        &format!("/api/v1/pending-revisions/{pending_id}/approve"),
+        Some(&reviewer_session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, body) = json_request(
+        router,
+        "GET",
+        "/api/v1/notifications",
+        Some(&author_session),
+        None,
+    )
+    .await;
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 1, "{body}");
+    assert_eq!(items[0]["kind"], "pending_revision_approved");
+    assert_eq!(items[0]["payload"]["reviewer_username"], "rev", "{body}");
+    assert!(
+        items[0]["payload"]["new_revision_id"].is_string(),
+        "new_revision_id should be a string, body: {body}"
+    );
 }

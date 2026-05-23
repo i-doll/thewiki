@@ -180,7 +180,7 @@ pub async fn get_pending<S: AppStorage>(
     let pending = state.storage.pending_revisions().get_by_id(id).await?;
     let body = pending.body.clone();
     let parent_revision_id = pending.parent_revision_id;
-    let (view, _page) = build_view(&state, pending).await?;
+    let (view, page) = build_view(&state, pending).await?;
 
     let parent_body = match parent_revision_id {
         Some(rev_id) => state
@@ -192,10 +192,36 @@ pub async fn get_pending<S: AppStorage>(
             .map(|r| r.body),
         None => None,
     };
+    // Pull the current head body so the reviewer can see when the page
+    // moved on after this proposal was queued. If the live head matches
+    // the proposal's parent the reviewer's mental model is "diff parent
+    // vs proposal" and nothing else; if it diverged we flag it.
+    let head_body = match page.current_revision_id {
+        Some(rev_id) => state
+            .storage
+            .revisions()
+            .get_by_id(rev_id)
+            .await
+            .ok()
+            .map(|r| r.body),
+        None => None,
+    };
+    let head_moved_since_proposal = match (page.current_revision_id, parent_revision_id) {
+        // Head matches the parent the proposal was based on → no drift.
+        (Some(head), Some(parent)) => head != parent,
+        // Page had no head when queued, but does now → drift (another
+        // edit beat this proposal to creating the page).
+        (Some(_), None) => true,
+        // No live head (either rolled-back or never had one) → no drift
+        // we can usefully flag.
+        (None, _) => false,
+    };
     Ok(Json(PendingRevisionDetailResponse {
         view,
         body,
         parent_body,
+        head_body,
+        head_moved_since_proposal,
     }))
 }
 
@@ -232,6 +258,13 @@ pub async fn approve_pending<S: AppStorage>(
             pending.status,
         )));
     }
+    // Self-review block: a user with REVIEW_EDITS who happens to have
+    // queued this edit themselves can't sign off on their own work.
+    if let Some(author_id) = pending.author_id
+        && author_id == actor.user_id
+    {
+        return Err(ApiError::Forbidden);
+    }
 
     // Resolve the author id used on the promoted revision. For anonymous
     // edits we route the credit to the singleton anonymous user — same
@@ -252,6 +285,22 @@ pub async fn approve_pending<S: AppStorage>(
             .await?
     };
 
+    // ── CAS the pending row to `approved` FIRST ───────────────────────────
+    //
+    // Order matters. If we committed the revision first and then flipped
+    // the status, a transient DB error on the flip would leave us with a
+    // live revision but a still-`pending` row — a retry would create a
+    // SECOND revision for the same queued edit. Flipping first means the
+    // worst case is an `approved` pending row whose revision wasn't
+    // committed (an operator-recoverable state) instead of duplicated
+    // revisions on retry. The repo's CAS guard returns `Conflict` if
+    // another reviewer beat us to it.
+    let updated = state
+        .storage
+        .pending_revisions()
+        .approve(id, actor.user_id, OffsetDateTime::now_utc())
+        .await?;
+
     let revision = Revision {
         id: RevisionId::new(),
         page_id: page.id,
@@ -265,6 +314,7 @@ pub async fn approve_pending<S: AppStorage>(
         },
         created_at: OffsetDateTime::now_utc(),
     };
+    let new_revision_id = revision.id;
     page.current_revision_id = Some(revision.id);
     page.updated_at = revision.created_at;
 
@@ -324,14 +374,6 @@ pub async fn approve_pending<S: AppStorage>(
         .replace_for_source(page.id, &rows)
         .await?;
 
-    // Flip the pending row to approved. The repo guards against a racing
-    // double-approve by checking `status = pending` inside the transaction.
-    let updated = state
-        .storage
-        .pending_revisions()
-        .approve(id, actor.user_id, OffsetDateTime::now_utc())
-        .await?;
-
     // Send the in-app notification to the original author, if any.
     if let Some(author) = pending.author_id {
         let payload = json!({
@@ -340,6 +382,8 @@ pub async fn approve_pending<S: AppStorage>(
             "namespace_slug": namespace_slug,
             "page_slug": page.slug,
             "page_title": page.title,
+            "reviewer_username": actor.username,
+            "new_revision_id": new_revision_id.into_uuid(),
         });
         let _ = state
             .storage
@@ -397,6 +441,12 @@ pub async fn reject_pending<S: AppStorage>(
             pending.status,
         )));
     }
+    // Self-review block: a reviewer can't reject their own queued edit.
+    if let Some(author_id) = pending.author_id
+        && author_id == actor.user_id
+    {
+        return Err(ApiError::Forbidden);
+    }
 
     let updated = state
         .storage
@@ -441,6 +491,7 @@ pub async fn reject_pending<S: AppStorage>(
             "page_slug": page.slug,
             "page_title": page.title,
             "reason": reason,
+            "reviewer_username": actor.username,
         });
         let _ = state
             .storage

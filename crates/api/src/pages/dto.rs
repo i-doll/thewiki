@@ -131,6 +131,7 @@ pub struct PageView {
     /// the row was written (1 = next to be reviewed). Present only when
     /// [`Self::queued`] is `true`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(minimum = 1)]
     pub queue_position: Option<u64>,
 }
 
