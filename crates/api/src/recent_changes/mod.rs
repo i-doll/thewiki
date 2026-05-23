@@ -6,9 +6,8 @@
 //! [`utoipa_axum::router::OpenApiRouter`] so the OpenAPI document stays in
 //! sync with what is mounted.
 //!
-//! Atom/RSS output is intentionally out of scope here (tracked separately as
-//! M2 issue #46) — this endpoint is the JSON foundation those feeds will sit
-//! on top of.
+//! The Atom syndication variant of this feed lives in [`crate::feeds`]
+//! alongside the per-namespace and watchlist feeds (#46).
 
 pub mod dto;
 pub mod routes;

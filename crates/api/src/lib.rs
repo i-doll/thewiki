@@ -16,6 +16,7 @@ pub mod cli;
 pub mod config;
 pub mod error;
 pub mod extractors;
+pub mod feeds;
 pub mod graphql;
 pub mod media;
 pub mod namespaces;
@@ -27,6 +28,7 @@ pub mod search;
 pub mod state;
 pub mod static_assets;
 pub mod telemetry;
+pub mod watchlist;
 pub mod wiki;
 
 pub use app::{

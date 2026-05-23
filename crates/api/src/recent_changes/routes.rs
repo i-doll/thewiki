@@ -88,6 +88,10 @@ pub async fn list_recent_changes<S: AppStorage>(
         since,
         namespace_id,
         actor_id,
+        // JSON endpoint preserves the historical behaviour: it lists every
+        // revision regardless of protection. The Atom feeds set this to
+        // `true` to keep public output public.
+        public_only: false,
     };
 
     let slice = state

@@ -46,7 +46,7 @@ impl RecentChangesRepository for LibsqlRecentChangesRepository<'_> {
         // appended the predicates.
         let mut sql = String::from(
             "SELECT r.id, r.page_id, p.slug, p.namespace_id, n.slug, r.author_id, \
-                    u.username, r.edit_summary, r.created_at \
+                    u.username, r.edit_summary, r.created_at, p.protection_level \
              FROM revisions r \
              JOIN pages p      ON r.page_id      = p.id \
              JOIN namespaces n ON p.namespace_id = n.id \
@@ -61,6 +61,11 @@ impl RecentChangesRepository for LibsqlRecentChangesRepository<'_> {
         }
         if actor_bytes.is_some() {
             sql.push_str(" AND r.author_id = ?");
+        }
+        if filter.public_only {
+            // See SQLite sibling for rationale: push the protection filter down
+            // so `LIMIT` counts public rows only.
+            sql.push_str(" AND p.protection_level IN ('none', 'semi_protected')");
         }
         if cursor_pair.is_some() {
             sql.push_str(" AND (r.created_at, r.id) < (?, ?)");

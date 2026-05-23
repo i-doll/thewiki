@@ -16,7 +16,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::error::StorageError;
-use crate::postgres::codec::{format_cursor_ts, parse_cursor_ts};
+use crate::postgres::codec::{format_cursor_ts, parse_cursor_ts, parse_protection_level};
 use crate::repo::{
     Cursor, PageSlice, RecentChange, RecentChangesFilter, RecentChangesRepository, clamp_limit,
 };
@@ -32,6 +32,7 @@ type Row = (
     String,         // u.username
     Option<String>, // r.edit_summary
     OffsetDateTime, // r.created_at
+    String,         // p.protection_level
 );
 
 fn row_to_recent_change(row: Row) -> Result<RecentChange, StorageError> {
@@ -45,6 +46,7 @@ fn row_to_recent_change(row: Row) -> Result<RecentChange, StorageError> {
         author_username,
         edit_summary,
         created_at,
+        protection_level,
     ) = row;
     Ok(RecentChange {
         revision_id: RevisionId::from_uuid(revision_id),
@@ -56,6 +58,7 @@ fn row_to_recent_change(row: Row) -> Result<RecentChange, StorageError> {
         author_username,
         edit_summary,
         created_at,
+        protection_level: parse_protection_level(&protection_level)?,
     })
 }
 
@@ -91,7 +94,7 @@ impl RecentChangesRepository for PostgresRecentChangesRepository<'_> {
         // Build the SQL dynamically, tracking the next `$N` placeholder.
         let mut sql = String::from(
             "SELECT r.id, r.page_id, p.slug, p.namespace_id, n.slug, r.author_id, \
-                    u.username, r.edit_summary, r.created_at \
+                    u.username, r.edit_summary, r.created_at, p.protection_level \
              FROM revisions r \
              JOIN pages p      ON r.page_id      = p.id \
              JOIN namespaces n ON p.namespace_id = n.id \
@@ -113,6 +116,11 @@ impl RecentChangesRepository for PostgresRecentChangesRepository<'_> {
         }
         if actor_uuid.is_some() {
             next_param(&mut sql, "AND r.author_id =", &mut idx);
+        }
+        if filter.public_only {
+            // Push the protection filter down so `LIMIT` is applied to public
+            // rows only. Mirrors the SQLite/libsql adapters.
+            sql.push_str(" AND p.protection_level IN ('none', 'semi_protected')");
         }
         if cursor_pair.is_some() {
             // Row-value comparison resumes the descending scan strictly older

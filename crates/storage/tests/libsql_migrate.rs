@@ -20,6 +20,7 @@ const EXPECTED_TABLES: &[&str] = &[
     "revisions",
     "sessions",
     "audit_log",
+    "watch",
 ];
 
 #[tokio::test]

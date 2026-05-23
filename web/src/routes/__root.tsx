@@ -24,6 +24,9 @@ function RootComponent() {
 						<Link to="/wiki" className="hover:text-neutral-900">
 							Pages
 						</Link>
+						<Link to="/watchlist" className="hover:text-neutral-900">
+							Watchlist
+						</Link>
 						<Link to="/login" className="hover:text-neutral-900">
 							Login
 						</Link>

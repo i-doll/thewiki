@@ -558,3 +558,75 @@ export function canEditAtProtectionLevel(
 			return permissions.has("PROTECT");
 	}
 }
+
+// ─── Watchlist (#46) ────────────────────────────────────────────────────
+
+/** A row on the calling user's watchlist. Mirrors `WatchedPageView`. */
+export interface WatchedPageView {
+	page_id: string;
+	namespace: string;
+	slug: string;
+	title: string;
+	watched_at: string;
+}
+
+/** Response from `GET /api/v1/watchlist`. */
+export interface WatchlistResponse {
+	items: WatchedPageView[];
+}
+
+/** Response from `POST /api/v1/watchlist`. */
+export interface WatchStatus {
+	watched: boolean;
+}
+
+/** Fetch the current user's watchlist. 401 surfaces as ApiError. */
+export async function listWatchlist(): Promise<WatchlistResponse> {
+	return jsonRequest<WatchlistResponse>("/api/v1/watchlist", {
+		method: "GET",
+		credentials: "same-origin",
+	});
+}
+
+/** Add `pageId` to the current user's watchlist. */
+export async function addToWatchlist(pageId: string): Promise<WatchStatus> {
+	return jsonRequest<WatchStatus>("/api/v1/watchlist", {
+		method: "POST",
+		headers: authHeaders(),
+		credentials: "same-origin",
+		body: JSON.stringify({ page_id: pageId }),
+	});
+}
+
+/** Remove `pageId` from the current user's watchlist. */
+export async function removeFromWatchlist(pageId: string): Promise<void> {
+	const res = await fetch(`/api/v1/watchlist/${encodeURIComponent(pageId)}`, {
+		method: "DELETE",
+		headers: authHeaders(),
+		credentials: "same-origin",
+	});
+	if (!res.ok) {
+		const message = await parseError(res);
+		throw new ApiError(res.status, message);
+	}
+}
+
+/**
+ * Stable URL of the calling user's Atom feed. The actual fetch goes through
+ * the user's feed reader, not the SPA — we just render a link.
+ */
+export const WATCHLIST_ATOM_URL = "/api/v1/watchlist.atom";
+
+/** Stable URL of the wiki-wide recent-changes Atom feed. */
+export const RECENT_CHANGES_ATOM_URL = "/api/v1/recent-changes.atom";
+
+/**
+ * Build the URL of a per-namespace Atom feed.
+ *
+ * Note the `/atom` sub-segment: Axum's router rejects `{namespace}.atom`
+ * because of the literal-after-param suffix, so the namespace feed lives
+ * one level deeper than the wiki-wide one.
+ */
+export function namespaceAtomUrl(namespace: string): string {
+	return `/api/v1/recent-changes/${encodeURIComponent(namespace)}/atom`;
+}

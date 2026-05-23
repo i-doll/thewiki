@@ -10,15 +10,19 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import {
+	addToWatchlist,
 	ApiError,
 	type AuthMePayload,
 	canEditAtProtectionLevel,
 	fetchAuthMe,
 	fetchPage,
+	listWatchlist,
 	type PageView,
 	type ProtectionLevel,
 	parsePermissions,
 	protectPage,
+	removeFromWatchlist,
+	type WatchlistResponse,
 } from "../lib/api";
 import { renderMarkdown } from "../lib/markdown";
 
@@ -153,7 +157,7 @@ function PageViewComponent() {
 							dangerouslySetInnerHTML={{ __html: renderedHtml }}
 						/>
 					)}
-					<div className="mt-8 flex gap-3 border-t border-neutral-200 pt-4">
+					<div className="mt-8 flex flex-wrap gap-3 border-t border-neutral-200 pt-4">
 						{canEdit ? (
 							<Link
 								to="/wiki/$namespace/$slug/edit"
@@ -173,6 +177,7 @@ function PageViewComponent() {
 								Edit
 							</button>
 						)}
+						{authenticated && <WatchToggle pageId={page.id} />}
 						<Link
 							to="/wiki"
 							className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-800 hover:bg-neutral-100"
@@ -355,6 +360,98 @@ function ProtectionModal({ page, namespace, onClose, onSaved }: ProtectionModalP
 				</div>
 			</div>
 		</div>
+	);
+}
+
+/**
+ * Star/unstar button that toggles a page on the current user's watchlist.
+ *
+ * Reads the list once to decide whether the page is already watched, then
+ * issues `POST`/`DELETE` on click and patches the cached list so the toggle
+ * flips instantly. Mutations bubble errors through `react-hot-toast` so the
+ * user sees a clear failure surface without an alert dialog.
+ */
+function WatchToggle({ pageId }: { pageId: string }) {
+	const queryClient = useQueryClient();
+	const query = useQuery<WatchlistResponse, ApiError>({
+		queryKey: ["watchlist"],
+		queryFn: listWatchlist,
+		retry: (failureCount, error) => {
+			if (error instanceof ApiError && error.status === 401) {
+				return false;
+			}
+			return failureCount < 1;
+		},
+		staleTime: 30_000,
+	});
+
+	const watching = query.data?.items.some((row) => row.page_id === pageId) ?? false;
+
+	const mutation = useMutation<void, ApiError, boolean>({
+		mutationFn: async (nextWatching) => {
+			if (nextWatching) {
+				await addToWatchlist(pageId);
+			} else {
+				await removeFromWatchlist(pageId);
+			}
+		},
+		onSuccess: (_void, nextWatching) => {
+			queryClient.setQueryData<WatchlistResponse>(["watchlist"], (prev) => {
+				if (!prev) {
+					return prev;
+				}
+				if (nextWatching) {
+					return prev; // refetch picks the new row up; nothing to merge inline.
+				}
+				return { items: prev.items.filter((row) => row.page_id !== pageId) };
+			});
+			void queryClient.invalidateQueries({ queryKey: ["watchlist"] });
+			toast.success(nextWatching ? "Watching" : "Removed from watchlist");
+		},
+		onError: (error) => {
+			toast.error(`Couldn't update watchlist: ${error.message}`);
+		},
+	});
+
+	const disabled =
+		query.isPending ||
+		mutation.isPending ||
+		(query.isError &&
+			!(query.error instanceof ApiError && query.error.status === 401));
+
+	return (
+		<button
+			type="button"
+			onClick={() => mutation.mutate(!watching)}
+			disabled={disabled}
+			className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+				watching
+					? "border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100"
+					: "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
+			} disabled:cursor-not-allowed disabled:opacity-60`}
+			aria-pressed={watching}
+			title={watching ? "Stop watching this page" : "Add this page to your watchlist"}
+		>
+			<StarIcon filled={watching} />
+			{watching ? "Watching" : "Watch"}
+		</button>
+	);
+}
+
+function StarIcon({ filled }: { filled: boolean }) {
+	return (
+		<svg
+			aria-hidden
+			viewBox="0 0 16 16"
+			className={`h-3.5 w-3.5 ${filled ? "text-amber-500" : "text-neutral-400"}`}
+			fill={filled ? "currentColor" : "none"}
+			stroke="currentColor"
+			strokeWidth="1.5"
+			strokeLinejoin="round"
+		>
+			<title>{filled ? "Watching" : "Not watching"}</title>
+			<path d="M8 1.5l1.95 4.32 4.55.59-3.4 3.18.92 4.91L8 12.06l-4.02 2.44.92-4.91L1.5 6.4l4.55-.59L8 1.5z" />
+		</svg>
 	);
 }
 

@@ -60,6 +60,7 @@ mod revision;
 mod role;
 mod session;
 mod user;
+mod watch;
 
 pub use audit_log::PostgresAuditLogRepository;
 pub use media::{
@@ -72,6 +73,7 @@ pub use revision::PostgresRevisionRepository;
 pub use role::PostgresRoleRepository;
 pub use session::PostgresSessionRepository;
 pub use user::PostgresUserRepository;
+pub use watch::PostgresWatchRepository;
 
 /// Postgres-flavoured migration set, loaded from `migrations/postgres/`.
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/postgres");
@@ -214,6 +216,13 @@ impl PostgresStorage {
     #[must_use]
     pub fn media_variants(&self) -> PostgresMediaVariantRepository<'_> {
         PostgresMediaVariantRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`WatchRepository`](crate::repo::WatchRepository) (#46).
+    #[must_use]
+    pub fn watches(&self) -> PostgresWatchRepository<'_> {
+        PostgresWatchRepository::new(&self.pool)
     }
 
     /// Apply the embedded Postgres migration set to an arbitrary pool.

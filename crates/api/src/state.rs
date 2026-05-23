@@ -25,7 +25,7 @@ use thewiki_storage::repo::{
     AuditLogRepository, CategoryRepository, IpBlocklistRepository, MediaBlobRepository,
     MediaRepository, MediaVariantRepository, NamespaceRepository, NewAuditLogEntry,
     PageAuditMutation, PageLinkRepository, PageRepository, RecentChangesRepository,
-    RevisionRepository, TagRepository, UrlBlocklistRepository, UserRepository,
+    RevisionRepository, TagRepository, UrlBlocklistRepository, UserRepository, WatchRepository,
 };
 
 use crate::auth::AuthState;
@@ -98,6 +98,10 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     type UrlBlocklist<'a>: UrlBlocklistRepository + 'a
     where
         Self: 'a;
+    /// Watch repository borrowed from this handle (#46).
+    type Watches<'a>: WatchRepository + 'a
+    where
+        Self: 'a;
 
     /// Borrow a [`PageRepository`].
     fn pages(&self) -> Self::Pages<'_>;
@@ -127,6 +131,8 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     fn ip_blocklist(&self) -> Self::IpBlocklist<'_>;
     /// Borrow a [`UrlBlocklistRepository`] (#42).
     fn url_blocklist(&self) -> Self::UrlBlocklist<'_>;
+    /// Borrow a [`WatchRepository`] (#46).
+    fn watches(&self) -> Self::Watches<'_>;
 
     /// Commit a page mutation and its required audit row atomically.
     fn commit_page_audit(
@@ -151,6 +157,7 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     type Tags<'a> = thewiki_storage::sqlite::SqliteTagRepository<'a>;
     type IpBlocklist<'a> = thewiki_storage::sqlite::SqliteIpBlocklistRepository<'a>;
     type UrlBlocklist<'a> = thewiki_storage::sqlite::SqliteUrlBlocklistRepository<'a>;
+    type Watches<'a> = thewiki_storage::sqlite::SqliteWatchRepository<'a>;
 
     fn pages(&self) -> Self::Pages<'_> {
         Self::pages(self)
@@ -193,6 +200,9 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     }
     fn url_blocklist(&self) -> Self::UrlBlocklist<'_> {
         Self::url_blocklist(self)
+    }
+    fn watches(&self) -> Self::Watches<'_> {
+        Self::watches(self)
     }
 
     fn commit_page_audit(

@@ -2944,6 +2944,100 @@
         }
       }
     },
+    "/api/v1/recent-changes.atom": {
+      "get": {
+        "tags": [
+          "recent-changes"
+        ],
+        "summary": "`GET /api/v1/recent-changes.atom` — wiki-wide Atom feed.",
+        "operationId": "recent_changes_atom",
+        "responses": {
+          "200": {
+            "description": "Atom feed",
+            "content": {
+              "application/atom+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recent-changes/{namespace}/atom": {
+      "get": {
+        "tags": [
+          "recent-changes"
+        ],
+        "summary": "`GET /api/v1/recent-changes/{namespace}/atom` — per-namespace Atom feed.",
+        "description": "Axum's `matchit`-based router rejects parameters that share a path\nsegment with literal text (`{namespace}.atom` would error), so the\nnamespace feed lives under a `/atom` sub-segment. The wiki-wide feed at\n`/recent-changes.atom` is unaffected because its full path is a literal.",
+        "operationId": "recent_changes_namespace_atom",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Namespace slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Atom feed",
+            "content": {
+              "application/atom+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid namespace slug",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Namespace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/search": {
       "get": {
         "tags": [
@@ -3168,6 +3262,237 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/watchlist": {
+      "get": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "`GET /api/v1/watchlist` — return every page the caller watches, newest\nsubscription first.",
+        "operationId": "list_watchlist",
+        "responses": {
+          "200": {
+            "description": "Watchlist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "`POST /api/v1/watchlist` — add a page to the caller's watchlist.",
+        "description": "Idempotent: re-watching a page already on the watchlist returns the same\n`201 { watched: true }` body without bumping the original timestamp, and\nwithout writing a second `watchlist.add` audit row.",
+        "operationId": "add_to_watchlist",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddWatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Added to watchlist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/watchlist.atom": {
+      "get": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "`GET /api/v1/watchlist.atom` — Atom feed of the caller's watched pages.",
+        "description": "Each entry corresponds to a watched page's latest revision so feed\nreaders behave the same way they do on the wiki-wide route: a fresh\n`<updated>` whenever someone edits a page the user watches.",
+        "operationId": "watchlist_atom",
+        "responses": {
+          "200": {
+            "description": "Atom feed",
+            "content": {
+              "application/atom+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/watchlist/{page_id}": {
+      "delete": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "`DELETE /api/v1/watchlist/{page_id}` — remove a page from the caller's\nwatchlist.",
+        "description": "Idempotent — removing a page the user wasn't watching returns\n`204 No Content` just the same. Returns `404` only when the page itself\ndoesn't exist (so callers can distinguish \"typo'd ID\" from \"already\nremoved\").",
+        "operationId": "remove_from_watchlist",
+        "parameters": [
+          {
+            "name": "page_id",
+            "in": "path",
+            "description": "Page UUID to remove",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed (or wasn't watched)"
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
       }
     },
     "/api/v1/wiki/{namespace}": {
@@ -4081,6 +4406,19 @@
   },
   "components": {
     "schemas": {
+      "AddWatchRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/v1/watchlist`.",
+        "required": [
+          "page_id"
+        ],
+        "properties": {
+          "page_id": {
+            "$ref": "#/components/schemas/PageId",
+            "description": "Identifier of the page to add to the watchlist."
+          }
+        }
+      },
       "AuditLogEntryView": {
         "type": "object",
         "description": "JSON representation of one audit-log entry.",
@@ -5495,6 +5833,69 @@
             "description": "Login handle."
           }
         }
+      },
+      "WatchStatus": {
+        "type": "object",
+        "description": "Response from `POST /api/v1/watchlist` and the toggle path on the SPA.",
+        "required": [
+          "watched"
+        ],
+        "properties": {
+          "watched": {
+            "type": "boolean",
+            "description": "Whether the page is currently on the caller's watchlist after the\noperation."
+          }
+        }
+      },
+      "WatchedPageView": {
+        "type": "object",
+        "description": "A single row on the user's watchlist.\n\nConstructed from a `thewiki_storage::repo::WatchedPage` — the row already\njoins in namespace slug and page title so the SPA can render the list\nwithout follow-up lookups.",
+        "required": [
+          "page_id",
+          "namespace",
+          "slug",
+          "title",
+          "watched_at"
+        ],
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "description": "Namespace slug the page lives in."
+          },
+          "page_id": {
+            "$ref": "#/components/schemas/PageId",
+            "description": "Watched page's stable identifier."
+          },
+          "slug": {
+            "type": "string",
+            "description": "URL slug of the page within its namespace."
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable title."
+          },
+          "watched_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the user added the page to their watchlist."
+          }
+        }
+      },
+      "WatchlistResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/watchlist`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WatchedPageView"
+            },
+            "description": "Pages on the caller's watchlist, newest first."
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -5564,6 +5965,10 @@
     {
       "name": "admin-blocklist",
       "description": "IP / URL blocklists (#42)"
+    },
+    {
+      "name": "watchlist",
+      "description": "Per-user page watchlist + Atom feed (#46)"
     }
   ]
 }
