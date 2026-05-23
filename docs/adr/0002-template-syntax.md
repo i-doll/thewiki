@@ -1,6 +1,6 @@
 # ADR-0002: Template syntax
 
-- Status: Accepted
+- Status: Proposed
 - Date: 2026-05-23
 - Decision-makers: @i-doll
 
@@ -67,16 +67,32 @@ with the following concrete semantics for v1:
 5. **Whitespace handling** — argument names and values are trimmed of leading
    and trailing whitespace, matching MediaWiki. To preserve whitespace,
    authors use HTML entities or place content inside fenced code.
-6. **Escaping** — a literal `|` or `}}` inside an argument is written with
-   HTML entities (`&#124;`, `&#125;&#125;`) or wrapped in a `<nowiki>`-like
-   construct (deferred to a follow-up; v1 documents the entity approach).
+6. **Escaping** — a literal `|` or `}}` inside an argument value is written
+   with HTML entities (`&#124;`, `&#125;&#125;`) or wrapped in a
+   `<nowiki>`-like construct (deferred to a follow-up; v1 documents the
+   entity approach). **Argument values are themselves expanded** before
+   being passed: `{{Outer|{{Inner}}}}` first expands `{{Inner}}`, then
+   passes the resulting string as positional argument `1` of `Outer`. This
+   matches MediaWiki and is needed for any real infobox-style template. A
+   literal opening `{{` inside an argument that should *not* be expanded
+   must be written as `&#123;&#123;`. Expansion of nested calls counts
+   against the same depth budget as direct transclusion.
 7. **Recursion limit** — hard cap of **20** expansion levels, configurable
    via the runtime config under `[render.template] max_recursion_depth = 20`.
    Exceeding the limit emits a render-time error pinned to the originating
-   call site.
-8. **Self-reference and cycles** — a template that includes itself, directly
-   or via a cycle, is detected by per-render stack tracking. The cycle is
-   broken at the first re-entry and a render error is emitted.
+   call site. The depth counter increments on every transclusion entry,
+   regardless of whether it is direct, via a nested argument expansion, or
+   via a chain of distinct templates — it bounds *work*, not just unique
+   names.
+8. **Self-reference and cycles** — orthogonal to the depth limit. The
+   renderer maintains a per-render *expansion stack* of template IDs
+   currently being expanded. Before pushing a new template onto the stack,
+   the renderer checks whether that ID is already present; if so, the
+   transclusion is rejected as a cycle without entering the body. This
+   fires independently of and before the depth counter, so a tight
+   self-reference (`A → A`) is caught at depth 2 rather than running up to
+   the depth limit, and a long but non-cyclic chain of distinct templates
+   is bounded only by the depth counter.
 9. **Performance budget** — compiled templates are cached in-process by
    `(template_id, current_revision_id)`. Cache invalidation is automatic
    when the template revision changes. No template body is re-parsed inside
@@ -265,23 +281,36 @@ Welcome **Aida** — your role is Editor.
 
 If `role=` is omitted, the default `guest` is used.
 
-**Recursion-limit error**:
+**Recursion-limit error** (deep but non-cyclic chain — depth counter fires):
 
 ```text
-{{Loopy}}
+{{Chain1}}
 ```
 
-with `Template:Loopy` body:
+with each of `Template:Chain1` … `Template:Chain21` containing
+`{{ChainN+1}}` for `N < 21`. After 20 successful expansions, the next call
+hits the depth limit:
 
 ```text
-{{Loopy}}
+[template error: recursion limit exceeded (20) at Chain1 → Chain2 → … → Chain21]
 ```
 
-renders to an inline error block, line/column pinned to the call site:
+**Cycle error** (cycle detector fires before the depth counter):
 
 ```text
-[template error: recursion limit exceeded (20) at Loopy → Loopy → …]
+{{A}}
 ```
+
+with `Template:A` body `{{B}}` and `Template:B` body `{{A}}`. At depth 3,
+the renderer is about to push `A` onto the expansion stack and finds it
+already present:
+
+```text
+[template error: transclusion cycle detected at A → B → A]
+```
+
+Self-reference (`Template:Loopy` body `{{Loopy}}`) is the degenerate case of
+the same check and fires at depth 2 with the chain `Loopy → Loopy`.
 
 **Missing template**:
 
@@ -294,15 +323,6 @@ renders to:
 ```text
 [template error: template `Template:NoSuchTemplate` not found]
 ```
-
-**Cycle**:
-
-```text
-A includes B; B includes A.
-```
-
-The cycle is broken at the first re-entry and emits the same recursion-limit
-style error with the chain printed for diagnosis.
 
 ## References
 
