@@ -49,6 +49,28 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 ###############################################################################
+# Stage: web-build — builds the React frontend with pnpm.                     #
+#                                                                             #
+# Defined before `rust-build` because `rust-build` does                        #
+# `COPY --from=web-build`; BuildKit requires the source stage to appear       #
+# earlier in the file even though it parallelises them at execution time.     #
+###############################################################################
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS web-build
+WORKDIR /web
+
+# pnpm 10 to match the repo's `engines.pnpm` and the lockfile format.
+RUN corepack enable && corepack prepare pnpm@10 --activate
+
+# Install with the lockfile pinned, then build. pnpm fetches into its content-
+# addressed store; we don't worry about pruning here because this stage is
+# discarded after the COPY in the final stage.
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY web/ ./
+RUN pnpm build
+
+###############################################################################
 # Stage: rust-build — cross-compiles the workspace for $TARGETPLATFORM.       #
 ###############################################################################
 FROM chef AS rust-build
@@ -138,24 +160,6 @@ RUN set -eux; \
 # park this under `/tmp` (which `cargo` / `cargo-chef` never touch) so the
 # layer above stays cache-friendly.
 RUN mkdir -p /tmp/empty-data
-
-###############################################################################
-# Stage: web-build — builds the React frontend with pnpm.                     #
-###############################################################################
-FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS web-build
-WORKDIR /web
-
-# pnpm 10 to match the repo's `engines.pnpm` and the lockfile format.
-RUN corepack enable && corepack prepare pnpm@10 --activate
-
-# Install with the lockfile pinned, then build. pnpm fetches into its content-
-# addressed store; we don't worry about pruning here because this stage is
-# discarded after the COPY in the final stage.
-COPY web/package.json web/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
-
-COPY web/ ./
-RUN pnpm build
 
 ###############################################################################
 # Stage: runtime — distroless, non-root, minimal.                             #
