@@ -221,7 +221,7 @@ pub(crate) fn session_from_libsql_row(row: &Row) -> Result<Session, StorageError
 /// Decode a `recent_changes` JOIN row.
 ///
 /// Column order: `r.id, r.page_id, p.slug, p.namespace_id, n.slug,
-/// r.author_id, u.username, r.edit_summary, r.created_at`.
+/// r.author_id, u.username, r.edit_summary, r.created_at, p.protection_level`.
 pub(crate) fn recent_change_from_libsql_row(row: &Row) -> Result<RecentChange, StorageError> {
     Ok(RecentChange {
         revision_id: RevisionId::from_uuid(decode_uuid(&col_blob(row, 0)?)?),
@@ -233,6 +233,7 @@ pub(crate) fn recent_change_from_libsql_row(row: &Row) -> Result<RecentChange, S
         author_username: col_text(row, 6)?,
         edit_summary: col_text_opt(row, 7)?,
         created_at: parse_ts(&col_text(row, 8)?)?,
+        protection_level: crate::codec::parse_protection_level(&col_text(row, 9)?)?,
     })
 }
 

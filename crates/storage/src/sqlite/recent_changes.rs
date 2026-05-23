@@ -31,6 +31,7 @@ type Row = (
     String,         // u.username
     Option<String>, // r.edit_summary
     String,         // r.created_at
+    String,         // p.protection_level
 );
 
 fn row_to_recent_change(row: Row) -> Result<RecentChange, StorageError> {
@@ -44,6 +45,7 @@ fn row_to_recent_change(row: Row) -> Result<RecentChange, StorageError> {
         author_username,
         edit_summary,
         created_at,
+        protection_level,
     ) = row;
     Ok(RecentChange {
         revision_id: RevisionId::from_uuid(crate::sqlite::codec::decode_uuid(&revision_id)?),
@@ -55,6 +57,7 @@ fn row_to_recent_change(row: Row) -> Result<RecentChange, StorageError> {
         author_username,
         edit_summary,
         created_at: parse_ts(&created_at)?,
+        protection_level: crate::codec::parse_protection_level(&protection_level)?,
     })
 }
 
@@ -94,7 +97,7 @@ impl RecentChangesRepository for SqliteRecentChangesRepository<'_> {
         // and we bind in the same order we appended them.
         let mut sql = String::from(
             "SELECT r.id, r.page_id, p.slug, p.namespace_id, n.slug, r.author_id, \
-                    u.username, r.edit_summary, r.created_at \
+                    u.username, r.edit_summary, r.created_at, p.protection_level \
              FROM revisions r \
              JOIN pages p      ON r.page_id      = p.id \
              JOIN namespaces n ON p.namespace_id = n.id \

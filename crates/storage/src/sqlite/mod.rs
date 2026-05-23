@@ -70,6 +70,7 @@ mod session;
 mod tag;
 mod url_blocklist;
 mod user;
+mod watch;
 
 pub use audit_log::SqliteAuditLogRepository;
 pub use category::SqliteCategoryRepository;
@@ -85,6 +86,7 @@ pub use session::SqliteSessionRepository;
 pub use tag::SqliteTagRepository;
 pub use url_blocklist::SqliteUrlBlocklistRepository;
 pub use user::SqliteUserRepository;
+pub use watch::SqliteWatchRepository;
 
 /// Migration set baked into the binary at compile time. See `/migrations/`.
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
@@ -285,6 +287,12 @@ impl SqliteStorage {
     #[must_use]
     pub fn url_blocklist(&self) -> SqliteUrlBlocklistRepository<'_> {
         SqliteUrlBlocklistRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a [`WatchRepository`](crate::repo::WatchRepository) (#46).
+    #[must_use]
+    pub fn watches(&self) -> SqliteWatchRepository<'_> {
+        SqliteWatchRepository::new(&self.pool)
     }
 
     /// Commit a page mutation together with its audit-log row.

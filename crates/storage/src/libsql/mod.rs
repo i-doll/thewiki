@@ -72,6 +72,7 @@ mod revision;
 mod role;
 mod session;
 mod user;
+mod watch;
 
 pub use audit_log::LibsqlAuditLogRepository;
 pub use media::{LibsqlMediaBlobRepository, LibsqlMediaRepository, LibsqlMediaVariantRepository};
@@ -82,6 +83,7 @@ pub use revision::LibsqlRevisionRepository;
 pub use role::LibsqlRoleRepository;
 pub use session::LibsqlSessionRepository;
 pub use user::LibsqlUserRepository;
+pub use watch::LibsqlWatchRepository;
 
 /// Embedded migration set, applied in the order listed by
 /// [`LibsqlStorage::new`].
@@ -119,6 +121,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "20260523120000_categories_and_tags",
         include_str!("../../../../migrations/20260523120000_categories_and_tags.sql"),
+    ),
+    (
+        "20260523150000_watchlist",
+        include_str!("../../../../migrations/20260523150000_watchlist.sql"),
     ),
 ];
 
@@ -316,6 +322,13 @@ impl LibsqlStorage {
     #[must_use]
     pub fn media_variants(&self) -> LibsqlMediaVariantRepository<'_> {
         LibsqlMediaVariantRepository::new(&self.conn)
+    }
+
+    /// Borrow this handle as a
+    /// [`WatchRepository`](crate::repo::WatchRepository) (#46).
+    #[must_use]
+    pub fn watches(&self) -> LibsqlWatchRepository<'_> {
+        LibsqlWatchRepository::new(&self.conn)
     }
 
     /// Commit a page mutation together with its audit-log row.

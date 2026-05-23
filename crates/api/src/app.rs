@@ -48,6 +48,7 @@ use crate::blocklist::{self, BlocklistState, peer_ip::SecurityRuntime};
 use crate::captcha;
 use crate::categories;
 use crate::config::{Config, GraphQLConfig, RateLimitConfig, SecurityConfig};
+use crate::feeds;
 use crate::graphql::{self, GraphQLState};
 use crate::media;
 use crate::namespaces;
@@ -57,6 +58,7 @@ use crate::recent_changes;
 use crate::search;
 use crate::state::{AppState, AppStorage};
 use crate::static_assets;
+use crate::watchlist;
 use crate::wiki;
 use std::sync::Arc;
 
@@ -99,6 +101,7 @@ const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
         (name = "tags", description = "Flat tags (#29)"),
         (name = "captcha", description = "CAPTCHA provider frontend config (#41)"),
         (name = "admin-blocklist", description = "IP / URL blocklists (#42)"),
+        (name = "watchlist", description = "Per-user page watchlist + Atom feed (#46)"),
     )
 )]
 pub struct ApiDoc;
@@ -117,6 +120,12 @@ fn api_router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
         .nest("/api/v1/tags", categories::tags_router::<S>())
         .nest("/api/v1/captcha", captcha::routes::build_router::<S>())
         .nest("/api/v1/admin", admin::router::<S>())
+        .nest("/api/v1/watchlist", watchlist::router::<S>())
+        // Atom feeds (#46) live under `/api/v1` directly so their paths can
+        // carry the `.atom` suffix without colliding with the JSON routes
+        // (e.g. `/recent-changes.atom` is a sibling of `/recent-changes`,
+        // not a child).
+        .nest("/api/v1", feeds::router::<S>())
 }
 
 /// Generate the full public REST OpenAPI document.
@@ -319,6 +328,32 @@ fn add_operation_security(api_doc: &mut OpenApiDoc) {
         "/api/v1/admin/blocklist/url/{id}",
         HttpMethod::Delete,
         vec![session_and_csrf_requirement()],
+    );
+    // Watchlist (#46). Reads require a session; mutations also require the
+    // double-submit CSRF token because they affect server state.
+    set_operation_security(
+        api_doc,
+        "/api/v1/watchlist",
+        HttpMethod::Get,
+        vec![session_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/watchlist",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/watchlist/{page_id}",
+        HttpMethod::Delete,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/watchlist.atom",
+        HttpMethod::Get,
+        vec![session_requirement()],
     );
 }
 

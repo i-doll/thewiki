@@ -179,6 +179,10 @@ redis = { version = "0.27", default-features = false, features = [
     "script",
 ] }
 
+# Atom feed rendering (#46). `atom_syndication` round-trips a typed Atom 1.0
+# tree to/from XML so handlers don't hand-roll the namespace + element layout.
+atom_syndication = "0.12"
+
 # GraphQL surface (#37). `async-graphql` provides the schema + resolver
 # macros; `async-graphql-axum` is the axum integration that gives us the
 # `GraphQL` extractor + response type. The `time` feature wires `OffsetDateTime`

@@ -112,6 +112,12 @@ futures-util = "0.3"
 dashmap = { workspace = true }
 redis = { workspace = true, optional = true }
 
+# Atom feed rendering (#46). `atom_syndication` round-trips a typed Atom 1.0
+# tree to/from XML so the feed handlers don't hand-roll the namespace +
+# element layout. The crate produces RFC 4287 conformant XML out of the
+# box, matching the issue's "feed validates" acceptance criterion.
+atom_syndication = { workspace = true }
+
 # GraphQL surface (#37). See the workspace dependency block for feature
 # rationale. `async-graphql-axum` wires `axum::extract::FromRequest` for
 # `GraphQLRequest` and an `IntoResponse` for `GraphQLResponse`; the handler

@@ -30,8 +30,8 @@ use std::time::Duration;
 use serde_json::Value;
 use thewiki_core::{
     AuditLogId, Category, CategoryId, Media, MediaId, Namespace, NamespaceId, NamespaceSlug, Page,
-    PageId, Revision, RevisionId, Role, RoleId, RoleName, Session, SessionId, Tag, User, UserId,
-    Username,
+    PageId, ProtectionLevel, Revision, RevisionId, Role, RoleId, RoleName, Session, SessionId, Tag,
+    User, UserId, Username,
 };
 use time::OffsetDateTime;
 
@@ -491,6 +491,9 @@ pub struct RecentChange {
     pub edit_summary: Option<String>,
     /// When the revision was committed.
     pub created_at: OffsetDateTime,
+    /// `pages.protection_level` snapshot. Carried so the Atom feed handler
+    /// (#46) can skip non-public rows without a follow-up lookup.
+    pub protection_level: ProtectionLevel,
 }
 
 /// Filter passed to [`RecentChangesRepository::list`].
@@ -1273,4 +1276,88 @@ pub trait UrlBlocklistRepository: Send + Sync {
 
     /// Delete a row by primary key.
     fn delete(&self, id: uuid::Uuid) -> impl Future<Output = Result<(), StorageError>> + Send;
+}
+
+/// A flattened row in the per-user watchlist.
+///
+/// Each row stands on its own — page slug, namespace slug, and title are
+/// joined in so the API can render the `/watchlist` listing and the
+/// `watchlist.atom` feed without follow-up lookups.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchedPage {
+    /// Watched page.
+    pub page_id: PageId,
+    /// Namespace the page lives in.
+    pub namespace_id: NamespaceId,
+    /// Slug of the namespace, joined for convenience.
+    pub namespace_slug: String,
+    /// URL slug of the page.
+    pub page_slug: String,
+    /// Human-readable title of the page.
+    pub page_title: String,
+    /// `pages.protection_level` snapshot.
+    pub protection_level: ProtectionLevel,
+    /// When the user added the page to their watchlist.
+    pub watched_at: OffsetDateTime,
+    /// When the page itself was last updated. Drives the Atom `<updated>`
+    /// for the feed entry.
+    pub updated_at: OffsetDateTime,
+}
+
+/// Persistence operations for the per-user watchlist (#46).
+///
+/// Each `(user_id, page_id)` pair represents an opt-in subscription to the
+/// page's revision feed. Watchlist reads are scoped to the caller's own
+/// rows; the trait is intentionally narrow because no admin tool yet
+/// needs cross-user visibility.
+pub trait WatchRepository: Send + Sync {
+    /// Add a `(user_id, page_id)` row. Idempotent — re-watching a page the
+    /// user already watches is a no-op and the existing `created_at` is
+    /// preserved.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::Database`] if either foreign key doesn't resolve
+    ///   (the user or the page doesn't exist).
+    fn watch(
+        &self,
+        user_id: UserId,
+        page_id: PageId,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Remove the `(user_id, page_id)` row. Idempotent — removing a row
+    /// that isn't there is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures as [`StorageError::Database`].
+    fn unwatch(
+        &self,
+        user_id: UserId,
+        page_id: PageId,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Report whether `user_id` currently watches `page_id`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures as [`StorageError::Database`].
+    fn is_watched(
+        &self,
+        user_id: UserId,
+        page_id: PageId,
+    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
+
+    /// List the pages `user_id` watches, joined against the page + namespace
+    /// rows for direct rendering. Order is `(watched_at DESC, page_id DESC)`
+    /// so the newest subscription appears first.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures as [`StorageError::Database`].
+    fn list_for_user(
+        &self,
+        user_id: UserId,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<WatchedPage>, StorageError>> + Send;
 }

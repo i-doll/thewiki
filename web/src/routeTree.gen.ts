@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WatchlistRouteImport } from './routes/watchlist'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as LoginRouteImport } from './routes/login'
@@ -26,6 +27,11 @@ import { Route as WikiNamespaceSlugEditRouteImport } from './routes/wiki_.$names
 import { Route as WikiNamespaceSlugHistoryRouteImport } from './routes/wiki.$namespace.$slug.history'
 import { Route as WikiNamespaceSlugDiffRouteImport } from './routes/wiki.$namespace.$slug.diff'
 
+const WatchlistRoute = WatchlistRouteImport.update({
+  id: '/watchlist',
+  path: '/watchlist',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
@@ -114,6 +120,7 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
   '/admin/blocklists': typeof AdminBlocklistsRoute
+  '/watchlist': typeof WatchlistRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
@@ -132,6 +139,7 @@ export interface FileRoutesByTo {
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
   '/admin/blocklists': typeof AdminBlocklistsRoute
+  '/watchlist': typeof WatchlistRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
@@ -151,6 +159,7 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
   '/admin/blocklists': typeof AdminBlocklistsRoute
+  '/watchlist': typeof WatchlistRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
@@ -171,6 +180,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/search'
     | '/admin/blocklists'
+    | '/watchlist'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
@@ -189,6 +199,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/search'
     | '/admin/blocklists'
+    | '/watchlist'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
@@ -207,6 +218,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/search'
     | '/admin/blocklists'
+    | '/watchlist'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
@@ -226,6 +238,7 @@ export interface RootRouteChildren {
   RegisterRoute: typeof RegisterRoute
   SearchRoute: typeof SearchRoute
   AdminBlocklistsRoute: typeof AdminBlocklistsRoute
+  WatchlistRoute: typeof WatchlistRoute
   CategorySlugRoute: typeof CategorySlugRoute
   TagTagRoute: typeof TagTagRoute
   WikiSlugRoute: typeof WikiSlugRouteWithChildren
@@ -237,6 +250,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/watchlist': {
+      id: '/watchlist'
+      path: '/watchlist'
+      fullPath: '/watchlist'
+      preLoaderRoute: typeof WatchlistRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/search': {
       id: '/search'
       path: '/search'
@@ -385,6 +405,7 @@ const rootRouteChildren: RootRouteChildren = {
   RegisterRoute: RegisterRoute,
   SearchRoute: SearchRoute,
   AdminBlocklistsRoute: AdminBlocklistsRoute,
+  WatchlistRoute: WatchlistRoute,
   CategorySlugRoute: CategorySlugRoute,
   TagTagRoute: TagTagRoute,
   WikiSlugRoute: WikiSlugRouteWithChildren,
