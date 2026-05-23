@@ -46,10 +46,16 @@ pub struct SearchQuery {
     pub title_boost: f32,
     /// Multiplier applied to the score of every hit that belongs to a
     /// discussion / talk namespace (#43). `< 1.0` demotes talk pages so
-    /// subject pages outrank their discussion threads by default; `1.0` is
-    /// the no-op default the indexer uses when the API layer doesn't set
-    /// the field explicitly. The shipped REST + GraphQL handlers default
-    /// to `0.5` (configurable via `search.talk_boost`).
+    /// subject pages outrank their discussion threads by default. The
+    /// shipped REST + GraphQL handlers default to `0.5` (configurable
+    /// via `search.talk_boost`).
+    ///
+    /// Note: the [`Default`] derive sets this field to `0.0` (the
+    /// `f32` default), which the indexer treats as the no-op multiplier
+    /// `1.0`. So `SearchQuery::default()` and `SearchQuery::text(..)`
+    /// are equivalent to "no talk-page demotion" rather than "every
+    /// talk-page scored 0". Callers that want to suppress talk hits
+    /// should set a strictly positive value below `1.0`.
     pub talk_boost: f32,
 }
 
