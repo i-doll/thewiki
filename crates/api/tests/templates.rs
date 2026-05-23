@@ -70,7 +70,11 @@ async fn fresh_app() -> (Router, UserId) {
     let mut auth_cfg = thewiki_api::config::Config::defaults().auth;
     auth_cfg.anonymous_edits = true;
     let state = AppState::new(storage.clone(), auth_cfg);
-    let router = app::build_with_state(state);
+    // Disable rate limiting for tests that seed many templates in quick
+    // succession — long-chain depth tests easily trip the default cap.
+    let mut rate_limit = thewiki_api::config::Config::defaults().rate_limit;
+    rate_limit.enabled = false;
+    let router = app::build_with_state_with_rate_limit(state, rate_limit);
     (router, user.id)
 }
 
@@ -194,6 +198,167 @@ async fn missing_template_surfaces_inline_error() {
     // Surrounding text survived the pre-pass.
     assert!(html.contains("Before"), "html = {html}");
     assert!(html.contains("after"), "html = {html}");
+}
+
+/// ADR-0002 §8: a self-reference (`Loopy → Loopy`) must be caught by the
+/// cycle detector at depth 2 with a `cycle` error — NOT by running up to
+/// the depth limit. Goes through the API so it exercises the full
+/// `build_template_resolver` -> renderer path.
+#[tokio::test]
+async fn self_reference_caught_as_cycle_not_depth() {
+    let (router, user_id) = fresh_app().await;
+
+    seed_template(&router, "Loopy", "{{Loopy}}", user_id).await;
+
+    let (status, body) = json_request(
+        router,
+        "POST",
+        "/api/v1/pages",
+        Some(user_id),
+        Some(json!({
+            "namespace_slug": "Main",
+            "slug": "home",
+            "title": "Home",
+            "content": "{{Loopy}}"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "body: {body}");
+    let html = body["content_html"].as_str().expect("content_html string");
+    assert!(html.contains("template-error"), "html = {html}");
+    assert!(
+        html.contains("transclusion cycle detected"),
+        "expected cycle diagnostic, html = {html}"
+    );
+    assert!(
+        !html.contains("recursion limit"),
+        "must not trip depth limit, html = {html}"
+    );
+    // Diagnostic must carry line/column of the user-visible call site.
+    assert!(html.contains("data-line=\""), "no line, html = {html}");
+    assert!(html.contains("data-col=\""), "no column, html = {html}");
+}
+
+/// ADR-0002 §8: a two-cycle (`A → B → A`) must be caught at depth 3 by the
+/// cycle detector, NOT at the depth limit.
+#[tokio::test]
+async fn two_cycle_caught_as_cycle_not_depth() {
+    let (router, user_id) = fresh_app().await;
+
+    seed_template(&router, "Ay", "{{Bee}}", user_id).await;
+    seed_template(&router, "Bee", "{{Ay}}", user_id).await;
+
+    let (status, body) = json_request(
+        router,
+        "POST",
+        "/api/v1/pages",
+        Some(user_id),
+        Some(json!({
+            "namespace_slug": "Main",
+            "slug": "home",
+            "title": "Home",
+            "content": "{{Ay}}"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "body: {body}");
+    let html = body["content_html"].as_str().expect("content_html string");
+    assert!(
+        html.contains("transclusion cycle detected"),
+        "expected cycle diagnostic, html = {html}"
+    );
+    assert!(
+        !html.contains("recursion limit"),
+        "must not trip depth limit, html = {html}"
+    );
+    assert!(
+        html.contains("Ay") && html.contains("Bee"),
+        "chain must name both templates, html = {html}"
+    );
+    assert!(html.contains("data-line=\""), "no line, html = {html}");
+    assert!(html.contains("data-col=\""), "no column, html = {html}");
+}
+
+/// ADR-0002 §7: a long *non-cyclic* chain (`Chain1 → … → Chain21`) must
+/// hit the depth limit (20), not be mis-flagged as a cycle.
+#[tokio::test]
+async fn long_chain_hits_depth_not_cycle() {
+    let (router, user_id) = fresh_app().await;
+
+    // Twenty-one distinct templates, each calling the next. Chain21
+    // ends the chain with no call — chain depth 21 > 20 trips the limit.
+    for i in 1..=21 {
+        let body = if i < 21 {
+            format!("{{{{Chain{}}}}}", i + 1)
+        } else {
+            "end".to_string()
+        };
+        seed_template(&router, &format!("Chain{i}"), &body, user_id).await;
+    }
+
+    let (status, body) = json_request(
+        router,
+        "POST",
+        "/api/v1/pages",
+        Some(user_id),
+        Some(json!({
+            "namespace_slug": "Main",
+            "slug": "home",
+            "title": "Home",
+            "content": "{{Chain1}}"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "body: {body}");
+    let html = body["content_html"].as_str().expect("content_html string");
+    assert!(
+        html.contains("recursion limit exceeded"),
+        "expected depth diagnostic, html = {html}"
+    );
+    assert!(
+        !html.contains("cycle"),
+        "must not trip cycle detector, html = {html}"
+    );
+    assert!(html.contains("data-line=\""), "no line, html = {html}");
+    assert!(html.contains("data-col=\""), "no column, html = {html}");
+}
+
+/// ADR-0002 §10: every diagnostic carries the originating line/column
+/// from the user-visible page so the editor can highlight the call site.
+/// Verifies the cycle path specifically — the failure surfaces from deep
+/// inside the recursion, so a naive implementation would pin it to the
+/// inner template body's coordinates instead of the original page.
+#[tokio::test]
+async fn cycle_diagnostic_pins_to_user_visible_call_site() {
+    let (router, user_id) = fresh_app().await;
+
+    seed_template(&router, "Loopy", "{{Loopy}}", user_id).await;
+
+    let content = "line one\nline two\n  {{Loopy}}";
+    let (status, body) = json_request(
+        router,
+        "POST",
+        "/api/v1/pages",
+        Some(user_id),
+        Some(json!({
+            "namespace_slug": "Main",
+            "slug": "home",
+            "title": "Home",
+            "content": content,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "body: {body}");
+    let html = body["content_html"].as_str().expect("content_html string");
+    // Call is on line 3 (1-indexed), column 3 (after the two-space indent).
+    assert!(
+        html.contains("data-line=\"3\""),
+        "diagnostic must point at the page line, html = {html}"
+    );
+    assert!(
+        html.contains("data-col=\"3\""),
+        "diagnostic must point at the page column, html = {html}"
+    );
 }
 
 #[tokio::test]

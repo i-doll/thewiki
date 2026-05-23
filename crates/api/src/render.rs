@@ -100,16 +100,29 @@ pub async fn render_markdown<S: AppStorage>(
 /// Built by [`build_template_resolver`] before each render; key is
 /// `(namespace, name)`. Missing entries surface as `None` and the renderer
 /// emits a `[template error: ... not found]` inline diagnostic.
+///
+/// `known_namespaces` carries the slugs that actually exist in storage so
+/// the renderer can distinguish "unknown namespace" from "template not
+/// found" when a user writes `{{Foo:Bar}}` with `Foo` not being a real
+/// namespace.
 #[derive(Debug, Default)]
 pub struct PrecomputedTemplateResolver {
     sources: HashMap<(String, String), TemplateSource>,
+    known_namespaces: HashSet<String>,
 }
 
 impl PrecomputedTemplateResolver {
-    /// Wrap a populated `(namespace, name) -> body` map.
+    /// Wrap a populated `(namespace, name) -> body` map plus the set of
+    /// known namespace slugs.
     #[must_use]
-    pub fn new(sources: HashMap<(String, String), TemplateSource>) -> Self {
-        Self { sources }
+    pub fn new(
+        sources: HashMap<(String, String), TemplateSource>,
+        known_namespaces: HashSet<String>,
+    ) -> Self {
+        Self {
+            sources,
+            known_namespaces,
+        }
     }
 }
 
@@ -118,6 +131,10 @@ impl TemplateResolver for PrecomputedTemplateResolver {
         self.sources
             .get(&(ns.to_string(), name.to_string()))
             .cloned()
+    }
+
+    fn namespace_exists(&self, ns: &str) -> bool {
+        self.known_namespaces.contains(ns)
     }
 }
 
@@ -134,13 +151,16 @@ impl TemplateResolver for PrecomputedTemplateResolver {
 ///
 /// Storage errors other than `NotFound` propagate. A missing template is
 /// expected (the renderer turns it into an inline diagnostic), so the walk
-/// silently drops it.
+/// silently drops only that specific case. Any other storage error must
+/// fail the render loudly rather than silently producing a misleading
+/// "template not found" diagnostic during a DB hiccup.
 pub async fn build_template_resolver<S: AppStorage>(
     storage: &S,
     source: &str,
     max_depth: usize,
 ) -> Result<PrecomputedTemplateResolver, ApiError> {
     let mut sources: HashMap<(String, String), TemplateSource> = HashMap::new();
+    let mut known_namespaces: HashSet<String> = HashSet::new();
     let mut queue: Vec<(String, String)> =
         scan_template_calls(source).into_iter().collect();
     let mut depth = 0;
@@ -162,20 +182,30 @@ pub async fn build_template_resolver<S: AppStorage>(
                 }
             };
             let Some(ns_id) = ns_id else {
-                continue; // Missing namespace -> render will emit "not found".
+                // Missing namespace -> renderer will emit a distinct
+                // "unknown namespace" diagnostic. We do NOT record it in
+                // `known_namespaces`.
+                continue;
             };
+            // Record that we've confirmed this namespace exists, so the
+            // renderer can distinguish "ns missing" from "page missing".
+            known_namespaces.insert(ns.clone());
             let page = match storage.pages().get_by_namespace_and_slug(ns_id, &name).await {
                 Ok(p) => p,
+                // Page missing — caller emits "template not found" inline.
+                // This is the *only* storage error we silently swallow.
                 Err(StorageError::NotFound) => continue,
                 Err(e) => return Err(ApiError::from(e)),
             };
             let body = match page.current_revision_id {
-                Some(rev_id) => storage
-                    .revisions()
-                    .get_by_id(rev_id)
-                    .await
-                    .map(|r| r.body)
-                    .unwrap_or_default(),
+                Some(rev_id) => match storage.revisions().get_by_id(rev_id).await {
+                    Ok(r) => r.body,
+                    // A page that points at a missing revision is a data
+                    // bug, but treat it as an empty body so the rest of
+                    // the render proceeds — same as the prior behaviour.
+                    Err(StorageError::NotFound) => String::new(),
+                    Err(e) => return Err(ApiError::from(e)),
+                },
                 None => String::new(),
             };
             // Surface new calls in this body so the next loop pass picks
@@ -200,7 +230,7 @@ pub async fn build_template_resolver<S: AppStorage>(
         queue = next.into_iter().collect();
         depth += 1;
     }
-    Ok(PrecomputedTemplateResolver::new(sources))
+    Ok(PrecomputedTemplateResolver::new(sources, known_namespaces))
 }
 
 /// Look up a namespace by slug, returning `Ok(None)` on a clean miss so the
