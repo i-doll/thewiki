@@ -55,6 +55,13 @@ impl std::fmt::Debug for AuthState {
         // is consumed by `async_trait` machinery and forcing `Debug` on
         // every impl would be a pointless constraint. We synthesise a
         // placeholder so the field name stays visible in panic backtraces.
+        //
+        // CAPTCHA config is projected explicitly rather than forwarded
+        // wholesale: `secret_key` is a sensitive credential and the
+        // derived `Debug` on `CaptchaConfig` would dump it verbatim into
+        // any log line, panic backtrace, or `dbg!(...)` call. We surface
+        // only the provider name, presence booleans for the keys, and the
+        // operator-controlled `apply_to_*` flags.
         f.debug_struct("AuthState")
             .field("storage", &self.storage)
             .field("hasher", &self.hasher)
@@ -62,7 +69,23 @@ impl std::fmt::Debug for AuthState {
             .field("secure_cookies", &self.secure_cookies)
             .field("config", &self.config)
             .field("captcha", &"<dyn CaptchaProvider>")
-            .field("captcha_config", &self.captcha_config)
+            .field("captcha_provider", &self.captcha_config.provider)
+            .field(
+                "captcha_site_key_configured",
+                &!self.captcha_config.site_key.trim().is_empty(),
+            )
+            .field(
+                "captcha_secret_key_configured",
+                &!self.captcha_config.secret_key.trim().is_empty(),
+            )
+            .field(
+                "captcha_apply_to_registration",
+                &self.captcha_config.apply_to_registration,
+            )
+            .field(
+                "captcha_apply_to_anonymous_edits",
+                &self.captcha_config.apply_to_anonymous_edits,
+            )
             .finish()
     }
 }
