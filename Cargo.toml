@@ -194,6 +194,18 @@ async-graphql = { version = "7", default-features = false, features = [
 ] }
 async-graphql-axum = "7"
 
+# CAPTCHA provider (#41). `reqwest` drives the outbound POST to the upstream
+# verifier (hCaptcha's `siteverify`). The `rustls-tls` feature is selected so
+# we don't drag in `openssl` system deps; `json` is the convenience wrapper
+# for the form-encoded response. `wiremock` runs an in-process HTTP server
+# that the hCaptcha provider tests point at to assert success/failure/network
+# behaviour without touching the real upstream.
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json",
+] }
+wiremock = "0.6"
+
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 unwrap_used = "warn"

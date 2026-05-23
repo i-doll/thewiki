@@ -15,9 +15,18 @@ thiserror = { workspace = true }
 time = { workspace = true }
 utoipa = { workspace = true }
 uuid = { workspace = true }
+# The CAPTCHA trait (#41) is exposed dyn-compatibly so the API layer can hold
+# `Arc<dyn CaptchaProvider>` in `AppState` without parameterising every
+# handler over a provider type. Native `async fn` in trait isn't
+# dyn-compatible today, so `async_trait` is the pragmatic call for this
+# one trait — the cost (one heap allocation per verify) is irrelevant
+# next to the network round-trip the trait already performs.
+async-trait = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+# Async runtime for the NoopCaptcha trait test.
+tokio = { workspace = true }
 
 [lints]
 workspace = true

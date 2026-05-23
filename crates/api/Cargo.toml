@@ -119,6 +119,10 @@ redis = { workspace = true, optional = true }
 async-graphql = { workspace = true }
 async-graphql-axum = { workspace = true }
 
+# CAPTCHA provider (#41). `reqwest` is used directly by the hCaptcha impl
+# in `src/captcha/hcaptcha.rs` to POST against `hcaptcha.com/siteverify`.
+reqwest = { workspace = true }
+
 [features]
 default = []
 # Enable the Redis-backed rate-limit store. See
@@ -151,6 +155,8 @@ tempfile = { workspace = true }
 # tests don't have to wait on the async indexer worker for a commit to
 # land.
 thewiki-search = { workspace = true }
+# Mock upstream HTTP server for the hCaptcha provider tests (#41).
+wiremock = { workspace = true }
 
 [lints]
 workspace = true

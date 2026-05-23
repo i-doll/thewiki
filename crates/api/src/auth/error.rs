@@ -12,6 +12,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+use thewiki_core::CaptchaError;
 use thewiki_storage::StorageError;
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -59,6 +60,48 @@ pub enum AuthError {
     /// Storage-layer error escaped the auth path.
     #[error("storage error: {0}")]
     Storage(#[from] StorageError),
+
+    /// Registration was attempted but the captcha token was missing or
+    /// rejected (#41). Distinct from `CsrfFailed` so the SPA can surface
+    /// "please complete the captcha" rather than a generic CSRF retry.
+    #[error("captcha verification failed: {0}")]
+    CaptchaFailed(String),
+
+    /// The CAPTCHA upstream was unreachable. Mapped to `502 Bad Gateway`
+    /// because the failure isn't on the caller.
+    #[error("captcha upstream unreachable: {0}")]
+    CaptchaUpstream(String),
+
+    /// The chosen CAPTCHA provider was misconfigured at the time of the
+    /// request (e.g. empty keys after a hot reload). Surfaces as `500`.
+    #[error("captcha misconfigured: {0}")]
+    CaptchaMisconfigured(String),
+
+    /// Account registration is disabled in this deployment (i.e.
+    /// `auth.registration = "closed"`). Renders as `403`.
+    #[error("registration is closed")]
+    RegistrationClosed,
+
+    /// Caller-supplied input failed validation (e.g. invalid username,
+    /// empty password). Renders as `400`.
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+}
+
+impl From<CaptchaError> for AuthError {
+    fn from(err: CaptchaError) -> Self {
+        match err {
+            CaptchaError::InvalidResponse(msg) => Self::CaptchaFailed(msg),
+            CaptchaError::Network(msg) => Self::CaptchaUpstream(msg),
+            CaptchaError::Misconfigured(msg) => Self::CaptchaMisconfigured(msg),
+            // `CaptchaError` is marked `#[non_exhaustive]` so adding a new
+            // variant in the trait crate doesn't break consumers. Any
+            // future variant lands on the misconfigured fallback so the
+            // operator sees a 500 with the unfamiliar message rather than
+            // an undefined behaviour.
+            other => Self::CaptchaMisconfigured(other.to_string()),
+        }
+    }
 }
 
 impl AuthError {
@@ -69,8 +112,12 @@ impl AuthError {
             Self::InvalidCredentials | Self::MissingSession | Self::ExpiredSession => {
                 StatusCode::UNAUTHORIZED
             }
-            Self::Forbidden | Self::CsrfFailed => StatusCode::FORBIDDEN,
-            Self::HashFailure(_) | Self::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Forbidden | Self::CsrfFailed | Self::RegistrationClosed => StatusCode::FORBIDDEN,
+            Self::CaptchaFailed(_) | Self::InvalidInput(_) => StatusCode::BAD_REQUEST,
+            Self::CaptchaUpstream(_) => StatusCode::BAD_GATEWAY,
+            Self::HashFailure(_) | Self::Storage(_) | Self::CaptchaMisconfigured(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
         }
     }
 
@@ -85,6 +132,11 @@ impl AuthError {
             }
             Self::Forbidden => "forbidden",
             Self::CsrfFailed => "csrf_failed",
+            Self::CaptchaFailed(_) => "captcha_failed",
+            Self::CaptchaUpstream(_) => "captcha_upstream",
+            Self::CaptchaMisconfigured(_) => "captcha_misconfigured",
+            Self::RegistrationClosed => "registration_closed",
+            Self::InvalidInput(_) => "invalid_input",
             Self::HashFailure(_) | Self::Storage(_) => "internal_error",
         }
     }

@@ -8,10 +8,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use thewiki_core::{CaptchaProvider, NoopCaptcha};
 use thewiki_storage::sqlite::SqliteStorage;
 
 use crate::auth::password::Argon2Hasher;
-use crate::config::AuthConfig;
+use crate::config::{AuthConfig, CaptchaConfig};
 
 /// Auth-related app state.
 ///
@@ -21,7 +22,7 @@ use crate::config::AuthConfig;
 /// [`thewiki_storage::repo`](thewiki_storage::repo)), so a concrete struct
 /// is the simpler call. Swapping in `postgres`/`libsql` at M1 means swapping
 /// the field type — the handlers stay the same.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AuthState {
     /// Storage facade. Cloning is cheap — the inner `SqlitePool` is an `Arc`.
     pub storage: SqliteStorage,
@@ -38,10 +39,41 @@ pub struct AuthState {
     /// signup affordances. Also consulted by the configurable-auth extractors
     /// via the `AppState` indirection.
     pub config: AuthConfig,
+    /// CAPTCHA provider (#41). Consulted by the register handler when
+    /// `captcha.apply_to_registration = true`. Defaults to the noop
+    /// provider in tests and integration fixtures that don't stand up a
+    /// real provider.
+    pub captcha: Arc<dyn CaptchaProvider>,
+    /// Snapshot of `Config::captcha` — handlers branch on `apply_to_*`
+    /// flags to decide whether to require a token before mutating state.
+    pub captcha_config: CaptchaConfig,
+}
+
+impl std::fmt::Debug for AuthState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `dyn CaptchaProvider` doesn't carry a `Debug` bound — the trait
+        // is consumed by `async_trait` machinery and forcing `Debug` on
+        // every impl would be a pointless constraint. We synthesise a
+        // placeholder so the field name stays visible in panic backtraces.
+        f.debug_struct("AuthState")
+            .field("storage", &self.storage)
+            .field("hasher", &self.hasher)
+            .field("session_ttl", &self.session_ttl)
+            .field("secure_cookies", &self.secure_cookies)
+            .field("config", &self.config)
+            .field("captcha", &"<dyn CaptchaProvider>")
+            .field("captcha_config", &self.captcha_config)
+            .finish()
+    }
 }
 
 impl AuthState {
     /// Build the state from its parts.
+    ///
+    /// The CAPTCHA wiring defaults to the noop provider so existing callers
+    /// (integration tests, the auth-only app constructor) don't have to
+    /// know about it. Production wires the operator-configured provider
+    /// via [`Self::with_captcha`].
     #[must_use]
     pub fn new(
         storage: SqliteStorage,
@@ -56,6 +88,20 @@ impl AuthState {
             session_ttl,
             secure_cookies,
             config,
+            captcha: Arc::new(NoopCaptcha),
+            captcha_config: CaptchaConfig::default(),
         }
+    }
+
+    /// Wire the CAPTCHA provider + config snapshot.
+    #[must_use]
+    pub fn with_captcha(
+        mut self,
+        captcha_config: CaptchaConfig,
+        provider: Arc<dyn CaptchaProvider>,
+    ) -> Self {
+        self.captcha = provider;
+        self.captcha_config = captcha_config;
+        self
     }
 }

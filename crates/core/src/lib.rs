@@ -70,6 +70,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod captcha;
 pub mod category;
 pub mod content_format;
 pub mod id;
@@ -86,6 +87,7 @@ pub mod tag;
 pub mod user;
 pub mod validation;
 
+pub use captcha::{CaptchaError, CaptchaFrontendConfig, CaptchaProvider, NoopCaptcha};
 pub use category::Category;
 pub use content_format::ContentFormat;
 pub use id::{

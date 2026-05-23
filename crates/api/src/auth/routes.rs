@@ -22,7 +22,7 @@ use axum::response::IntoResponse;
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use thewiki_core::Username;
+use thewiki_core::{EmailAddress, Username};
 use thewiki_core::{Permissions, Role, User, UserId};
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
@@ -387,6 +387,154 @@ pub async fn policy(State(state): State<AuthState>) -> Json<AuthPolicyPayload> {
     })
 }
 
+/// JSON body for [`register`].
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct RegisterRequest {
+    /// Desired login handle. Validated through [`Username`].
+    pub username: String,
+    /// Plain-text password. Hashed via Argon2id before storage.
+    pub password: String,
+    /// Optional email address. Stored normalised to lowercase via
+    /// [`EmailAddress`].
+    #[serde(default)]
+    pub email: Option<String>,
+    /// Optional human-readable display name. Falls back to `username` on
+    /// the UI side when absent.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// CAPTCHA challenge token returned by the rendered widget. Required
+    /// when `captcha.apply_to_registration = true` on the server; ignored
+    /// otherwise. Empty / missing when the noop provider is wired.
+    #[serde(default)]
+    pub captcha_response: Option<String>,
+}
+
+/// `POST /api/v1/auth/register` — create a new user account (#41 wiring).
+///
+/// Honours `auth.registration`:
+///
+/// | Policy   | Behaviour                                                 |
+/// |----------|-----------------------------------------------------------|
+/// | `open`   | Anyone can register (subject to CAPTCHA if configured).   |
+/// | `invite` | Returns 403 — invite codes ship with #38.                 |
+/// | `closed` | Returns 403; admins create accounts manually.             |
+///
+/// When `captcha.apply_to_registration = true`, the handler runs
+/// `captcha.verify` against `captcha_response` before creating the user.
+/// A failed verification short-circuits with 400 (`captcha_failed`); a
+/// network error with the upstream surfaces as 502 (`captcha_upstream`)
+/// so the SPA can offer a retry.
+///
+/// The created user holds no roles by default — operators promote them
+/// out-of-band. The endpoint does **not** issue a session; the SPA is
+/// expected to redirect to `/login` after a successful 201.
+#[utoipa::path(
+    post,
+    path = "/register",
+    request_body = RegisterRequest,
+    responses(
+        (status = 201, description = "Account created", body = UserPayload),
+        (status = 400, description = "Validation or captcha failure", body = crate::auth::error::AuthErrorBody),
+        (status = 403, description = "Registration is closed or requires an invite", body = crate::auth::error::AuthErrorBody),
+        (status = 409, description = "Username already taken", body = crate::auth::error::AuthErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
+        (status = 500, description = "Storage or hashing failure", body = crate::auth::error::AuthErrorBody),
+        (status = 502, description = "Captcha upstream unreachable", body = crate::auth::error::AuthErrorBody),
+    ),
+    tag = "auth",
+)]
+pub async fn register(
+    State(state): State<AuthState>,
+    Json(req): Json<RegisterRequest>,
+) -> Result<Response, AuthError> {
+    // Registration policy gate. The two restrictive modes both surface as
+    // `403 registration_closed` — invite codes are #38, so we don't have
+    // anything more specific to return today.
+    match state.config.registration {
+        RegistrationPolicy::Open => {}
+        RegistrationPolicy::Invite | RegistrationPolicy::Closed => {
+            return Err(AuthError::RegistrationClosed);
+        }
+    }
+
+    // CAPTCHA gate. We only run the upstream call when the operator opted
+    // in — the noop provider would accept anyway but we save the
+    // round-trip for the common dev case.
+    if state.captcha_config.apply_to_registration {
+        let token = req
+            .captcha_response
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| AuthError::CaptchaFailed("missing-input-response".to_string()))?;
+        // The handler intentionally does not forward the caller's IP to the
+        // upstream verifier — hCaptcha treats `remoteip` as optional, and
+        // pulling it off the request would require the auth router to be
+        // mounted via `into_make_service_with_connect_info`. We can add it
+        // back in a follow-up by reading the `X-Forwarded-For` chain via
+        // the same trusted-proxy logic the rate limiter uses.
+        state.captcha.verify(token, None).await?;
+    }
+
+    // Username / password validation. Email is optional.
+    let username = Username::new(req.username.clone())
+        .map_err(|e| AuthError::InvalidInput(format!("username: {e}")))?;
+    if req.password.is_empty() {
+        return Err(AuthError::InvalidInput("password must not be empty".to_string()));
+    }
+    // No upper bound on password length here — Argon2 handles arbitrary
+    // input; the byte cost is in the hash function itself.
+    let email = match req.email.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => Some(
+            EmailAddress::new(raw)
+                .map_err(|e| AuthError::InvalidInput(format!("email: {e}")))?,
+        ),
+        None => None,
+    };
+
+    let password_hash = state.hasher.hash(&req.password)?;
+    let user = User {
+        id: UserId::new(),
+        username: username.clone(),
+        email,
+        display_name: req.display_name.clone(),
+        created_at: OffsetDateTime::now_utc(),
+        last_login_at: None,
+    };
+
+    match state
+        .storage
+        .users()
+        .create(&user, Some(password_hash.as_str()))
+        .await
+    {
+        Ok(()) => {}
+        Err(StorageError::Conflict(msg)) => {
+            // Username collision. The auth error enum doesn't carry a
+            // dedicated 409 variant — we surface it as `InvalidInput`
+            // with a clean message so the SPA can show "that name's
+            // taken" without leaking storage internals.
+            return Err(AuthError::InvalidInput(format!("username taken: {msg}")));
+        }
+        Err(e) => return Err(AuthError::Storage(e)),
+    }
+
+    // Audit-log the signup. Best-effort: the user row is committed; we
+    // don't want a logging blip to roll it back.
+    record_auth_event(
+        &state,
+        user.id,
+        user.username.as_str(),
+        "auth.register",
+        json!({ "user_id": user.id.into_uuid() }),
+    )
+    .await;
+
+    // No roles yet — operators promote new accounts out-of-band.
+    let payload = user_payload(&user, &[], Permissions::empty());
+    Ok((StatusCode::CREATED, Json(payload)).into_response())
+}
+
 /// Build the auth router. Mounted under `/api/v1/auth` by [`crate::app::build_with_state`].
 pub fn build_router() -> OpenApiRouter<AuthState> {
     OpenApiRouter::new()
@@ -394,6 +542,7 @@ pub fn build_router() -> OpenApiRouter<AuthState> {
         .routes(routes!(logout))
         .routes(routes!(me))
         .routes(routes!(policy))
+        .routes(routes!(register))
 }
 
 /// Look up a user's stored PHC password hash. `None` means the user exists

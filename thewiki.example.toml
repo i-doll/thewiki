@@ -314,6 +314,37 @@ max_query_depth = 15
 max_query_complexity = 1000
 
 # ---------------------------------------------------------------------------
+# CAPTCHA provider (#41).
+#
+# Operators turn this on when they expose registration or anonymous edits
+# to the public internet. The default `noop` provider accepts every token
+# unchanged, which is the right call for private deploys where the auth
+# wall is already enough.
+#
+# Switching `provider` to `"hcaptcha"` requires both `site_key` (public,
+# embedded in the rendered widget) and `secret_key` (server-side, sent to
+# `https://api.hcaptcha.com/siteverify`). The binary refuses to start
+# with `hcaptcha` selected and either key empty.
+#
+# The two `apply_to_*` flags decide which surfaces consult the provider:
+#   - `apply_to_registration` gates `POST /api/v1/auth/register`. Default
+#     `true` because account signups are the most common bot target.
+#   - `apply_to_anonymous_edits` gates the configurable-auth anonymous
+#     fallback that fires when `auth.anonymous_edits = true`. Default
+#     `false`; operators usually pair this with the approval queue
+#     (`auth.approval_required_for = "anonymous"`) which is the stronger
+#     gate. Today the anonymous edit path stubs the captcha check (no
+#     handler bypasses anonymous edits via the captcha gate yet) — see
+#     the TODO in `crates/api/src/extractors.rs`.
+# ---------------------------------------------------------------------------
+[captcha]
+provider = "noop"  # or "hcaptcha"
+site_key = ""
+secret_key = ""
+apply_to_registration = true
+apply_to_anonymous_edits = false
+
+# ---------------------------------------------------------------------------
 # Observability.
 # ---------------------------------------------------------------------------
 [telemetry]
