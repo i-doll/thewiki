@@ -16,6 +16,18 @@ const DEFAULT_NAMESPACE_SLUG: &str = "Main";
 /// Slug used for the implicit template namespace seeded at boot (#45).
 const TEMPLATE_NAMESPACE_SLUG: &str = "Template";
 
+/// Prefix prepended to a subject namespace slug to produce its discussion
+/// counterpart (#43).
+const TALK_SLUG_PREFIX: &str = "Talk_";
+
+/// Prefix prepended to a subject namespace's display name to produce the
+/// talk-side label.
+const TALK_DISPLAY_PREFIX: &str = "Talk: ";
+
+/// SELECT-list used by every read query. Keeps the column order in lockstep
+/// with [`namespace_from_libsql_row`].
+const NAMESPACE_COLUMNS: &str = "id, slug, display_name, created_at, is_talk, paired_namespace_id";
+
 /// libsql-backed namespace repository.
 pub struct LibsqlNamespaceRepository<'a> {
     conn: &'a Connection,
@@ -25,25 +37,43 @@ impl<'a> LibsqlNamespaceRepository<'a> {
     pub(super) fn new(conn: &'a Connection) -> Self {
         Self { conn }
     }
-}
 
-impl NamespaceRepository for LibsqlNamespaceRepository<'_> {
-    async fn create(&self, namespace: &Namespace) -> Result<(), StorageError> {
-        // Match the SQLite adapter: the schema demands a `created_at` but the
-        // domain `Namespace` doesn't carry one yet, so stamp "now" at insert
-        // time. Swap for the carried value once `Namespace` grows one.
+    fn build_talk_pair(subject: &Namespace) -> Result<Namespace, StorageError> {
+        let talk_slug = format!("{TALK_SLUG_PREFIX}{}", subject.slug.as_str());
+        let slug = NamespaceSlug::new(&talk_slug).map_err(|err| {
+            StorageError::invalid_input(format!(
+                "could not derive talk slug from {:?}: {err}",
+                subject.slug.as_str()
+            ))
+        })?;
+        Ok(Namespace {
+            id: NamespaceId::new(),
+            slug,
+            display_name: format!("{TALK_DISPLAY_PREFIX}{}", subject.display_name),
+            is_talk: true,
+            paired_namespace_id: Some(subject.id),
+        })
+    }
+
+    async fn insert_row(&self, namespace: &Namespace) -> Result<(), StorageError> {
         let now = format_ts(time::OffsetDateTime::now_utc())?;
         let id = uuid_bytes(namespace.id.into_uuid());
+        let paired_value: Value = match namespace.paired_namespace_id {
+            Some(p) => Value::Blob(uuid_bytes(p.into_uuid()).to_vec()),
+            None => Value::Null,
+        };
 
         let result = self
             .conn
             .execute(
-                "INSERT INTO namespaces (id, slug, display_name, created_at) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO namespaces (id, slug, display_name, created_at, is_talk, paired_namespace_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     Value::Blob(id.to_vec()),
                     namespace.slug.as_str().to_owned(),
                     namespace.display_name.clone(),
                     now,
+                    i64::from(namespace.is_talk),
+                    paired_value,
                 ],
             )
             .await;
@@ -54,12 +84,52 @@ impl NamespaceRepository for LibsqlNamespaceRepository<'_> {
         }
     }
 
+    async fn set_pair(&self, id: NamespaceId, paired_id: NamespaceId) -> Result<(), StorageError> {
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let paired_bytes = uuid_bytes(paired_id.into_uuid());
+        self.conn
+            .execute(
+                "UPDATE namespaces SET paired_namespace_id = ?1 WHERE id = ?2",
+                params![
+                    Value::Blob(paired_bytes.to_vec()),
+                    Value::Blob(id_bytes.to_vec()),
+                ],
+            )
+            .await
+            .map_err(db_error)?;
+        Ok(())
+    }
+}
+
+impl NamespaceRepository for LibsqlNamespaceRepository<'_> {
+    async fn create(&self, namespace: &Namespace) -> Result<(), StorageError> {
+        self.insert_row(namespace).await?;
+
+        if !namespace.is_talk && namespace.paired_namespace_id.is_none() {
+            let talk = Self::build_talk_pair(namespace)?;
+            match self.insert_row(&talk).await {
+                Ok(()) => {
+                    self.set_pair(namespace.id, talk.id).await?;
+                }
+                Err(StorageError::Conflict(_)) => {
+                    let existing = self.get_by_slug(&talk.slug).await?;
+                    if existing.paired_namespace_id.is_none() {
+                        self.set_pair(existing.id, namespace.id).await?;
+                    }
+                    self.set_pair(namespace.id, existing.id).await?;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
     async fn get_by_id(&self, id: NamespaceId) -> Result<Namespace, StorageError> {
         let id_bytes = uuid_bytes(id.into_uuid());
         let mut rows = into_db(
             self.conn
                 .query(
-                    "SELECT id, slug, display_name, created_at FROM namespaces WHERE id = ?1",
+                    &format!("SELECT {NAMESPACE_COLUMNS} FROM namespaces WHERE id = ?1"),
                     params![Value::Blob(id_bytes.to_vec())],
                 )
                 .await,
@@ -75,7 +145,7 @@ impl NamespaceRepository for LibsqlNamespaceRepository<'_> {
         let mut rows = into_db(
             self.conn
                 .query(
-                    "SELECT id, slug, display_name, created_at FROM namespaces WHERE slug = ?1",
+                    &format!("SELECT {NAMESPACE_COLUMNS} FROM namespaces WHERE slug = ?1"),
                     params![slug.as_str().to_owned()],
                 )
                 .await,
@@ -91,7 +161,9 @@ impl NamespaceRepository for LibsqlNamespaceRepository<'_> {
         let mut rows = into_db(
             self.conn
                 .query(
-                    "SELECT id, slug, display_name, created_at FROM namespaces ORDER BY created_at ASC, id ASC",
+                    &format!(
+                        "SELECT {NAMESPACE_COLUMNS} FROM namespaces ORDER BY created_at ASC, id ASC"
+                    ),
                     (),
                 )
                 .await,
@@ -166,9 +238,11 @@ impl LibsqlNamespaceRepository<'_> {
                     id: NamespaceId::new(),
                     slug,
                     display_name: slug_str.to_owned(),
+                    is_talk: false,
+                    paired_namespace_id: None,
                 };
                 match self.create(&ns).await {
-                    Ok(()) => Ok(ns),
+                    Ok(()) => self.get_by_id(ns.id).await,
                     Err(StorageError::Conflict(_)) => self.get_by_slug(&ns.slug).await,
                     Err(e) => Err(e),
                 }

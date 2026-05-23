@@ -118,8 +118,14 @@ pub async fn create_namespace<S: AppStorage>(
         id: NamespaceId::new(),
         slug,
         display_name: req.display_name,
+        is_talk: false,
+        paired_namespace_id: None,
     };
     state.storage.namespaces().create(&namespace).await?;
+    // After `create`, the repository has auto-paired the namespace with
+    // its `Talk_<slug>` discussion side (#43). Re-read so the response
+    // surfaces the fresh pairing pointer.
+    let namespace = state.storage.namespaces().get_by_id(namespace.id).await?;
 
     // Audit row. We write through the audit log directly because there is
     // no namespace-specific PageAuditMutation — namespaces aren't pages and
@@ -201,6 +207,8 @@ pub async fn update_namespace<S: AppStorage>(
         id: namespace.id,
         slug: namespace.slug.into_string(),
         display_name: req.display_name,
+        is_talk: namespace.is_talk,
+        paired_namespace_id: namespace.paired_namespace_id,
     }))
 }
 

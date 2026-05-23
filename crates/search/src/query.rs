@@ -44,6 +44,13 @@ pub struct SearchQuery {
     /// boost entirely (every field weighted equally). The API layer reads
     /// this from `Config::search.title_boost` (default 2.0).
     pub title_boost: f32,
+    /// Multiplier applied to the score of every hit that belongs to a
+    /// discussion / talk namespace (#43). `< 1.0` demotes talk pages so
+    /// subject pages outrank their discussion threads by default; `1.0` is
+    /// the no-op default the indexer uses when the API layer doesn't set
+    /// the field explicitly. The shipped REST + GraphQL handlers default
+    /// to `0.5` (configurable via `search.talk_boost`).
+    pub talk_boost: f32,
 }
 
 impl SearchQuery {

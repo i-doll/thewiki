@@ -31,7 +31,10 @@ use tantivy::directory::MmapDirectory;
 use tantivy::query::QueryParser;
 use tantivy::schema::Value;
 use tantivy::snippet::SnippetGenerator;
-use tantivy::{DateTime, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
+use tantivy::{
+    DateTime, DocAddress, Index, IndexReader, IndexWriter, ReloadPolicy, Score, SegmentReader,
+    TantivyDocument, Term,
+};
 use thewiki_core::{NamespaceId, PageId};
 use time::OffsetDateTime;
 use tracing::debug;
@@ -78,6 +81,11 @@ pub struct PageDoc {
     pub tags: Vec<String>,
     /// Last-edited timestamp (typically the head revision's `created_at`).
     pub updated_at: OffsetDateTime,
+    /// `true` if the page belongs to a discussion ("talk") namespace
+    /// (#43). The reader-side scorer multiplies the BM25 score for these
+    /// rows by [`SearchQuery::talk_boost`](crate::SearchQuery::talk_boost)
+    /// so subject pages outrank their discussion threads by default.
+    pub is_talk: bool,
 }
 
 /// Owning handle to the on-disk Tantivy index.
@@ -180,6 +188,7 @@ impl SearchIndex {
             td.add_text(self.schema.tags, tag);
         }
         td.add_date(self.schema.updated_at, DateTime::from_utc(doc.updated_at));
+        td.add_i64(self.schema.is_talk, i64::from(doc.is_talk));
         writer.add_document(td)?;
         Ok(())
     }
@@ -239,7 +248,40 @@ impl SearchIndex {
             .parse_query(text.trim())
             .map_err(|e| SearchError::schema(format!("query parse: {e}")))?;
         let limit = usize::try_from(query.limit.max(1)).unwrap_or(usize::MAX);
-        let top = searcher.search(&*parsed, &TopDocs::with_limit(limit).order_by_score())?;
+
+        // Talk pages from discussion namespaces (#43) get their BM25 score
+        // scaled by `talk_boost` so subject pages outrank their discussion
+        // threads by default. `1.0` is the no-op default; the API layer
+        // ships `0.5` via `Config::search.talk_boost`.
+        let talk_boost = if query.talk_boost > 0.0 {
+            query.talk_boost
+        } else {
+            1.0
+        };
+        let top: Vec<(Score, DocAddress)> = if (talk_boost - 1.0).abs() < f32::EPSILON {
+            // Fast path: no rescore needed.
+            searcher.search(&*parsed, &TopDocs::with_limit(limit).order_by_score())?
+        } else {
+            searcher.search(
+                &*parsed,
+                &TopDocs::with_limit(limit).tweak_score(move |segment: &SegmentReader| {
+                    // The `is_talk` column was added by [`SearchSchema::new`]
+                    // and is required for every document the writer adds, so
+                    // a missing reader here means the schema is out of sync
+                    // with the on-disk index — a programming error, not a
+                    // runtime failure mode. We log the issue and fall back to
+                    // "no demotion" so a misconfigured deploy still serves
+                    // results instead of 500-ing.
+                    let reader = segment.fast_fields().i64("is_talk").ok();
+                    move |doc, original_score: Score| match reader.as_ref() {
+                        Some(column) if matches!(column.values_for_doc(doc).next(), Some(1)) => {
+                            original_score * talk_boost
+                        }
+                        _ => original_score,
+                    }
+                }),
+            )?
+        };
 
         let snippet_gen = SnippetGenerator::create(&searcher, &*parsed, s.body)?;
         let mut hits = Vec::with_capacity(top.len());

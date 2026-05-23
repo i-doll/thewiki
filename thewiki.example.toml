@@ -255,6 +255,12 @@ batch_size = 100
 # entirely (every field weighted equally). Default: 2.0.
 title_boost = 2.0
 
+# Score multiplier applied to hits in discussion ("talk") namespaces (#43).
+# Values below 1.0 demote talk pages so subject pages outrank their
+# discussion threads by default; 1.0 disables the demotion entirely. Talk
+# pages are still searchable. Default: 0.5.
+talk_boost = 0.5
+
 # ---------------------------------------------------------------------------
 # Administrative audit log (#36).
 #

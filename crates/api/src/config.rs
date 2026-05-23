@@ -750,12 +750,24 @@ pub struct SearchConfig {
     /// field weighted equally). Default: `2.0`.
     #[serde(default = "default_title_boost")]
     pub title_boost: f32,
+    /// Multiplier applied to the score of pages that live in a discussion
+    /// (talk) namespace (#43). Values below `1.0` demote talk pages so
+    /// subject pages outrank their discussion threads by default; `1.0`
+    /// disables the demotion. Default: `0.5`.
+    #[serde(default = "default_talk_boost")]
+    pub talk_boost: f32,
 }
 
 /// `serde` default for [`SearchConfig::title_boost`].
 #[must_use]
 fn default_title_boost() -> f32 {
     2.0
+}
+
+/// `serde` default for [`SearchConfig::talk_boost`].
+#[must_use]
+fn default_talk_boost() -> f32 {
+    0.5
 }
 
 impl Default for SearchConfig {
@@ -765,6 +777,7 @@ impl Default for SearchConfig {
             commit_interval_ms: 200,
             batch_size: 100,
             title_boost: default_title_boost(),
+            talk_boost: default_talk_boost(),
         }
     }
 }
@@ -1083,6 +1096,11 @@ impl Config {
         if !self.search.title_boost.is_finite() || self.search.title_boost < 0.0 {
             return Err(ConfigError::Invalid(
                 "search.title_boost must be a finite non-negative number".to_string(),
+            ));
+        }
+        if !self.search.talk_boost.is_finite() || self.search.talk_boost < 0.0 {
+            return Err(ConfigError::Invalid(
+                "search.talk_boost must be a finite non-negative number".to_string(),
             ));
         }
 

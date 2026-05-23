@@ -28,7 +28,7 @@
 //! to a forced rebuild.
 
 use tantivy::schema::{
-    BytesOptions, DateOptions, Field, STORED, STRING, Schema, SchemaBuilder, TEXT,
+    BytesOptions, DateOptions, Field, NumericOptions, STORED, STRING, Schema, SchemaBuilder, TEXT,
 };
 
 /// Resolved field handles for the page index.
@@ -55,6 +55,10 @@ pub struct SearchSchema {
     pub tags: Field,
     /// `updated_at` — RFC 3339 datetime, indexed + stored + fast.
     pub updated_at: Field,
+    /// `is_talk` — `1` if the page belongs to a discussion namespace (#43),
+    /// `0` otherwise. Stored as a fast field so the relevance-tweaker can
+    /// read it per-doc without a stored-field round-trip.
+    pub is_talk: Field,
 }
 
 impl SearchSchema {
@@ -93,6 +97,13 @@ impl SearchSchema {
         let updated_at_opts = DateOptions::default().set_indexed().set_stored().set_fast();
         let updated_at = builder.add_date_field("updated_at", updated_at_opts);
 
+        // `is_talk` — fast field so [`SearchIndex::search`] can multiply
+        // each hit's score by the configured `talk_boost` (default 0.5)
+        // without a stored-field round-trip per result. Indexed so namespace
+        // filters can still target it directly when needed.
+        let is_talk_opts = NumericOptions::default().set_indexed().set_fast();
+        let is_talk = builder.add_i64_field("is_talk", is_talk_opts);
+
         Self {
             schema: builder.build(),
             page_id,
@@ -103,6 +114,7 @@ impl SearchSchema {
             body,
             tags,
             updated_at,
+            is_talk,
         }
     }
 
@@ -140,6 +152,7 @@ mod tests {
             "body",
             "tags",
             "updated_at",
+            "is_talk",
         ] {
             assert!(names.contains(&required), "missing field {required}");
         }

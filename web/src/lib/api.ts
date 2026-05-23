@@ -53,6 +53,24 @@ export interface CategoryView {
 	created_at: string;
 }
 
+/**
+ * Hypermedia link block on a `PageView` (#43). Additive — older clients
+ * that ignore `_links` are unaffected.
+ */
+export interface PageLinks {
+	/**
+	 * URL of the page's discussion / talk endpoint (`GET .../talk`).
+	 * `null` when the page already lives in a talk namespace.
+	 */
+	talk?: string | null;
+}
+
+/** Signature-expansion convention metadata (#43). */
+export interface SignatureConvention {
+	marker: string;
+	format: string;
+}
+
 /** Mirrors `PageView` from `crates/api/src/pages/dto.rs`. */
 export interface PageView {
 	id: string;
@@ -68,6 +86,12 @@ export interface PageView {
 	tags: string[];
 	created_at: string;
 	updated_at: string;
+	/** `true` when the page lives in a discussion ("talk") namespace (#43). */
+	is_talk?: boolean;
+	/** Hypermedia links surfaced alongside the page (#43). */
+	_links?: PageLinks;
+	/** Convention metadata so the SPA can preview `~~~~` client-side. */
+	signature_convention?: SignatureConvention;
 }
 
 /** Mirrors `PageListItem`. */
@@ -164,6 +188,52 @@ function authHeaders(): HeadersInit {
  */
 export async function fetchPage(slug: string, namespace?: string): Promise<PageView> {
 	return jsonRequest<PageView>(wikiPath(namespace, slug), { method: "GET" });
+}
+
+/**
+ * Fetch the discussion / talk page for a subject page (#43).
+ *
+ * Resolves `GET /api/v1/wiki/{namespace}/{slug}/talk`, which returns the
+ * talk-namespace page that pairs with `(namespace, slug)`. Returns `null`
+ * on a 404 so the UI can show a "Create the talk page" affordance without
+ * a try/catch dance; other failures bubble up as [`ApiError`].
+ */
+export async function fetchTalkPage(
+	slug: string,
+	namespace?: string,
+): Promise<PageView | null> {
+	const ns = encodeURIComponent(resolveNamespace(namespace));
+	const url = `/api/v1/wiki/${ns}/${encodeURIComponent(slug)}/talk`;
+	const res = await fetch(url, { method: "GET" });
+	if (res.status === 404) {
+		return null;
+	}
+	if (!res.ok) {
+		const message = await parseError(res);
+		throw new ApiError(res.status, message);
+	}
+	return (await res.json()) as PageView;
+}
+
+/**
+ * Expand the `~~~~` sign-with-timestamp marker client-side for preview.
+ *
+ * Mirrors the server-side expansion in
+ * `crates/api/src/pages/signature.rs` so the editor can render a live
+ * preview without round-tripping. The authoritative expansion still
+ * happens server-side at save time — this is purely a UX nicety.
+ */
+export function expandSignatureMarker(
+	body: string,
+	username: string,
+	now: Date = new Date(),
+): string {
+	if (!body.includes("~~~~")) {
+		return body;
+	}
+	const stamp = now.toISOString().replace(/\.\d{3}Z$/, "Z");
+	const replacement = `[[User:${username}]] ${stamp}`;
+	return body.split("~~~~").join(replacement);
 }
 
 export async function listPages(options: {
@@ -320,6 +390,10 @@ export interface NamespaceView {
 	id: string;
 	slug: string;
 	display_name: string;
+	/** `true` if this is the discussion side of a paired subject namespace (#43). */
+	is_talk?: boolean;
+	/** Paired namespace id — the talk side for a subject namespace and vice versa. */
+	paired_namespace_id?: string | null;
 }
 
 /** Response from `GET /api/v1/namespaces`. */

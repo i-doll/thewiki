@@ -307,6 +307,7 @@ impl<S: AppStorage> Query<S> {
             limit,
             cursor: None,
             title_boost: state.search_title_boost,
+            talk_boost: state.search_talk_boost,
         };
         let results = state
             .searcher

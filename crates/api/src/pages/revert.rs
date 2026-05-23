@@ -188,6 +188,7 @@ pub(crate) async fn revert_page_in_namespace<S: AppStorage>(
         body: indexed_body,
         tags: Vec::new(),
         updated_at: page.updated_at,
+        is_talk: namespace.is_talk,
     });
 
     let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;

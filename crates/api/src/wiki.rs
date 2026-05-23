@@ -35,6 +35,7 @@ use crate::pages::revert::RevertRequest;
 use crate::pages::revisions::{DiffQuery, DiffResponse, ListRevisionsQuery, RevisionListResponse};
 use crate::pages::{protect, revert, revisions, routes};
 use crate::state::{AppState, AppStorage};
+use thewiki_storage::repo::{NamespaceRepository, PageRepository};
 
 /// Parse a path-segment namespace slug. `400 Bad Request` on validation
 /// failure.
@@ -262,6 +263,64 @@ pub async fn revert<S: AppStorage>(
     revert::revert_page_in_namespace(state, ns, slug, author, req).await
 }
 
+/// `GET /api/v1/wiki/{namespace}/{slug}/talk` — fetch the talk page for the
+/// subject page identified by `(namespace, slug)` (#43).
+///
+/// Resolution rules:
+///
+/// - The path's `namespace` must resolve to a non-talk namespace that is
+///   paired with a `Talk_*` companion. The handler returns `400` if the
+///   path points at an unpaired namespace and `404` if the namespace
+///   doesn't exist.
+/// - The talk page lives at `(paired_namespace_id, slug)`. If no such row
+///   exists yet, the handler returns `404` — the SPA's "Discuss" button
+///   uses this to switch between "Create the talk page" and "Open the
+///   existing discussion".
+///
+/// Reads are open by design, exactly like the regular page reads.
+#[utoipa::path(
+    get,
+    path = "/{namespace}/{slug}/talk",
+    params(
+        ("namespace" = String, Path, description = "Subject namespace slug"),
+        ("slug" = String, Path, description = "Page slug within the subject namespace"),
+    ),
+    responses(
+        (status = 200, description = "Talk page for the subject", body = PageView),
+        (status = 400, description = "Namespace has no paired talk side", body = crate::error::ErrorBody),
+        (status = 404, description = "Subject namespace, subject page, or talk page not found", body = crate::error::ErrorBody),
+        (status = 429, description = "Rate limit exceeded", body = crate::rate_limit::RateLimitErrorBody),
+    ),
+    tag = "wiki",
+)]
+pub async fn get_talk<S: AppStorage>(
+    State(state): State<AppState<S>>,
+    Path((namespace, slug)): Path<(String, String)>,
+) -> Result<Json<PageView>, ApiError> {
+    let ns = parse_path_namespace(&namespace)?;
+    let subject_ns = state.storage.namespaces().get_by_slug(&ns).await?;
+    if subject_ns.is_talk {
+        return Err(ApiError::InvalidInput(
+            "namespace is already a talk namespace; talk pages do not have their own talk page"
+                .to_string(),
+        ));
+    }
+    let Some(paired_id) = subject_ns.paired_namespace_id else {
+        return Err(ApiError::InvalidInput(
+            "namespace is not paired with a discussion namespace".to_string(),
+        ));
+    };
+    let talk_ns = state.storage.namespaces().get_by_id(paired_id).await?;
+    let talk_page = state
+        .storage
+        .pages()
+        .get_by_namespace_and_slug(talk_ns.id, &slug)
+        .await?;
+    let talk_slug = talk_ns.slug.into_string();
+    let view = routes::hydrate_page_view(&state, talk_page, talk_slug).await?;
+    Ok(Json(view))
+}
+
 /// `POST /api/v1/wiki/{namespace}/{slug}/protect`.
 #[utoipa::path(
     post,
@@ -305,4 +364,5 @@ pub fn router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
         .routes(routes!(diff_revisions))
         .routes(routes!(revert))
         .routes(routes!(protect))
+        .routes(routes!(get_talk))
 }

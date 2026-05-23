@@ -180,6 +180,7 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         .with_search(indexer_handle)
         .with_searcher(searcher)
         .with_search_title_boost(config.search.title_boost)
+        .with_search_talk_boost(config.search.talk_boost)
         .with_captcha(config.captcha.clone(), Arc::clone(&captcha_provider))
         .with_render_config(config.render.clone());
     let media_backend = thewiki_api::media::build_media_backend(
@@ -330,7 +331,7 @@ async fn stream_pages_to_indexer(
     let namespaces = storage.namespaces().list().await?;
     let ns_by_id: std::collections::HashMap<_, _> = namespaces
         .iter()
-        .map(|ns| (ns.id, ns.slug.as_str().to_string()))
+        .map(|ns| (ns.id, (ns.slug.as_str().to_string(), ns.is_talk)))
         .collect();
     let mut count: u64 = 0;
     for ns in &namespaces {
@@ -350,7 +351,7 @@ async fn stream_pages_to_indexer(
                         .unwrap_or_default(),
                     None => String::new(),
                 };
-                let ns_slug = ns_by_id
+                let (ns_slug, is_talk) = ns_by_id
                     .get(&page.namespace_id)
                     .cloned()
                     .unwrap_or_default();
@@ -363,6 +364,7 @@ async fn stream_pages_to_indexer(
                     body,
                     tags: Vec::new(),
                     updated_at: page.updated_at,
+                    is_talk,
                 });
                 count = count.saturating_add(1);
             }
@@ -402,7 +404,7 @@ async fn run_reindex(args: ReindexArgs) -> anyhow::Result<()> {
     let namespaces = storage.namespaces().list().await?;
     let ns_by_id: std::collections::HashMap<_, _> = namespaces
         .iter()
-        .map(|ns| (ns.id, ns.slug.as_str().to_string()))
+        .map(|ns| (ns.id, (ns.slug.as_str().to_string(), ns.is_talk)))
         .collect();
 
     let mut docs: Vec<PageDoc> = Vec::new();
@@ -423,7 +425,7 @@ async fn run_reindex(args: ReindexArgs) -> anyhow::Result<()> {
                         .unwrap_or_default(),
                     None => String::new(),
                 };
-                let ns_slug = ns_by_id
+                let (ns_slug, is_talk) = ns_by_id
                     .get(&page.namespace_id)
                     .cloned()
                     .unwrap_or_default();
@@ -436,6 +438,7 @@ async fn run_reindex(args: ReindexArgs) -> anyhow::Result<()> {
                     body,
                     tags: Vec::new(),
                     updated_at: page.updated_at,
+                    is_talk,
                 });
             }
             cursor = slice.next;

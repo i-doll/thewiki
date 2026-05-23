@@ -26,6 +26,7 @@ fn doc(title: &str, body: &str) -> PageDoc {
         body: body.to_string(),
         tags: Vec::new(),
         updated_at: OffsetDateTime::now_utc(),
+        is_talk: false,
     }
 }
 
@@ -231,4 +232,68 @@ fn namespace_filter_excludes_other_namespaces() {
         !res.hits.iter().any(|h| h.page_id == alpha.page_id),
         "main-namespace page must be filtered out"
     );
+}
+
+/// Talk pages (#43) still match queries but get their BM25 score scaled by
+/// `talk_boost`, so a subject page with the same matching content ranks
+/// above its talk partner.
+#[test]
+fn talk_boost_demotes_talk_pages_below_subjects() {
+    let dir = TempDir::new().expect("tmpdir");
+    let mut subject = doc("Quantum Mechanics", "quantum mechanics is fascinating");
+    subject.is_talk = false;
+    let mut talk = doc("Quantum Mechanics", "quantum mechanics is fascinating");
+    talk.is_talk = true;
+
+    let index = with_index(dir.path(), |idx, w| {
+        idx.upsert_on(w, &subject).unwrap();
+        idx.upsert_on(w, &talk).unwrap();
+    });
+
+    // Without a demotion, the two identical docs tie. With `talk_boost = 0.5`
+    // the subject page must rank strictly above the talk page.
+    let mut q = SearchQuery::text("quantum", 10);
+    q.talk_boost = 0.5;
+    let res = index.search(&q).expect("search");
+    let subject_pos = res
+        .hits
+        .iter()
+        .position(|h| h.page_id == subject.page_id)
+        .expect("subject page is in results");
+    let talk_pos = res
+        .hits
+        .iter()
+        .position(|h| h.page_id == talk.page_id)
+        .expect("talk page is still searchable");
+    assert!(
+        subject_pos < talk_pos,
+        "expected subject {subject_pos} to outrank talk {talk_pos} with talk_boost = 0.5"
+    );
+    // Score-wise the subject hit should be twice the talk hit (subject keeps
+    // its raw score, talk is halved).
+    assert!(res.hits[subject_pos].score > res.hits[talk_pos].score);
+}
+
+/// `talk_boost = 1.0` is the no-op default — talk pages and subject pages
+/// then tie on identical content.
+#[test]
+fn talk_boost_one_is_a_no_op() {
+    let dir = TempDir::new().expect("tmpdir");
+    let mut subject = doc("Galaxy", "the milky way is a barred spiral galaxy");
+    subject.is_talk = false;
+    let mut talk = doc("Galaxy", "the milky way is a barred spiral galaxy");
+    talk.is_talk = true;
+
+    let index = with_index(dir.path(), |idx, w| {
+        idx.upsert_on(w, &subject).unwrap();
+        idx.upsert_on(w, &talk).unwrap();
+    });
+
+    let mut q = SearchQuery::text("galaxy", 10);
+    q.talk_boost = 1.0;
+    let res = index.search(&q).expect("search");
+    // Both must score the same; ordering between the two is undefined.
+    let scores: Vec<f32> = res.hits.iter().map(|h| h.score).collect();
+    assert!(scores.len() >= 2);
+    assert!((scores[0] - scores[1]).abs() < f32::EPSILON);
 }

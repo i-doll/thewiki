@@ -178,7 +178,8 @@ pub(crate) fn user_from_libsql_row(row: &Row) -> Result<User, StorageError> {
 
 /// Decode a `namespaces` row.
 ///
-/// Column order: `id, slug, display_name, created_at`.
+/// Column order: `id, slug, display_name, created_at, is_talk,
+/// paired_namespace_id`.
 pub(crate) fn namespace_from_libsql_row(
     row: &Row,
 ) -> Result<thewiki_core::Namespace, StorageError> {
@@ -187,6 +188,8 @@ pub(crate) fn namespace_from_libsql_row(
         col_text(row, 1)?,
         col_text(row, 2)?,
         col_text(row, 3)?,
+        col_int(row, 4)? != 0,
+        col_blob_opt(row, 5)?,
     )
 }
 

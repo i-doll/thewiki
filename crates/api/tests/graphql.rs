@@ -65,6 +65,8 @@ async fn build_app() -> TestApp {
             id: NamespaceId::new(),
             slug: NamespaceSlug::new("Main").expect("slug"),
             display_name: "Main".into(),
+            is_talk: false,
+            paired_namespace_id: None,
         })
         .await
         .expect("seed namespace");
@@ -382,6 +384,8 @@ async fn build_app_with_seeded_search() -> (Router, TempDir) {
             id: NamespaceId::new(),
             slug: NamespaceSlug::new("Main").expect("slug"),
             display_name: "Main".into(),
+            is_talk: false,
+            paired_namespace_id: None,
         })
         .await
         .expect("seed namespace");
@@ -431,6 +435,7 @@ async fn build_app_with_seeded_search() -> (Router, TempDir) {
                     body: body.to_string(),
                     tags: Vec::new(),
                     updated_at: OffsetDateTime::now_utc(),
+                    is_talk: false,
                 },
             )
             .expect("upsert");
