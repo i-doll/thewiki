@@ -15,9 +15,14 @@
  *   it lands, we call `window.hcaptcha.render(...)` against the div ref.
  * - On unmount we leave the script tag in place (it's idempotent) and
  *   tell hCaptcha to release the widget if it was rendered.
+ * - The parent gets an imperative handle (`resetCaptcha()`) via `ref` so
+ *   it can force a re-solve when a submit fails after the token was
+ *   already burned. hCaptcha tokens are single-use; without this the next
+ *   submit replays the dead token and the API rejects it with
+ *   `captcha_failed` (no UX feedback that the user has to re-solve).
  */
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { type CaptchaFrontendConfig, ensureHcaptchaScript } from "../lib/captcha";
 
 interface CaptchaProps {
@@ -26,6 +31,17 @@ interface CaptchaProps {
 	onVerify: (token: string) => void;
 	/** Called when the token expires or is invalidated. */
 	onExpire?: () => void;
+}
+
+/**
+ * Imperative handle the parent form holds via `ref`. The only operation
+ * we expose is `resetCaptcha()` — used by the register page when an API
+ * submit fails (e.g. username conflict) so the now-burned token isn't
+ * replayed on the next attempt.
+ */
+export interface CaptchaHandle {
+	/** Reset the widget so the user can solve a fresh challenge. */
+	resetCaptcha: () => void;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: window.hcaptcha is an external global
@@ -43,10 +59,36 @@ function hcaptchaGlobal(): HCaptchaGlobal | null {
 	return (window as any).hcaptcha ?? null;
 }
 
-export function Captcha({ config, onVerify, onExpire }: CaptchaProps) {
+export const Captcha = forwardRef<CaptchaHandle, CaptchaProps>(function Captcha(
+	{ config, onVerify, onExpire },
+	ref,
+) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const widgetIdRef = useRef<string | number | null>(null);
 	const [ready, setReady] = useState<boolean>(() => hcaptchaGlobal() !== null);
+
+	// Expose `resetCaptcha()` to the parent so a failed submit can clear
+	// the burned token. Safe to call before the widget has rendered — we
+	// just no-op if the global isn't there yet.
+	useImperativeHandle(
+		ref,
+		() => ({
+			resetCaptcha: () => {
+				const hcaptcha = hcaptchaGlobal();
+				const id = widgetIdRef.current;
+				if (hcaptcha?.reset && id !== null) {
+					try {
+						hcaptcha.reset(id);
+					} catch {
+						// noop: best-effort reset; if hCaptcha throws we
+						// surface the failure as a stale-token submission
+						// rather than crashing the page.
+					}
+				}
+			},
+		}),
+		[],
+	);
 
 	// Inject the script tag once on first mount across the page.
 	useEffect(() => {
@@ -126,4 +168,4 @@ export function Captcha({ config, onVerify, onExpire }: CaptchaProps) {
 	}
 
 	return <div ref={containerRef} className="my-3" />;
-}
+});

@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
-import { Captcha } from "../components/Captcha";
+import { Captcha, type CaptchaHandle } from "../components/Captcha";
 import { ApiError, register } from "../lib/api";
 import { type CaptchaFrontendConfig, fetchCaptchaConfig } from "../lib/captcha";
 
@@ -30,6 +30,12 @@ function RegisterComponent() {
 	const [captchaConfigLoaded, setCaptchaConfigLoaded] = useState(false);
 	const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
+	// Imperative handle to the Captcha so we can force a re-solve when a
+	// submit fails after the token was burned. hCaptcha tokens are
+	// single-use — without this, the next submit replays a dead token and
+	// the API rejects with `captcha_failed` and no UX signal that the
+	// user needs to solve a fresh challenge.
+	const captchaRef = useRef<CaptchaHandle | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -82,6 +88,13 @@ function RegisterComponent() {
 			toast.success("Account created — please log in");
 			navigate({ to: "/login" });
 		} catch (err) {
+			// Any submit failure burns the hCaptcha token (single-use). Clear
+			// the local copy and reset the widget so the user can solve a
+			// fresh challenge on retry; otherwise the next attempt replays
+			// the dead token and the API surfaces a confusing
+			// `captcha_failed`.
+			captchaRef.current?.resetCaptcha();
+			setCaptchaToken(null);
 			if (err instanceof ApiError) {
 				if (err.status === 403) {
 					toast.error("Registration is disabled on this wiki");
@@ -158,6 +171,7 @@ function RegisterComponent() {
 
 				{captchaConfigLoaded && captchaConfig && (
 					<Captcha
+						ref={captchaRef}
 						config={captchaConfig}
 						onVerify={(token) => setCaptchaToken(token)}
 						onExpire={() => setCaptchaToken(null)}
