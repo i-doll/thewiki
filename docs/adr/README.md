@@ -30,6 +30,7 @@ write a new ADR that supersedes the old one — we do not rewrite the old one.
 | #    | Title                                          | Status   | Date       |
 | ---- | ---------------------------------------------- | -------- | ---------- |
 | 0001 | [Markdown renderer](./0001-markdown-renderer.md) | Accepted | 2026-05-21 |
+| 0002 | [Template syntax](./0002-template-syntax.md)     | Accepted | 2026-05-23 |
 
 ## Why ADRs
 
