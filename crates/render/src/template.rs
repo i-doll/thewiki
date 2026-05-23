@@ -149,6 +149,10 @@ fn expand_body<R: TemplateResolver + ?Sized>(
     let bytes = body.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
+        debug_assert!(
+            body.is_char_boundary(i),
+            "expand_body: i must always sit on a UTF-8 char boundary"
+        );
         // Look for `{{{` (param ref) before `{{` (call) so triple-brace wins.
         if i + 3 <= bytes.len() && &bytes[i..i + 3] == b"{{{" {
             if in_template.is_some() {
@@ -198,8 +202,15 @@ fn expand_body<R: TemplateResolver + ?Sized>(
             i += consumed;
             continue;
         }
-        out.push(body.as_bytes()[i] as char);
-        i += 1;
+        // Multi-byte UTF-8 safe: step one full char, not one byte. The
+        // loop guard guarantees `i < body.len()`, and the debug-assert
+        // above pins `i` to a char boundary, so `next()` always yields a
+        // char — the `break` is defensive only.
+        let Some(ch) = body[i..].chars().next() else {
+            break;
+        };
+        out.push(ch);
+        i += ch.len_utf8();
     }
     out
 }
@@ -509,6 +520,10 @@ fn split_top_level_pipes(s: &str) -> Vec<String> {
     let mut depth: i32 = 0;
     let mut i = 0;
     while i < bytes.len() {
+        debug_assert!(
+            s.is_char_boundary(i),
+            "split_top_level_pipes: i must always sit on a UTF-8 char boundary"
+        );
         // Triple-brace runs as one balanced unit — copy verbatim and skip.
         if i + 3 <= bytes.len() && &bytes[i..i + 3] == b"{{{" {
             if let Some(close) = find_matching_triple_close(&s[i + 3..]) {
@@ -538,8 +553,15 @@ fn split_top_level_pipes(s: &str) -> Vec<String> {
             i += 1;
             continue;
         }
-        current.push(bytes[i] as char);
-        i += 1;
+        // Multi-byte UTF-8 safe: step one full char, not one byte. The
+        // loop guard guarantees `i < s.len()`, and the debug-assert above
+        // pins `i` to a char boundary, so `next()` always yields a char —
+        // the `break` is defensive only.
+        let Some(ch) = s[i..].chars().next() else {
+            break;
+        };
+        current.push(ch);
+        i += ch.len_utf8();
     }
     parts.push(current);
     parts
@@ -1106,5 +1128,90 @@ mod tests {
             parts[0], parts[1],
             "cache key collision would make both halves equal: {out}"
         );
+    }
+
+    // --- UTF-8 regression tests --------------------------------------------
+    //
+    // These pin the byte-wise char copying that previously corrupted
+    // multi-byte UTF-8 during expansion (`out.push(body.as_bytes()[i] as
+    // char)`) and pipe-splitting (`current.push(bytes[i] as char)`). Each
+    // assertion is byte-equality against the expected output so a regression
+    // would surface as a mojibake diff.
+
+    #[test]
+    fn utf8_template_name_with_non_ascii() {
+        // Template name itself contains a multi-byte character.
+        let r = MapResolver::default().with("Template", "Größe", "Hallo, {{{1}}}!");
+        let out = expand_with("{{Größe|Welt}}", &r);
+        assert_eq!(out, "Hallo, Welt!");
+    }
+
+    #[test]
+    fn utf8_template_name_cjk() {
+        let r = MapResolver::default().with("Template", "日本", "こんにちは、{{{1}}}！");
+        let out = expand_with("{{日本|世界}}", &r);
+        assert_eq!(out, "こんにちは、世界！");
+    }
+
+    #[test]
+    fn utf8_body_text_preserved_in_top_level_copy() {
+        // No templates in the source — exercises the top-level byte-copy
+        // path in `expand_body`. Includes Latin diacritics, CJK, and emoji.
+        let r = MapResolver::default();
+        let src = "Café — 日本語 — 🦀 ferris";
+        let out = expand_with(src, &r);
+        assert_eq!(out, src);
+    }
+
+    #[test]
+    fn utf8_positional_arg_value() {
+        let r = MapResolver::default().with("Template", "Greet", "Hello, {{{1}}}!");
+        let out = expand_with("{{Greet|Aïdä 🦀 日本}}", &r);
+        assert_eq!(out, "Hello, Aïdä 🦀 日本!");
+    }
+
+    #[test]
+    fn utf8_named_arg_value() {
+        let r = MapResolver::default().with("Template", "Welcome", "Welcome **{{{name}}}**.");
+        let out = expand_with("{{Welcome|name=Aïdä 🦀 日本}}", &r);
+        assert_eq!(out, "Welcome **Aïdä 🦀 日本**.");
+    }
+
+    #[test]
+    fn utf8_default_value() {
+        // Triple-brace default contains multi-byte text; it must survive
+        // the parser's pipe-splitting (which is the second `as char` site).
+        let r = MapResolver::default().with("Template", "Tea", "Greeting: {{{1|你好 🦀}}}.");
+        let out = expand_with("{{Tea}}", &r);
+        assert_eq!(out, "Greeting: 你好 🦀.");
+    }
+
+    #[test]
+    fn utf8_emoji_inside_template_body() {
+        // Emoji adjacent to braces — pins boundary handling around the
+        // `{{` / `}}` byte jumps.
+        let r = MapResolver::default().with("Template", "Crab", "🦀{{{1}}}🦀");
+        let out = expand_with("{{Crab|🦀}}", &r);
+        assert_eq!(out, "🦀🦀🦀");
+    }
+
+    #[test]
+    fn utf8_nested_call_with_non_ascii_args() {
+        // Argument to outer template is itself a template call whose result
+        // is multi-byte. Exercises pipe-splitting AND nested expansion.
+        let r = MapResolver::default()
+            .with("Template", "Outer", "[{{{1}}}]")
+            .with("Template", "Inner", "日本語 🦀");
+        let out = expand_with("{{Outer|{{Inner}}}}", &r);
+        assert_eq!(out, "[日本語 🦀]");
+    }
+
+    #[test]
+    fn utf8_mixed_multibyte_widths() {
+        // Mix of 2-byte (é), 3-byte (日), and 4-byte (🦀) UTF-8 sequences
+        // so any single-byte-step regression would corrupt at least one.
+        let r = MapResolver::default().with("Template", "Mix", "{{{1}}}|{{{2}}}|{{{3}}}");
+        let out = expand_with("{{Mix|café|日本|🦀}}", &r);
+        assert_eq!(out, "café|日本|🦀");
     }
 }

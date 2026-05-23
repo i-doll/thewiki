@@ -318,6 +318,19 @@ url = "redis://127.0.0.1:6379/0"
 }
 
 #[test]
+fn validate_rejects_zero_template_max_recursion_depth() {
+    // Pins the explicit `> 0` guard in `Config::validate()` so silently
+    // accepting `0` (which would disable template expansion entirely)
+    // cannot regress. ADR-0002 §7 expects a positive depth.
+    let mut cfg = Config::defaults();
+    cfg.render.template.max_recursion_depth = 0;
+    let err = cfg
+        .validate()
+        .expect_err("zero template depth must be rejected");
+    assert!(matches!(err, ConfigError::Invalid(_)));
+}
+
+#[test]
 fn validate_rejects_redis_backend_without_url() {
     let mut cfg = Config::defaults();
     cfg.rate_limit.backend = RateLimitBackendConfig::Redis { url: String::new() };
