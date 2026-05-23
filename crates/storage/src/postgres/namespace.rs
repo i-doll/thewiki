@@ -1,6 +1,6 @@
 //! Postgres [`NamespaceRepository`](crate::repo::NamespaceRepository) impl.
 
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use thewiki_core::{Namespace, NamespaceId, NamespaceSlug};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -52,7 +52,10 @@ impl<'a> PostgresNamespaceRepository<'a> {
         })
     }
 
-    async fn insert_row(&self, namespace: &Namespace) -> Result<(), StorageError> {
+    async fn insert_row_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        namespace: &Namespace,
+    ) -> Result<(), StorageError> {
         let now = OffsetDateTime::now_utc();
         let paired = namespace.paired_namespace_id.map(|p| p.into_uuid());
 
@@ -66,7 +69,7 @@ impl<'a> PostgresNamespaceRepository<'a> {
         .bind(now)
         .bind(namespace.is_talk)
         .bind(paired)
-        .execute(self.pool)
+        .execute(&mut **tx)
         .await;
 
         match result {
@@ -75,36 +78,68 @@ impl<'a> PostgresNamespaceRepository<'a> {
         }
     }
 
-    async fn set_pair(&self, id: NamespaceId, paired_id: NamespaceId) -> Result<(), StorageError> {
+    async fn set_pair_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        id: NamespaceId,
+        paired_id: NamespaceId,
+    ) -> Result<(), StorageError> {
         sqlx::query("UPDATE namespaces SET paired_namespace_id = $1 WHERE id = $2")
             .bind(paired_id.into_uuid())
             .bind(id.into_uuid())
-            .execute(self.pool)
+            .execute(&mut **tx)
             .await?;
         Ok(())
+    }
+
+    /// Lookup a namespace by slug inside the current transaction. Used by
+    /// `create()` so the "Talk_<slug> already exists" branch reads the
+    /// same view of the data the surrounding writes do.
+    async fn get_by_slug_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        slug: &NamespaceSlug,
+    ) -> Result<Namespace, StorageError> {
+        let row: Option<(Uuid, String, String, bool, Option<Uuid>)> = sqlx::query_as(
+            "SELECT id, slug, display_name, is_talk, paired_namespace_id FROM namespaces WHERE slug = $1",
+        )
+        .bind(slug.as_str())
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        match row {
+            Some((id, slug, display_name, is_talk, paired)) => {
+                namespace_from_row(id, slug, display_name, is_talk, paired)
+            }
+            None => Err(StorageError::NotFound),
+        }
     }
 }
 
 impl NamespaceRepository for PostgresNamespaceRepository<'_> {
     async fn create(&self, namespace: &Namespace) -> Result<(), StorageError> {
-        self.insert_row(namespace).await?;
+        // The subject insert, the paired talk insert, and the bidirectional
+        // `paired_namespace_id` updates all run inside a single transaction
+        // so a failure on any later step rolls back the whole pairing
+        // graph (#43, coderabbit).
+        let mut tx = self.pool.begin().await?;
+        Self::insert_row_tx(&mut tx, namespace).await?;
 
         if !namespace.is_talk && namespace.paired_namespace_id.is_none() {
             let talk = Self::build_talk_pair(namespace)?;
-            match self.insert_row(&talk).await {
+            match Self::insert_row_tx(&mut tx, &talk).await {
                 Ok(()) => {
-                    self.set_pair(namespace.id, talk.id).await?;
+                    Self::set_pair_tx(&mut tx, namespace.id, talk.id).await?;
                 }
                 Err(StorageError::Conflict(_)) => {
-                    let existing = self.get_by_slug(&talk.slug).await?;
+                    let existing = Self::get_by_slug_tx(&mut tx, &talk.slug).await?;
                     if existing.paired_namespace_id.is_none() {
-                        self.set_pair(existing.id, namespace.id).await?;
+                        Self::set_pair_tx(&mut tx, existing.id, namespace.id).await?;
                     }
-                    self.set_pair(namespace.id, existing.id).await?;
+                    Self::set_pair_tx(&mut tx, namespace.id, existing.id).await?;
                 }
                 Err(e) => return Err(e),
             }
         }
+        tx.commit().await?;
         Ok(())
     }
 

@@ -123,6 +123,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../../../../migrations/20260523120000_categories_and_tags.sql"),
     ),
     (
+        "20260523140000_talk_namespaces",
+        include_str!("../../../../migrations/20260523140000_talk_namespaces.sql"),
+    ),
+    (
         "20260523150000_watchlist",
         include_str!("../../../../migrations/20260523150000_watchlist.sql"),
     ),

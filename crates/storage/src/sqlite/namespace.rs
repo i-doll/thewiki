@@ -1,6 +1,6 @@
 //! SQLite [`NamespaceRepository`](crate::repo::NamespaceRepository) impl.
 
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 use thewiki_core::{Namespace, NamespaceId, NamespaceSlug};
 
 use crate::error::StorageError;
@@ -24,6 +24,11 @@ const TALK_DISPLAY_PREFIX: &str = "Talk: ";
 /// SELECT-list used by every read query. Pulled into a constant so the
 /// column order stays in lockstep with [`namespace_from_row`].
 const NAMESPACE_COLUMNS: &str = "id, slug, display_name, created_at, is_talk, paired_namespace_id";
+
+/// Row shape `sqlx::query_as` deserialises into for the SELECT list in
+/// [`NAMESPACE_COLUMNS`]. Hoisted to a type alias to keep call sites
+/// readable and to suppress clippy::type_complexity.
+type NamespaceRow = (Vec<u8>, String, String, String, bool, Option<Vec<u8>>);
 
 /// SQLite-backed namespace repository. Borrows the pool from
 /// [`SqliteStorage`](super::SqliteStorage).
@@ -56,9 +61,13 @@ impl<'a> SqliteNamespaceRepository<'a> {
         })
     }
 
-    /// Insert a raw namespace row exactly as supplied. Used by [`create`]
-    /// once for the subject and once for the auto-created talk partner.
-    async fn insert_row(&self, namespace: &Namespace) -> Result<(), StorageError> {
+    /// Insert a raw namespace row exactly as supplied. Runs against a
+    /// caller-supplied transaction so the subject/talk pairing flow stays
+    /// atomic (#43).
+    async fn insert_row_tx(
+        tx: &mut Transaction<'_, Sqlite>,
+        namespace: &Namespace,
+    ) -> Result<(), StorageError> {
         let now = format_ts(time::OffsetDateTime::now_utc())?;
         let id = uuid_bytes(namespace.id.into_uuid());
         let paired = namespace
@@ -75,7 +84,7 @@ impl<'a> SqliteNamespaceRepository<'a> {
         .bind(&now)
         .bind(namespace.is_talk)
         .bind(paired.as_ref().map(|b| b.as_slice()))
-        .execute(self.pool)
+        .execute(&mut **tx)
         .await;
 
         match result {
@@ -86,22 +95,56 @@ impl<'a> SqliteNamespaceRepository<'a> {
 
     /// Set `paired_namespace_id` on an existing row. Used to close the
     /// pairing loop after both rows have been inserted.
-    async fn set_pair(&self, id: NamespaceId, paired_id: NamespaceId) -> Result<(), StorageError> {
+    async fn set_pair_tx(
+        tx: &mut Transaction<'_, Sqlite>,
+        id: NamespaceId,
+        paired_id: NamespaceId,
+    ) -> Result<(), StorageError> {
         let id_bytes = uuid_bytes(id.into_uuid());
         let paired_bytes = uuid_bytes(paired_id.into_uuid());
         sqlx::query("UPDATE namespaces SET paired_namespace_id = ?1 WHERE id = ?2")
             .bind(paired_bytes.as_slice())
             .bind(id_bytes.as_slice())
-            .execute(self.pool)
+            .execute(&mut **tx)
             .await?;
         Ok(())
+    }
+
+    /// Lookup a namespace by slug inside the current transaction. Used by
+    /// `create()` so the "Talk_<slug> already exists" branch reads the
+    /// same view of the data the surrounding writes do.
+    async fn get_by_slug_tx(
+        tx: &mut Transaction<'_, Sqlite>,
+        slug: &NamespaceSlug,
+    ) -> Result<Namespace, StorageError> {
+        let row: Option<NamespaceRow> = sqlx::query_as(
+            &format!("SELECT {NAMESPACE_COLUMNS} FROM namespaces WHERE slug = ?1"),
+        )
+        .bind(slug.as_str())
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        match row {
+            Some((id, slug, display_name, created_at, is_talk, paired)) => {
+                namespace_from_row(id, slug, display_name, created_at, is_talk, paired)
+            }
+            None => Err(StorageError::NotFound),
+        }
     }
 }
 
 impl NamespaceRepository for SqliteNamespaceRepository<'_> {
     async fn create(&self, namespace: &Namespace) -> Result<(), StorageError> {
+        // The subject insert, the paired talk insert, and the bidirectional
+        // `paired_namespace_id` updates all run inside a single transaction
+        // so a failure on any later step rolls back the whole pairing
+        // graph (#43, coderabbit). Without this, an early subject row
+        // could persist with a dangling/missing partner if the second
+        // insert collided or the back-pointer update tripped a constraint.
+        let mut tx = self.pool.begin().await?;
+
         // Insert the subject (or pre-built talk) row first.
-        self.insert_row(namespace).await?;
+        Self::insert_row_tx(&mut tx, namespace).await?;
 
         // If the caller supplied a subject namespace (i.e. `is_talk =
         // false`) and didn't pre-wire a pair, auto-create the matching
@@ -112,26 +155,27 @@ impl NamespaceRepository for SqliteNamespaceRepository<'_> {
             let talk = Self::build_talk_pair(namespace)?;
             // If the talk slug already exists (e.g. the operator pre-created
             // it manually), reuse that row instead of erroring.
-            match self.insert_row(&talk).await {
+            match Self::insert_row_tx(&mut tx, &talk).await {
                 Ok(()) => {
-                    self.set_pair(namespace.id, talk.id).await?;
+                    Self::set_pair_tx(&mut tx, namespace.id, talk.id).await?;
                 }
                 Err(StorageError::Conflict(_)) => {
-                    let existing = self.get_by_slug(&talk.slug).await?;
+                    let existing = Self::get_by_slug_tx(&mut tx, &talk.slug).await?;
                     if existing.paired_namespace_id.is_none() {
-                        self.set_pair(existing.id, namespace.id).await?;
+                        Self::set_pair_tx(&mut tx, existing.id, namespace.id).await?;
                     }
-                    self.set_pair(namespace.id, existing.id).await?;
+                    Self::set_pair_tx(&mut tx, namespace.id, existing.id).await?;
                 }
                 Err(e) => return Err(e),
             }
         }
+        tx.commit().await?;
         Ok(())
     }
 
     async fn get_by_id(&self, id: NamespaceId) -> Result<Namespace, StorageError> {
         let id_bytes = uuid_bytes(id.into_uuid());
-        let row: Option<(Vec<u8>, String, String, String, bool, Option<Vec<u8>>)> = sqlx::query_as(
+        let row: Option<NamespaceRow> = sqlx::query_as(
             &format!("SELECT {NAMESPACE_COLUMNS} FROM namespaces WHERE id = ?1"),
         )
         .bind(id_bytes.as_slice())
@@ -147,7 +191,7 @@ impl NamespaceRepository for SqliteNamespaceRepository<'_> {
     }
 
     async fn get_by_slug(&self, slug: &NamespaceSlug) -> Result<Namespace, StorageError> {
-        let row: Option<(Vec<u8>, String, String, String, bool, Option<Vec<u8>>)> = sqlx::query_as(
+        let row: Option<NamespaceRow> = sqlx::query_as(
             &format!("SELECT {NAMESPACE_COLUMNS} FROM namespaces WHERE slug = ?1"),
         )
         .bind(slug.as_str())
@@ -163,7 +207,7 @@ impl NamespaceRepository for SqliteNamespaceRepository<'_> {
     }
 
     async fn list(&self) -> Result<Vec<Namespace>, StorageError> {
-        let rows: Vec<(Vec<u8>, String, String, String, bool, Option<Vec<u8>>)> = sqlx::query_as(
+        let rows: Vec<NamespaceRow> = sqlx::query_as(
             &format!("SELECT {NAMESPACE_COLUMNS} FROM namespaces ORDER BY created_at ASC, id ASC"),
         )
         .fetch_all(self.pool)

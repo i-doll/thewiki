@@ -6,6 +6,7 @@
 mod common_pg;
 
 use common_pg::{fresh_storage, make_namespace};
+use sqlx::Executor;
 use thewiki_core::NamespaceSlug;
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::NamespaceRepository;
@@ -42,6 +43,49 @@ async fn duplicate_namespace_slug_conflicts() {
     let b = make_namespace("main");
     let err = storage.namespaces().create(&b).await.expect_err("dup");
     assert!(matches!(err, StorageError::Conflict(_)), "got {err:?}");
+}
+
+/// Contrive a unique-index collision on `paired_namespace_id` partway
+/// through `create()` (#43, coderabbit). The subject row must NOT leak
+/// past the rollback when the back-pointer update fails.
+#[tokio::test]
+async fn create_rolls_back_subject_when_paired_update_fails() {
+    let Some((storage, fresh)) = fresh_storage().await else {
+        return;
+    };
+
+    // Seed `foo`; this auto-creates `Talk_foo` paired bidirectionally.
+    let foo = make_namespace("foo");
+    storage.namespaces().create(&foo).await.expect("seed foo");
+
+    // Rename the seeded `Talk_foo` to `Talk_bar` directly in SQL. The
+    // pair stays intact — `foo.paired_namespace_id` keeps pointing at
+    // the same id under a new slug. That id is now the forbidden
+    // duplicate for the partial UNIQUE index when we later try to make
+    // `bar` point at it too.
+    fresh.pool
+        .execute("UPDATE namespaces SET slug = 'Talk_bar' WHERE slug = 'Talk_foo'")
+        .await
+        .expect("rename Talk_foo to Talk_bar");
+
+    let bar = make_namespace("bar");
+    let err = storage
+        .namespaces()
+        .create(&bar)
+        .await
+        .expect_err("paired update should collide on UNIQUE(paired_namespace_id)");
+    assert!(
+        matches!(err, StorageError::Database(_) | StorageError::Conflict(_)),
+        "expected DB/Conflict error from UNIQUE violation, got {err:?}",
+    );
+
+    // The subject must NOT have leaked past the rollback.
+    let bar_slug = NamespaceSlug::new("bar").expect("slug");
+    let lookup = storage.namespaces().get_by_slug(&bar_slug).await;
+    assert!(
+        matches!(lookup, Err(StorageError::NotFound)),
+        "bar must not exist after rolled-back create, got {lookup:?}",
+    );
 }
 
 #[tokio::test]

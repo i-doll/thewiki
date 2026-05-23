@@ -1,6 +1,6 @@
 //! libsql [`NamespaceRepository`](crate::repo::NamespaceRepository) impl.
 
-use libsql::{Connection, Value, params};
+use libsql::{Connection, Transaction, Value, params};
 use thewiki_core::{Namespace, NamespaceId, NamespaceSlug};
 
 use crate::error::StorageError;
@@ -55,7 +55,10 @@ impl<'a> LibsqlNamespaceRepository<'a> {
         })
     }
 
-    async fn insert_row(&self, namespace: &Namespace) -> Result<(), StorageError> {
+    async fn insert_row_tx(
+        tx: &Transaction,
+        namespace: &Namespace,
+    ) -> Result<(), StorageError> {
         let now = format_ts(time::OffsetDateTime::now_utc())?;
         let id = uuid_bytes(namespace.id.into_uuid());
         let paired_value: Value = match namespace.paired_namespace_id {
@@ -63,8 +66,7 @@ impl<'a> LibsqlNamespaceRepository<'a> {
             None => Value::Null,
         };
 
-        let result = self
-            .conn
+        let result = tx
             .execute(
                 "INSERT INTO namespaces (id, slug, display_name, created_at, is_talk, paired_namespace_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
@@ -84,43 +86,102 @@ impl<'a> LibsqlNamespaceRepository<'a> {
         }
     }
 
-    async fn set_pair(&self, id: NamespaceId, paired_id: NamespaceId) -> Result<(), StorageError> {
+    async fn set_pair_tx(
+        tx: &Transaction,
+        id: NamespaceId,
+        paired_id: NamespaceId,
+    ) -> Result<(), StorageError> {
         let id_bytes = uuid_bytes(id.into_uuid());
         let paired_bytes = uuid_bytes(paired_id.into_uuid());
-        self.conn
-            .execute(
-                "UPDATE namespaces SET paired_namespace_id = ?1 WHERE id = ?2",
-                params![
-                    Value::Blob(paired_bytes.to_vec()),
-                    Value::Blob(id_bytes.to_vec()),
-                ],
-            )
-            .await
-            .map_err(db_error)?;
+        tx.execute(
+            "UPDATE namespaces SET paired_namespace_id = ?1 WHERE id = ?2",
+            params![
+                Value::Blob(paired_bytes.to_vec()),
+                Value::Blob(id_bytes.to_vec()),
+            ],
+        )
+        .await
+        .map_err(db_error)?;
         Ok(())
+    }
+
+    /// Lookup a namespace by slug inside the current transaction. Used by
+    /// `create()` so the "Talk_<slug> already exists" branch reads the
+    /// same view of the data the surrounding writes do.
+    async fn get_by_slug_tx(
+        tx: &Transaction,
+        slug: &NamespaceSlug,
+    ) -> Result<Namespace, StorageError> {
+        let mut rows = into_db(
+            tx.query(
+                &format!("SELECT {NAMESPACE_COLUMNS} FROM namespaces WHERE slug = ?1"),
+                params![slug.as_str().to_owned()],
+            )
+            .await,
+        )?;
+        let row = into_db(rows.next().await)?;
+        match row {
+            Some(row) => namespace_from_libsql_row(&row),
+            None => Err(StorageError::NotFound),
+        }
     }
 }
 
 impl NamespaceRepository for LibsqlNamespaceRepository<'_> {
     async fn create(&self, namespace: &Namespace) -> Result<(), StorageError> {
-        self.insert_row(namespace).await?;
+        // The subject insert, the paired talk insert, and the bidirectional
+        // `paired_namespace_id` updates all run inside a single transaction
+        // so a failure on any later step rolls back the whole pairing
+        // graph (#43, coderabbit). libsql's `Transaction` derefs to
+        // `Connection`, so the inner methods share the same query API.
+        let tx = into_db(self.conn.transaction().await)?;
+
+        if let Err(err) = Self::insert_row_tx(&tx, namespace).await {
+            let _ = tx.rollback().await;
+            return Err(err);
+        }
 
         if !namespace.is_talk && namespace.paired_namespace_id.is_none() {
-            let talk = Self::build_talk_pair(namespace)?;
-            match self.insert_row(&talk).await {
+            let talk = match Self::build_talk_pair(namespace) {
+                Ok(talk) => talk,
+                Err(err) => {
+                    let _ = tx.rollback().await;
+                    return Err(err);
+                }
+            };
+            match Self::insert_row_tx(&tx, &talk).await {
                 Ok(()) => {
-                    self.set_pair(namespace.id, talk.id).await?;
+                    if let Err(err) = Self::set_pair_tx(&tx, namespace.id, talk.id).await {
+                        let _ = tx.rollback().await;
+                        return Err(err);
+                    }
                 }
                 Err(StorageError::Conflict(_)) => {
-                    let existing = self.get_by_slug(&talk.slug).await?;
-                    if existing.paired_namespace_id.is_none() {
-                        self.set_pair(existing.id, namespace.id).await?;
+                    let existing = match Self::get_by_slug_tx(&tx, &talk.slug).await {
+                        Ok(ns) => ns,
+                        Err(err) => {
+                            let _ = tx.rollback().await;
+                            return Err(err);
+                        }
+                    };
+                    if existing.paired_namespace_id.is_none()
+                        && let Err(err) = Self::set_pair_tx(&tx, existing.id, namespace.id).await
+                    {
+                        let _ = tx.rollback().await;
+                        return Err(err);
                     }
-                    self.set_pair(namespace.id, existing.id).await?;
+                    if let Err(err) = Self::set_pair_tx(&tx, namespace.id, existing.id).await {
+                        let _ = tx.rollback().await;
+                        return Err(err);
+                    }
                 }
-                Err(e) => return Err(e),
+                Err(err) => {
+                    let _ = tx.rollback().await;
+                    return Err(err);
+                }
             }
         }
+        into_db(tx.commit().await)?;
         Ok(())
     }
 
