@@ -117,6 +117,11 @@ impl RecentChangesRepository for PostgresRecentChangesRepository<'_> {
         if actor_uuid.is_some() {
             next_param(&mut sql, "AND r.author_id =", &mut idx);
         }
+        if filter.public_only {
+            // Push the protection filter down so `LIMIT` is applied to public
+            // rows only. Mirrors the SQLite/libsql adapters.
+            sql.push_str(" AND p.protection_level IN ('none', 'semi_protected')");
+        }
         if cursor_pair.is_some() {
             // Row-value comparison resumes the descending scan strictly older
             // than the cursor.

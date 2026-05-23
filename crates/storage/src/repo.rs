@@ -508,6 +508,12 @@ pub struct RecentChangesFilter {
     pub namespace_id: Option<NamespaceId>,
     /// Only include revisions committed by this user.
     pub actor_id: Option<UserId>,
+    /// When `true`, restrict the result set to revisions of pages whose
+    /// `protection_level` is publicly viewable (`None` or `SemiProtected`).
+    /// Pushed down to SQL so the `LIMIT` is applied to public rows only —
+    /// otherwise an unprotected feed could under-fill when recent protected
+    /// edits dominate the head of the timeline. See #46.
+    pub public_only: bool,
 }
 
 /// Persistence operations for the wiki-wide recent-changes feed.
@@ -1315,6 +1321,10 @@ pub trait WatchRepository: Send + Sync {
     /// user already watches is a no-op and the existing `created_at` is
     /// preserved.
     ///
+    /// Returns `true` if a new row was inserted and `false` if the user was
+    /// already watching the page. The caller (e.g. the audit log emitter)
+    /// uses this to avoid recording spurious "added" events for retries.
+    ///
     /// # Errors
     ///
     /// * [`StorageError::Database`] if either foreign key doesn't resolve
@@ -1323,10 +1333,14 @@ pub trait WatchRepository: Send + Sync {
         &self,
         user_id: UserId,
         page_id: PageId,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
 
     /// Remove the `(user_id, page_id)` row. Idempotent — removing a row
     /// that isn't there is a no-op.
+    ///
+    /// Returns `true` if a row was actually removed and `false` if the user
+    /// wasn't watching the page in the first place. Same caller contract as
+    /// [`watch`](Self::watch).
     ///
     /// # Errors
     ///
@@ -1335,7 +1349,7 @@ pub trait WatchRepository: Send + Sync {
         &self,
         user_id: UserId,
         page_id: PageId,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
 
     /// Report whether `user_id` currently watches `page_id`.
     ///

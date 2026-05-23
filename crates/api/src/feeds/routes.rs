@@ -9,7 +9,8 @@ use axum::extract::{Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use std::str::FromStr;
-use thewiki_core::{NamespaceSlug, PageId, ProtectionLevel, RevisionId};
+use thewiki_core::{NamespaceSlug, PageId, RevisionId};
+use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
     NamespaceRepository, RecentChange, RecentChangesFilter, RecentChangesRepository,
     RevisionRepository, UserRepository, WatchRepository, WatchedPage,
@@ -35,10 +36,14 @@ use crate::state::{AppState, AppStorage};
 pub async fn recent_changes_atom<S: AppStorage>(
     State(state): State<AppState<S>>,
 ) -> Result<Response, ApiError> {
+    let filter = RecentChangesFilter {
+        public_only: true,
+        ..RecentChangesFilter::default()
+    };
     let slice = state
         .storage
         .recent_changes()
-        .list(RecentChangesFilter::default(), None, FEED_LIMIT)
+        .list(filter, None, FEED_LIMIT)
         .await?;
     Ok(render_recent_changes_feed(
         &slice.items,
@@ -75,6 +80,7 @@ pub async fn recent_changes_namespace_atom<S: AppStorage>(
     let ns = state.storage.namespaces().get_by_slug(&slug).await?;
     let filter = RecentChangesFilter {
         namespace_id: Some(ns.id),
+        public_only: true,
         ..RecentChangesFilter::default()
     };
     let slice = state
@@ -123,9 +129,14 @@ pub async fn watchlist_atom<S: AppStorage>(
     // username comes from a per-entry user lookup; the watchlist is bounded
     // at FEED_LIMIT, so N+1 here is at most 50 round-trips — fine for an
     // out-of-band feed read, and keeps the storage trait shape narrow.
+    //
+    // We also track the newest emitted timestamp so the feed-level
+    // `<updated>` matches the freshest entry, not just `watched.first()`
+    // (which is keyed on `watched_at`, not the page's revision time).
     let mut entries: Vec<Entry> = Vec::with_capacity(watched.len());
+    let mut latest_updated: Option<OffsetDateTime> = None;
     for page in &watched {
-        let entry = match state.storage.revisions().head_of(page.page_id).await {
+        let (entry, entry_updated) = match state.storage.revisions().head_of(page.page_id).await {
             Ok(rev) => {
                 let author_name = state
                     .storage
@@ -134,17 +145,26 @@ pub async fn watchlist_atom<S: AppStorage>(
                     .await
                     .map(|u| u.username.as_str().to_owned())
                     .unwrap_or_else(|_| rev.author_id.into_uuid().to_string());
-                watchlist_entry_from_revision(page, &rev, &author_name)
+                let created_at = rev.created_at;
+                (
+                    watchlist_entry_from_revision(page, &rev, &author_name),
+                    created_at,
+                )
             }
-            Err(_) => watchlist_entry_from_page(page),
+            // A page legitimately missing its head revision (defensive — pages
+            // are normally created with an initial revision) degrades to a
+            // page-level entry. Any other storage error is a real failure and
+            // must surface.
+            Err(StorageError::NotFound) => (watchlist_entry_from_page(page), page.updated_at),
+            Err(err) => return Err(err.into()),
         };
+        latest_updated = Some(latest_updated.map_or(entry_updated, |cur| cur.max(entry_updated)));
         entries.push(entry);
     }
 
-    let updated = watched
-        .first()
-        .map(|p| p.updated_at)
-        .unwrap_or_else(OffsetDateTime::now_utc);
+    // Empty feed: emit the UNIX epoch instead of `now_utc()` so an empty
+    // watchlist doesn't "look changed" to a reader on every poll.
+    let updated = latest_updated.unwrap_or(OffsetDateTime::UNIX_EPOCH);
 
     let feed = Feed {
         title: Text::plain(format!(
@@ -163,22 +183,25 @@ pub async fn watchlist_atom<S: AppStorage>(
 // ─── Renderers ───────────────────────────────────────────────────────────────
 
 /// Build the recent-changes Atom feed and wrap it in a 200 response.
+///
+/// Protection filtering happens at the SQL layer via
+/// [`RecentChangesFilter::public_only`]; the caller is expected to pass
+/// already-filtered rows. The renderer therefore takes the input verbatim.
 fn render_recent_changes_feed(
     items: &[RecentChange],
     title: &str,
     self_href: &str,
     feed_id: &str,
 ) -> Response {
-    let public_items: Vec<&RecentChange> = items.iter().filter(|rc| is_public(rc)).collect();
-    let updated = public_items
+    // RFC 4287 wants a stable `<updated>` across publishes. When the feed is
+    // empty we fall back to the UNIX epoch so a fresh poll of an empty feed
+    // doesn't "look changed" to a reader — `now_utc()` would do exactly that.
+    let updated = items
         .first()
         .map(|rc| rc.created_at)
-        .unwrap_or_else(OffsetDateTime::now_utc);
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH);
 
-    let entries = public_items
-        .iter()
-        .map(|rc| recent_change_entry(rc))
-        .collect();
+    let entries = items.iter().map(recent_change_entry).collect();
 
     let feed = Feed {
         title: Text::plain(title.to_owned()),
@@ -190,19 +213,6 @@ fn render_recent_changes_feed(
     };
 
     finalise_feed(feed)
-}
-
-/// Predicate: should a `RecentChange` row be exposed on the public feeds?
-///
-/// Pages at `None` or `SemiProtected` are publicly viewable; anything
-/// stronger is treated as restricted for syndication purposes even though
-/// the protection model is edit-side today. This is the conservative
-/// reading of "feeds respect protection".
-fn is_public(rc: &RecentChange) -> bool {
-    matches!(
-        rc.protection_level,
-        ProtectionLevel::None | ProtectionLevel::SemiProtected
-    )
 }
 
 /// Build one `<entry>` for the recent-changes feeds.

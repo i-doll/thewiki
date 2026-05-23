@@ -62,6 +62,11 @@ impl RecentChangesRepository for LibsqlRecentChangesRepository<'_> {
         if actor_bytes.is_some() {
             sql.push_str(" AND r.author_id = ?");
         }
+        if filter.public_only {
+            // See SQLite sibling for rationale: push the protection filter down
+            // so `LIMIT` counts public rows only.
+            sql.push_str(" AND p.protection_level IN ('none', 'semi_protected')");
+        }
         if cursor_pair.is_some() {
             sql.push_str(" AND (r.created_at, r.id) < (?, ?)");
         }

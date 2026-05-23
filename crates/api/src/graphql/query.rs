@@ -249,6 +249,9 @@ impl<S: AppStorage> Query<S> {
                     since,
                     namespace_id,
                     actor_id,
+                    // GraphQL mirrors the JSON endpoint shape — caller is
+                    // expected to filter on the client side if needed.
+                    public_only: false,
                 },
                 cursor.map(Cursor),
                 limit,

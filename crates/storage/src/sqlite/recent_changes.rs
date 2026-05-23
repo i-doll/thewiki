@@ -114,6 +114,14 @@ impl RecentChangesRepository for SqliteRecentChangesRepository<'_> {
         if actor_bytes.is_some() {
             sql.push_str(" AND r.author_id = ?");
         }
+        if filter.public_only {
+            // Push the protection filter down so `LIMIT` is applied to public
+            // rows only. Without this, a public feed could be under-filled if
+            // recent protected edits dominate the head of the timeline.
+            // The canonical "publicly viewable" set is `none` + `semi_protected`
+            // (anything stronger is treated as restricted for syndication).
+            sql.push_str(" AND p.protection_level IN ('none', 'semi_protected')");
+        }
         if cursor_pair.is_some() {
             // Newest-first means "strictly older" than the cursor. Row-value
             // comparison evaluates element-by-element by column affinity; the
