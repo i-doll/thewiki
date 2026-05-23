@@ -74,9 +74,12 @@ pub struct UpdatePageRequest {
 /// clients that ignore the `_links` block are unaffected.
 #[derive(Debug, Clone, Default, Serialize, ToSchema)]
 pub struct PageLinks {
-    /// URL of the discussion ("talk") page for this page, when the
-    /// namespace is paired with a `Talk_*` companion. `None` for pages
-    /// already in a talk namespace (no "talk of a talk").
+    /// Navigable SPA-route URL of the discussion ("talk") page paired
+    /// with this page, in the form `/wiki/<talk_ns>/<slug>`. The server
+    /// is the source of truth so the client never has to reconstruct
+    /// `Talk_<ns>` itself — that convention can drift after a rename.
+    /// `None` for pages already in a talk namespace (no "talk of a
+    /// talk") or when the namespace has no paired partner.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub talk: Option<String>,
 }

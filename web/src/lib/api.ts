@@ -59,8 +59,11 @@ export interface CategoryView {
  */
 export interface PageLinks {
 	/**
-	 * URL of the page's discussion / talk endpoint (`GET .../talk`).
-	 * `null` when the page already lives in a talk namespace.
+	 * Navigable SPA-route URL of the page's discussion / talk page. The
+	 * server is the source of truth so the client never has to
+	 * reconstruct `Talk_<ns>` itself — that convention can drift after a
+	 * rename. `null` when the page already lives in a talk namespace
+	 * (no "talk of a talk").
 	 */
 	talk?: string | null;
 }

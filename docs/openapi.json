@@ -5819,7 +5819,7 @@
               "string",
               "null"
             ],
-            "description": "URL of the discussion (\"talk\") page for this page, when the\nnamespace is paired with a `Talk_*` companion. `None` for pages\nalready in a talk namespace (no \"talk of a talk\")."
+            "description": "Navigable SPA-route URL of the discussion (\"talk\") page paired\nwith this page, in the form `/wiki/<talk_ns>/<slug>`. The server\nis the source of truth so the client never has to reconstruct\n`Talk_<ns>` itself — that convention can drift after a rename.\n`None` for pages already in a talk namespace (no \"talk of a\ntalk\") or when the namespace has no paired partner."
           }
         }
       },

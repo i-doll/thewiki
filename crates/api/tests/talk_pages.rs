@@ -261,7 +261,11 @@ async fn page_read_response_includes_talk_link_for_subject_pages() {
     let (status, body) = json_request(router, "GET", "/api/v1/wiki/Main/foo", None, None).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["is_talk"], false);
-    assert_eq!(body["_links"]["talk"], "/api/v1/wiki/Main/foo/talk");
+    // `_links.talk` ships the navigable SPA route — the actual paired
+    // talk namespace slug, not the literal `Talk_<ns>` convention. The
+    // server is the source of truth so a renamed talk namespace stays
+    // navigable.
+    assert_eq!(body["_links"]["talk"], "/wiki/Talk_Main/foo");
     assert_eq!(body["signature_convention"]["marker"], "~~~~");
 }
 

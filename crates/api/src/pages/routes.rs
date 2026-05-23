@@ -280,21 +280,26 @@ pub(crate) async fn hydrate_page_view<S: AppStorage>(
         .namespaces()
         .get_by_id(page.namespace_id)
         .await?;
-    // Build the talk URL: for a subject namespace we point at the
-    // discussion-resolver endpoint, which 404s if the talk page hasn't
-    // been created yet. The SPA inspects 404 vs 200 to decide between
-    // "Create the talk page" and "Open existing discussion". For
-    // talk-namespace pages we leave `_links.talk` empty — no "talk of a
-    // talk".
-    let links = if namespace.is_talk || namespace.paired_namespace_id.is_none() {
-        PageLinks::default()
-    } else {
-        PageLinks {
-            talk: Some(format!(
-                "/api/v1/wiki/{}/{}/talk",
-                namespace_slug, page.slug
-            )),
+    // Build the talk URL: the navigable SPA route at the page's paired
+    // talk namespace (#43, coderabbit). Looking up the paired namespace
+    // by id is required because the talk slug is **not** guaranteed to
+    // be `Talk_<subject>` — the convention holds for the seeded `Main`
+    // partner but operators can rename namespaces independently. The
+    // server is the source of truth; clients that construct
+    // `Talk_<ns>` would mis-route after a rename. For talk-namespace
+    // pages we leave `_links.talk` empty — no "talk of a talk".
+    let links = match namespace.paired_namespace_id {
+        Some(paired_id) if !namespace.is_talk => {
+            let paired_ns = state.storage.namespaces().get_by_id(paired_id).await?;
+            PageLinks {
+                talk: Some(format!(
+                    "/wiki/{}/{}",
+                    paired_ns.slug.as_str(),
+                    page.slug,
+                )),
+            }
         }
+        _ => PageLinks::default(),
     };
     Ok(PageView {
         id: page.id,

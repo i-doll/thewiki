@@ -225,17 +225,19 @@ function PageViewComponent() {
 						</Link>
 					</div>
 					{page.is_talk !== true && page._links?.talk != null && (
-						// "Discuss" / talk sidebar link (#43). Always points at the
-						// subject page's paired talk page; the talk-namespace
-						// SPA route renders the thread view automatically.
+						// "Discuss" / talk sidebar link (#43). The server ships the
+						// canonical SPA-route URL on `_links.talk` so we don't have
+						// to reconstruct `Talk_<ns>` client-side; that convention
+						// holds for the seeded `Main` partner but not after a
+						// rename. The talk-namespace SPA route renders the thread
+						// view automatically.
 						<div>
-							<Link
-								to="/wiki/$namespace/$slug"
-								params={{ namespace: `Talk_${namespace}`, slug: page.slug }}
+							<a
+								href={page._links.talk}
 								className="inline-flex items-center gap-1 rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
 							>
 								Discuss
-							</Link>
+							</a>
 						</div>
 					)}
 					{canManageProtection && (
