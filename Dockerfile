@@ -9,16 +9,15 @@
 # manager in the final image.
 #
 # Two builder stages run natively on the *build* host (`$BUILDPLATFORM`):
-#   1. `rust-build`  — cross-compiles the workspace for `$TARGETPLATFORM`
-#                      using cargo-chef for dependency caching.
-#   2. `web-build`   — builds the React frontend with pnpm.
+#   1. `web-build`   — builds the React frontend with pnpm.
+#   2. `rust-build`  — cross-compiles the workspace for `$TARGETPLATFORM`
+#                      using cargo-chef for dependency caching, with
+#                      `web/dist/` copied in from `web-build` so `rust-embed`
+#                      bakes the real SPA bundle into the binary.
 #
-# The Rust binary does not yet embed `web/dist/` (that lands in #16 via
-# `rust-embed`). We still produce the frontend bundle here and copy it into
-# the final image so the moment #16 merges, deploys pick up the static assets
-# without a Dockerfile churn. Until then, `web/dist/` is dead weight at
-# `/srv/web/dist/` inside the image — kilobytes, not megabytes, and it keeps
-# release infrastructure stable across the embed switch.
+# The SPA bundle is embedded directly into the Rust binary via `rust-embed`
+# (#16), so the runtime image carries no separate `/srv/web/dist/` copy —
+# everything the binary serves lives in the binary itself.
 #
 # Healthcheck: there's intentionally no `HEALTHCHECK` instruction here.
 # Distroless ships no `wget`/`curl`/`sh`, and the `thewiki` binary does not
@@ -114,6 +113,18 @@ RUN RUST_TARGET="$(cat /tmp/rust_target)"; \
 # Now bring in the real source and build the binary. This is the only layer
 # that rebuilds on source changes.
 COPY . .
+
+# `rust-embed` reads `crates/api/../../web/dist` at compile time and bakes
+# every file into the binary (see `crates/api/src/static_assets.rs`). The
+# `web/dist/` directory is *not* in the build context (.dockerignore excludes
+# it as a build artefact), so we splice in the bundle produced by the
+# `web-build` stage right before `cargo build`. Without this COPY, the
+# fallback in `crates/api/build.rs` would write a placeholder `index.html`
+# and the binary would embed that instead of the real SPA — exactly the
+# "thewiki API is running, but the SPA bundle has not been built" page
+# operators were seeing in production.
+COPY --from=web-build /web/dist ./web/dist
+
 RUN set -eux; \
     RUST_TARGET="$(cat /tmp/rust_target)"; \
     cargo build --release --target "$RUST_TARGET" -p thewiki-api; \
@@ -166,9 +177,10 @@ LABEL org.opencontainers.image.title="thewiki" \
       org.opencontainers.image.authors="thewiki contributors"
 
 # Default install layout:
-#   /usr/local/bin/thewiki   — the server binary
-#   /srv/web/dist/           — built frontend (consumed by #16 once embedding
-#                              lands; ignored by the binary until then).
+#   /usr/local/bin/thewiki   — the server binary, with the SPA bundle
+#                              embedded via `rust-embed` (#16). No separate
+#                              `/srv/web/dist/` is needed; the binary serves
+#                              every asset out of its own `.rodata`.
 #   /data/                   — the writable data root. Operators are expected
 #                              to bind-mount or named-volume mount this path
 #                              (`docker run -v thewiki-data:/data ...`); the
@@ -176,7 +188,6 @@ LABEL org.opencontainers.image.title="thewiki" \
 #                              `thewiki.db` and `search/` relative to it via
 #                              the runtime stage's `WORKDIR`.
 COPY --from=rust-build /out/thewiki /usr/local/bin/thewiki
-COPY --from=web-build  /web/dist    /srv/web/dist
 
 # Materialize `/data/` owned by uid:gid 65532 (distroless `nonroot`) so the
 # binary can write to it without an operator having to chown the volume.
