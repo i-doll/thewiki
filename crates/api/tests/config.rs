@@ -53,6 +53,8 @@ fn defaults_match_documented_values() {
     assert_eq!(cfg.audit_log.retention_days, 365);
     assert_eq!(cfg.telemetry.log_format, LogFormat::Json);
     assert!(matches!(cfg.storage.backend, StorageBackend::Db));
+    // Template engine (#45): default depth cap mirrors ADR-0002.
+    assert_eq!(cfg.render.template.max_recursion_depth, 20);
 
     cfg.validate().expect("defaults validate");
 }
@@ -313,6 +315,19 @@ url = "redis://127.0.0.1:6379/0"
         }
         Ok(())
     });
+}
+
+#[test]
+fn validate_rejects_zero_template_max_recursion_depth() {
+    // Pins the explicit `> 0` guard in `Config::validate()` so silently
+    // accepting `0` (which would disable template expansion entirely)
+    // cannot regress. ADR-0002 §7 expects a positive depth.
+    let mut cfg = Config::defaults();
+    cfg.render.template.max_recursion_depth = 0;
+    let err = cfg
+        .validate()
+        .expect_err("zero template depth must be rejected");
+    assert!(matches!(err, ConfigError::Invalid(_)));
 }
 
 #[test]

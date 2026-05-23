@@ -109,6 +109,15 @@ fn build() -> Builder<'static> {
     tag_attributes.insert("code", ["class"].into_iter().collect());
     tag_attributes.insert("td", ["align"].into_iter().collect());
     tag_attributes.insert("th", ["align"].into_iter().collect());
+    // Inline template-error spans (#45) carry `class="template-error"` plus
+    // `data-line` / `data-col` pinning the diagnostic back at the source.
+    // Letting these through keeps the editor able to surface the error
+    // location after sanitisation. No other attributes are allowed on
+    // `<span>` — authors writing raw HTML still get stripped.
+    tag_attributes.insert(
+        "span",
+        ["class", "data-line", "data-col"].into_iter().collect(),
+    );
     // `pulldown-cmark` emits `<input type="checkbox" disabled checked?>` for
     // GFM task lists. Letting these specific attributes through preserves
     // rendered checkboxes; the `disabled` flag means they remain inert.

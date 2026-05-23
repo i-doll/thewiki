@@ -26,6 +26,8 @@
 //!
 //! [ADR-0001]: ../../../docs/adr/0001-markdown-renderer.md
 
+use std::sync::Arc;
+
 use pulldown_cmark::{CowStr, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd, html};
 use thewiki_core::ContentFormat;
 use thewiki_core::render::{
@@ -34,6 +36,9 @@ use thewiki_core::render::{
 
 use crate::sanitise;
 use crate::slug::SlugAllocator;
+use crate::template::{
+    self, DEFAULT_MAX_RECURSION_DEPTH, NoopResolver, TemplateResolver,
+};
 
 /// Default namespace label used when [`RenderContext::namespace_slug`] is
 /// unset. Tests and the renderer-only call sites get the same default the API
@@ -42,17 +47,65 @@ const DEFAULT_NAMESPACE_LABEL: &str = "Main";
 
 /// Markdown renderer backed by [`pulldown_cmark`].
 ///
-/// Stateless and cheap to clone; safe to share across threads.
-#[derive(Debug, Clone, Default)]
+/// Carries an optional [`TemplateResolver`] used by the transclusion pre-pass
+/// (#45) and a configurable depth cap. Cheap to clone — the resolver lives
+/// behind an `Arc`.
+#[derive(Clone)]
 pub struct MarkdownRenderer {
-    _priv: (),
+    template_resolver: Arc<dyn TemplateResolver>,
+    max_recursion_depth: usize,
+}
+
+impl Default for MarkdownRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for MarkdownRenderer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MarkdownRenderer")
+            .field("max_recursion_depth", &self.max_recursion_depth)
+            .finish_non_exhaustive()
+    }
 }
 
 impl MarkdownRenderer {
-    /// Construct a new renderer.
+    /// Construct a renderer with no template resolver attached. Bare
+    /// `{{Foo}}` calls render as `[template error: ... not found]` inline
+    /// blocks, which is the right behaviour for tests and renderer-only
+    /// callers.
     #[must_use]
-    pub const fn new() -> Self {
-        Self { _priv: () }
+    pub fn new() -> Self {
+        Self {
+            template_resolver: Arc::new(NoopResolver),
+            max_recursion_depth: DEFAULT_MAX_RECURSION_DEPTH,
+        }
+    }
+
+    /// Attach a [`TemplateResolver`]. The API layer wires one backed by the
+    /// page store so transclusions resolve to real templates.
+    #[must_use]
+    pub fn with_template_resolver(mut self, resolver: Arc<dyn TemplateResolver>) -> Self {
+        self.template_resolver = resolver;
+        self
+    }
+
+    /// Override the recursion depth cap. The default is
+    /// [`DEFAULT_MAX_RECURSION_DEPTH`]; operators tune this via
+    /// `[render.template] max_recursion_depth`.
+    #[must_use]
+    pub fn with_max_recursion_depth(mut self, depth: usize) -> Self {
+        self.max_recursion_depth = depth;
+        self
+    }
+
+    /// Current recursion depth cap. Used by the API layer to bound its
+    /// eager template pre-fetch walk to the same budget the renderer will
+    /// enforce.
+    #[must_use]
+    pub fn max_recursion_depth(&self) -> usize {
+        self.max_recursion_depth
     }
 
     fn options() -> Options {
@@ -74,6 +127,23 @@ impl Renderer for MarkdownRenderer {
         if source.trim().is_empty() {
             return Err(RenderError::EmptyInput);
         }
+
+        // ---- Template pre-pass (#45). Expands every `{{Name|...}}` into
+        // its substituted body before pulldown-cmark sees the source. The
+        // pre-pass is whole-source whether or not a resolver is attached;
+        // with the noop resolver the only effect is that calls in the
+        // source become inline `[template error: ... not found]` blocks.
+        // Cheap no-op when no `{{` appears in the source.
+        let expanded = if source.contains("{{") {
+            template::expand(
+                source,
+                self.template_resolver.as_ref(),
+                self.max_recursion_depth,
+            )
+        } else {
+            source.to_string()
+        };
+        let source = expanded.as_str();
 
         let parser = Parser::new_ext(source, Self::options());
 

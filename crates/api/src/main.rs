@@ -86,6 +86,19 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         "default namespace ready",
     );
 
+    // Seed the `Template` namespace (#45). Templates are wiki pages in this
+    // namespace; the transclusion pre-pass expects to find it on boot.
+    let template_ns = storage
+        .namespaces()
+        .get_or_create_template_namespace()
+        .await
+        .context("seeding template namespace")?;
+    tracing::info!(
+        slug = %template_ns.slug.as_str(),
+        id = %template_ns.id.into_uuid(),
+        "template namespace ready",
+    );
+
     if config.audit_log.enabled {
         let pruned = prune_expired_audit_log(&storage, config.audit_log.retention_days)
             .await
@@ -166,7 +179,8 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         .with_search(indexer_handle)
         .with_searcher(searcher)
         .with_search_title_boost(config.search.title_boost)
-        .with_captcha(config.captcha.clone(), Arc::clone(&captcha_provider));
+        .with_captcha(config.captcha.clone(), Arc::clone(&captcha_provider))
+        .with_render_config(config.render.clone());
     let media_backend = thewiki_api::media::build_media_backend(
         &config.storage.backend,
         std::sync::Arc::clone(&app_state.storage),

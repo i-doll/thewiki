@@ -13,6 +13,9 @@ use crate::repo::NamespaceRepository;
 /// Slug used for the implicit default namespace seeded at boot (#28).
 const DEFAULT_NAMESPACE_SLUG: &str = "Main";
 
+/// Slug used for the implicit template namespace seeded at boot (#45).
+const TEMPLATE_NAMESPACE_SLUG: &str = "Template";
+
 /// libsql-backed namespace repository.
 pub struct LibsqlNamespaceRepository<'a> {
     conn: &'a Connection,
@@ -140,8 +143,21 @@ impl NamespaceRepository for LibsqlNamespaceRepository<'_> {
     }
 
     async fn get_or_create_default(&self) -> Result<Namespace, StorageError> {
-        let slug = NamespaceSlug::new(DEFAULT_NAMESPACE_SLUG).map_err(|e| {
-            StorageError::InvalidInput(format!("default namespace slug is invalid: {e}"))
+        self.get_or_create_by_slug(DEFAULT_NAMESPACE_SLUG).await
+    }
+
+    async fn get_or_create_template_namespace(&self) -> Result<Namespace, StorageError> {
+        self.get_or_create_by_slug(TEMPLATE_NAMESPACE_SLUG).await
+    }
+}
+
+impl LibsqlNamespaceRepository<'_> {
+    /// Shared implementation of the idempotent "seed by slug" path used by
+    /// [`get_or_create_default`](Self::get_or_create_default) and
+    /// [`get_or_create_template_namespace`](Self::get_or_create_template_namespace).
+    async fn get_or_create_by_slug(&self, slug_str: &str) -> Result<Namespace, StorageError> {
+        let slug = NamespaceSlug::new(slug_str).map_err(|e| {
+            StorageError::InvalidInput(format!("namespace slug {slug_str:?} is invalid: {e}"))
         })?;
         match self.get_by_slug(&slug).await {
             Ok(ns) => Ok(ns),
@@ -149,7 +165,7 @@ impl NamespaceRepository for LibsqlNamespaceRepository<'_> {
                 let ns = Namespace {
                     id: NamespaceId::new(),
                     slug,
-                    display_name: DEFAULT_NAMESPACE_SLUG.to_owned(),
+                    display_name: slug_str.to_owned(),
                 };
                 match self.create(&ns).await {
                     Ok(()) => Ok(ns),

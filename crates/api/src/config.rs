@@ -58,6 +58,48 @@ pub struct Config {
     /// Security policy: X-Forwarded-For trust and blocklist plumbing (#42).
     #[serde(default)]
     pub security: SecurityConfig,
+    /// Renderer tuning (#45 templates, future Markdown knobs).
+    #[serde(default)]
+    pub render: RenderConfig,
+}
+
+/// Renderer tuning. Today exposes only the template subsection (#45); other
+/// renderer knobs (Markdown options, smart-punctuation overrides, ...) plug
+/// in here as they ship.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenderConfig {
+    /// Template transclusion engine (#45).
+    #[serde(default)]
+    pub template: TemplateConfig,
+}
+
+/// Template transclusion (#45). The depth cap defends against pathological
+/// templates that expand without bound — both deeply nested chains and
+/// recursive self-references. Cycle detection is independent and fires
+/// before the depth counter (see ADR-0002).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateConfig {
+    /// Hard cap on transclusion depth. Defaults to 20 (per ADR-0002).
+    ///
+    /// Exceeding this cap emits a `[template error: recursion limit
+    /// exceeded]` inline diagnostic at the originating call site.
+    #[serde(default = "default_max_recursion_depth")]
+    pub max_recursion_depth: u32,
+}
+
+/// `serde` default for [`TemplateConfig::max_recursion_depth`].
+fn default_max_recursion_depth() -> u32 {
+    20
+}
+
+impl Default for TemplateConfig {
+    fn default() -> Self {
+        Self {
+            max_recursion_depth: default_max_recursion_depth(),
+        }
+    }
 }
 
 /// CAPTCHA provider configuration (#41).
@@ -750,6 +792,7 @@ impl Config {
             graphql: GraphQLConfig::default(),
             captcha: CaptchaConfig::default(),
             security: SecurityConfig::default(),
+            render: RenderConfig::default(),
         }
     }
 
@@ -950,6 +993,12 @@ impl Config {
                     "security.trusted_proxies: {cidr:?} is not a valid CIDR"
                 )));
             }
+        }
+
+        if self.render.template.max_recursion_depth == 0 {
+            return Err(ConfigError::Invalid(
+                "render.template.max_recursion_depth must be > 0".to_string(),
+            ));
         }
 
         Ok(())

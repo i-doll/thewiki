@@ -207,7 +207,9 @@ pub(crate) async fn hydrate_page_view<S: AppStorage>(
     let content_html = if content.trim().is_empty() {
         String::new()
     } else {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::new().with_max_recursion_depth(
+            state.render_config.template.max_recursion_depth as usize,
+        );
         page_render::render_markdown(
             state.storage.as_ref(),
             &renderer,

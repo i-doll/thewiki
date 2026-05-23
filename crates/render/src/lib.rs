@@ -41,10 +41,15 @@
 pub mod markdown;
 mod sanitise;
 mod slug;
+pub mod template;
 
 use thewiki_core::render::RendererRegistry;
 
 pub use markdown::MarkdownRenderer;
+pub use template::{
+    DEFAULT_MAX_RECURSION_DEPTH, NoopResolver, TEMPLATE_ERROR_CLASS, TEMPLATE_NAMESPACE,
+    TemplateResolver, TemplateSource,
+};
 
 /// Build a [`RendererRegistry`] containing every concrete renderer this
 /// crate ships.
