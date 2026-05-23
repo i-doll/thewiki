@@ -317,6 +317,19 @@ pub trait NamespaceRepository: Send + Sync {
     /// [`StorageError::Database`].
     fn get_or_create_default(&self)
     -> impl Future<Output = Result<Namespace, StorageError>> + Send;
+
+    /// Ensure the `Template` namespace exists. Same idempotent semantics as
+    /// [`get_or_create_default`]; the slug is fixed because template
+    /// transclusion syntax (#45, ADR-0002) hard-codes `Template:` as the
+    /// implicit namespace for bare `{{Foo}}` calls.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures as
+    /// [`StorageError::Database`].
+    fn get_or_create_template_namespace(
+        &self,
+    ) -> impl Future<Output = Result<Namespace, StorageError>> + Send;
 }
 
 /// Persistence operations for the [`Role`] aggregate.

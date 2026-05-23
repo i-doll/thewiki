@@ -53,6 +53,8 @@ fn defaults_match_documented_values() {
     assert_eq!(cfg.audit_log.retention_days, 365);
     assert_eq!(cfg.telemetry.log_format, LogFormat::Json);
     assert!(matches!(cfg.storage.backend, StorageBackend::Db));
+    // Template engine (#45): default depth cap mirrors ADR-0002.
+    assert_eq!(cfg.render.template.max_recursion_depth, 20);
 
     cfg.validate().expect("defaults validate");
 }

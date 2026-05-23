@@ -345,6 +345,24 @@ apply_to_registration = true
 apply_to_anonymous_edits = false
 
 # ---------------------------------------------------------------------------
+# Renderer tuning (#45).
+#
+# Today this exposes the template transclusion engine. The depth cap defends
+# against pathological templates that expand without bound (deep chains and
+# self-references). Cycle detection runs independently and fires before the
+# depth counter — a tight `A -> A` self-reference is caught at depth 2, not
+# at the limit. See ADR-0002 for the surface syntax and `#45` for the
+# implementation walkthrough.
+# ---------------------------------------------------------------------------
+[render.template]
+# Hard cap on transclusion depth. Exceeding it emits an inline
+# `[template error: recursion limit exceeded (...)]` block pinned to the
+# originating call site (with line/column).
+#
+# Must be > 0. Default: 20.
+max_recursion_depth = 20
+
+# ---------------------------------------------------------------------------
 # Observability.
 # ---------------------------------------------------------------------------
 [telemetry]

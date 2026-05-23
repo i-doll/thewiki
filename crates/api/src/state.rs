@@ -275,6 +275,9 @@ pub struct AppState<S: AppStorage> {
     /// Tuning for the media upload endpoint (size cap, type allowlist).
     /// Pulled from [`crate::config::StorageConfig::media`].
     pub media_config: crate::config::MediaConfig,
+    /// Renderer tuning — currently the template transclusion depth cap
+    /// (#45). Pulled from [`crate::config::RenderConfig`].
+    pub render_config: crate::config::RenderConfig,
     /// Blob backend for the media endpoints (#32). `None` in tests / app
     /// roots that don't wire media routes; otherwise an `Arc<dyn …>`
     /// because [`MediaBackend`] is dyn-compatible.
@@ -314,7 +317,16 @@ impl<S: AppStorage> AppState<S> {
             captcha: Arc::new(NoopCaptcha),
             captcha_config: CaptchaConfig::default(),
             blocklist: None,
+            render_config: crate::config::RenderConfig::default(),
         }
+    }
+
+    /// Override the renderer configuration (template depth cap, etc.). The
+    /// binary wires this from `[render]` in the operator's TOML.
+    #[must_use]
+    pub fn with_render_config(mut self, render: crate::config::RenderConfig) -> Self {
+        self.render_config = render;
+        self
     }
 
     /// Replace the [`IndexerHandle`]. Production code calls this with a
@@ -419,6 +431,7 @@ impl<S: AppStorage> Clone for AppState<S> {
             captcha: Arc::clone(&self.captcha),
             captcha_config: self.captcha_config.clone(),
             blocklist: self.blocklist.clone(),
+            render_config: self.render_config.clone(),
         }
     }
 }
