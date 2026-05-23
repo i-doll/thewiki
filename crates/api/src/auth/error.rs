@@ -86,6 +86,14 @@ pub enum AuthError {
     /// empty password). Renders as `400`.
     #[error("invalid input: {0}")]
     InvalidInput(String),
+
+    /// The chosen username collides with an existing account. Distinct
+    /// from `InvalidInput` so the wire contract matches the documented
+    /// `409` response — the SPA can branch on the stable
+    /// `"username_taken"` code to surface a targeted message without
+    /// parsing the human-readable string.
+    #[error("username already taken")]
+    UsernameTaken,
 }
 
 impl From<CaptchaError> for AuthError {
@@ -114,6 +122,7 @@ impl AuthError {
             }
             Self::Forbidden | Self::CsrfFailed | Self::RegistrationClosed => StatusCode::FORBIDDEN,
             Self::CaptchaFailed(_) | Self::InvalidInput(_) => StatusCode::BAD_REQUEST,
+            Self::UsernameTaken => StatusCode::CONFLICT,
             Self::CaptchaUpstream(_) => StatusCode::BAD_GATEWAY,
             Self::HashFailure(_) | Self::Storage(_) | Self::CaptchaMisconfigured(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -137,6 +146,7 @@ impl AuthError {
             Self::CaptchaMisconfigured(_) => "captcha_misconfigured",
             Self::RegistrationClosed => "registration_closed",
             Self::InvalidInput(_) => "invalid_input",
+            Self::UsernameTaken => "username_taken",
             Self::HashFailure(_) | Self::Storage(_) => "internal_error",
         }
     }

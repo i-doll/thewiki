@@ -98,6 +98,12 @@ function RegisterComponent() {
 			if (err instanceof ApiError) {
 				if (err.status === 403) {
 					toast.error("Registration is disabled on this wiki");
+				} else if (err.status === 409) {
+					// Stable `"username_taken"` wire code (#41); we
+					// surface a targeted message rather than the raw
+					// server string so the UX matches the field that
+					// needs editing.
+					toast.error("That username is already taken — pick another");
 				} else if (err.status === 400) {
 					toast.error(`Could not create account: ${err.message}`);
 				} else if (err.status === 502) {

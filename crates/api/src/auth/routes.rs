@@ -509,12 +509,12 @@ pub async fn register(
         .await
     {
         Ok(()) => {}
-        Err(StorageError::Conflict(msg)) => {
-            // Username collision. The auth error enum doesn't carry a
-            // dedicated 409 variant — we surface it as `InvalidInput`
-            // with a clean message so the SPA can show "that name's
-            // taken" without leaking storage internals.
-            return Err(AuthError::InvalidInput(format!("username taken: {msg}")));
+        Err(StorageError::Conflict(_)) => {
+            // Username collision. Surfaces as `409 username_taken` so the
+            // SPA can branch on the stable wire code without parsing the
+            // human-readable message — and so the documented OpenAPI
+            // response matches runtime behaviour.
+            return Err(AuthError::UsernameTaken);
         }
         Err(e) => return Err(AuthError::Storage(e)),
     }
