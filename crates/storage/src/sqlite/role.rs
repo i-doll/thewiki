@@ -129,4 +129,63 @@ impl RoleRepository for SqliteRoleRepository<'_> {
 
         rows.into_iter().map(row_to_role).collect()
     }
+
+    async fn update(&self, role: &Role) -> Result<(), StorageError> {
+        let id = uuid_bytes(role.id.into_uuid());
+        let permissions = permissions_to_i64(role.permissions);
+        let result = sqlx::query(
+            "UPDATE roles SET display_name = ?1, permissions = ?2 WHERE id = ?3",
+        )
+        .bind(&role.display_name)
+        .bind(permissions)
+        .bind(id.as_slice())
+        .execute(self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            Err(StorageError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn delete(&self, id: RoleId) -> Result<(), StorageError> {
+        // The `user_roles.role_id` FK is `ON DELETE CASCADE` in the
+        // schema, so deleting a role with assignments would silently
+        // detach all users from it. That's a footgun, so we refuse here
+        // when `count_users > 0`. The API layer additionally surfaces a
+        // 409 with an operator-friendly message, but the safety net
+        // lives in the repo so any other caller is guarded too.
+        let assigned = self.count_users(id).await?;
+        if assigned > 0 {
+            return Err(StorageError::conflict(
+                "role is still assigned to one or more users",
+            ));
+        }
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let out = sqlx::query("DELETE FROM roles WHERE id = ?1")
+            .bind(id_bytes.as_slice())
+            .execute(self.pool)
+            .await?;
+        if out.rows_affected() == 0 {
+            Err(StorageError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn count_users(&self, id: RoleId) -> Result<u64, StorageError> {
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let row: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM user_roles WHERE role_id = ?1")
+                .bind(id_bytes.as_slice())
+                .fetch_one(self.pool)
+                .await?;
+        // Counts are non-negative by construction.
+        #[allow(
+            clippy::cast_sign_loss,
+            reason = "COUNT(*) is non-negative; representation in sqlite is i64"
+        )]
+        let count = if row.0 < 0 { 0 } else { row.0 as u64 };
+        Ok(count)
+    }
 }

@@ -201,10 +201,7 @@ export async function fetchPage(slug: string, namespace?: string): Promise<PageV
  * on a 404 so the UI can show a "Create the talk page" affordance without
  * a try/catch dance; other failures bubble up as [`ApiError`].
  */
-export async function fetchTalkPage(
-	slug: string,
-	namespace?: string,
-): Promise<PageView | null> {
+export async function fetchTalkPage(slug: string, namespace?: string): Promise<PageView | null> {
 	const ns = encodeURIComponent(resolveNamespace(namespace));
 	const url = `/api/v1/wiki/${ns}/${encodeURIComponent(slug)}/talk`;
 	const res = await fetch(url, { method: "GET" });
@@ -777,17 +774,12 @@ export async function listPendingRevisions(options?: {
 		params.set("limit", String(options.limit));
 	}
 	const query = params.toString();
-	const url =
-		query.length > 0
-			? `/api/v1/pending-revisions?${query}`
-			: "/api/v1/pending-revisions";
+	const url = query.length > 0 ? `/api/v1/pending-revisions?${query}` : "/api/v1/pending-revisions";
 	return jsonRequest<PendingRevisionListResponse>(url, { method: "GET" });
 }
 
 /** Fetch one pending revision with the full proposed body + parent body. */
-export async function fetchPendingRevision(
-	id: string,
-): Promise<PendingRevisionDetailResponse> {
+export async function fetchPendingRevision(id: string): Promise<PendingRevisionDetailResponse> {
 	return jsonRequest<PendingRevisionDetailResponse>(
 		`/api/v1/pending-revisions/${encodeURIComponent(id)}`,
 		{ method: "GET" },
@@ -849,8 +841,7 @@ export async function listNotifications(options?: {
 		params.set("limit", String(options.limit));
 	}
 	const query = params.toString();
-	const url =
-		query.length > 0 ? `/api/v1/notifications?${query}` : "/api/v1/notifications";
+	const url = query.length > 0 ? `/api/v1/notifications?${query}` : "/api/v1/notifications";
 	const res = await fetch(url, { method: "GET", credentials: "same-origin" });
 	if (res.status === 401) {
 		return null;
@@ -863,8 +854,290 @@ export async function listNotifications(options?: {
 
 /** Mark a notification as read. */
 export async function markNotificationRead(id: string): Promise<NotificationView> {
-	return jsonRequest<NotificationView>(
-		`/api/v1/notifications/${encodeURIComponent(id)}/read`,
-		{ method: "POST", headers: authHeaders() },
+	return jsonRequest<NotificationView>(`/api/v1/notifications/${encodeURIComponent(id)}/read`, {
+		method: "POST",
+		headers: authHeaders(),
+	});
+}
+
+// ─── Admin: users / roles / config (#47) ──────────────────────────────────
+
+/** One role attached to a user. */
+export interface UserRoleView {
+	id: string;
+	name: string;
+	display_name: string;
+	permissions: string;
+}
+
+/** One user as the admin UI sees them. */
+export interface AdminUserView {
+	id: string;
+	username: string;
+	email: string | null;
+	display_name: string | null;
+	created_at: string;
+	last_login_at: string | null;
+	roles: UserRoleView[];
+}
+
+/** Response from `GET /api/v1/admin/users`. */
+export interface AdminUserListResponse {
+	items: AdminUserView[];
+	next_cursor: string | null;
+}
+
+/** Body for `POST /api/v1/admin/users/{id}/roles`. */
+export interface AssignRolesRequest {
+	role_ids: string[];
+}
+
+/** Fetch the paginated user list. Requires `MANAGE_USERS`. */
+export async function listAdminUsers(options?: {
+	search?: string;
+	role_id?: string;
+	limit?: number;
+	cursor?: string | null;
+}): Promise<AdminUserListResponse> {
+	const params = new URLSearchParams();
+	if (options?.search) params.set("search", options.search);
+	if (options?.role_id) params.set("role_id", options.role_id);
+	if (options?.limit !== undefined) params.set("limit", String(options.limit));
+	if (options?.cursor) params.set("cursor", options.cursor);
+	const query = params.toString();
+	const url = query.length > 0 ? `/api/v1/admin/users?${query}` : "/api/v1/admin/users";
+	return jsonRequest<AdminUserListResponse>(url, {
+		method: "GET",
+		credentials: "same-origin",
+	});
+}
+
+/** Fetch a single user with their attached roles. */
+export async function fetchAdminUser(id: string): Promise<AdminUserView> {
+	return jsonRequest<AdminUserView>(`/api/v1/admin/users/${encodeURIComponent(id)}`, {
+		method: "GET",
+		credentials: "same-origin",
+	});
+}
+
+/** Assign one or more roles to a user. Idempotent. */
+export async function assignUserRoles(
+	id: string,
+	body: AssignRolesRequest,
+): Promise<AdminUserView> {
+	return jsonRequest<AdminUserView>(`/api/v1/admin/users/${encodeURIComponent(id)}/roles`, {
+		method: "POST",
+		headers: authHeaders(),
+		credentials: "same-origin",
+		body: JSON.stringify(body),
+	});
+}
+
+/** Revoke a role from a user. Idempotent (204 on first or second call). */
+export async function revokeUserRole(userId: string, roleId: string): Promise<void> {
+	const res = await fetch(
+		`/api/v1/admin/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`,
+		{
+			method: "DELETE",
+			headers: authHeaders(),
+			credentials: "same-origin",
+		},
 	);
+	if (!res.ok) {
+		throw new ApiError(res.status, await parseError(res));
+	}
+}
+
+/** One role row in the admin role manager. */
+export interface AdminRoleView {
+	id: string;
+	name: string;
+	display_name: string;
+	permissions: string;
+	permission_flags: string[];
+	assigned_users: number;
+}
+
+/** Response from `GET /api/v1/admin/roles`. */
+export interface AdminRoleListResponse {
+	items: AdminRoleView[];
+}
+
+/** Body for `POST /api/v1/admin/roles`. */
+export interface CreateRoleRequest {
+	name: string;
+	display_name: string;
+	permissions: string[];
+}
+
+/** Body for `PUT /api/v1/admin/roles/{id}`. */
+export interface UpdateRoleRequest {
+	display_name?: string;
+	permissions?: string[];
+}
+
+/** Every defined role with its permission set + assigned-user count. */
+export async function listAdminRoles(): Promise<AdminRoleListResponse> {
+	return jsonRequest<AdminRoleListResponse>("/api/v1/admin/roles", {
+		method: "GET",
+		credentials: "same-origin",
+	});
+}
+
+/** Create a new role. */
+export async function createAdminRole(body: CreateRoleRequest): Promise<AdminRoleView> {
+	return jsonRequest<AdminRoleView>("/api/v1/admin/roles", {
+		method: "POST",
+		headers: authHeaders(),
+		credentials: "same-origin",
+		body: JSON.stringify(body),
+	});
+}
+
+/** Update a role's display name / permission set. */
+export async function updateAdminRole(id: string, body: UpdateRoleRequest): Promise<AdminRoleView> {
+	return jsonRequest<AdminRoleView>(`/api/v1/admin/roles/${encodeURIComponent(id)}`, {
+		method: "PUT",
+		headers: authHeaders(),
+		credentials: "same-origin",
+		body: JSON.stringify(body),
+	});
+}
+
+/** Delete a role. 409 if still assigned. */
+export async function deleteAdminRole(id: string): Promise<void> {
+	const res = await fetch(`/api/v1/admin/roles/${encodeURIComponent(id)}`, {
+		method: "DELETE",
+		headers: authHeaders(),
+		credentials: "same-origin",
+	});
+	if (!res.ok) {
+		throw new ApiError(res.status, await parseError(res));
+	}
+}
+
+/** Response from `GET /api/v1/admin/config`. */
+export interface AdminConfigResponse {
+	available: boolean;
+	config: unknown;
+}
+
+/** Fetch the redacted runtime configuration. Requires `MANAGE_USERS`. */
+export async function fetchAdminConfig(): Promise<AdminConfigResponse> {
+	return jsonRequest<AdminConfigResponse>("/api/v1/admin/config", {
+		method: "GET",
+		credentials: "same-origin",
+	});
+}
+
+/**
+ * Body for `POST /api/v1/namespaces` — mirrored here so the admin UI can
+ * call the existing endpoint without dragging in the namespace module.
+ */
+export interface CreateNamespaceRequest {
+	slug: string;
+	display_name: string;
+}
+
+export interface UpdateNamespaceRequest {
+	display_name: string;
+}
+
+export async function createNamespace(body: CreateNamespaceRequest): Promise<NamespaceView> {
+	return jsonRequest<NamespaceView>("/api/v1/namespaces", {
+		method: "POST",
+		headers: authHeaders(),
+		credentials: "same-origin",
+		body: JSON.stringify(body),
+	});
+}
+
+export async function updateNamespace(
+	slug: string,
+	body: UpdateNamespaceRequest,
+): Promise<NamespaceView> {
+	return jsonRequest<NamespaceView>(`/api/v1/namespaces/${encodeURIComponent(slug)}`, {
+		method: "PATCH",
+		headers: authHeaders(),
+		credentials: "same-origin",
+		body: JSON.stringify(body),
+	});
+}
+
+export async function deleteNamespace(slug: string): Promise<void> {
+	const res = await fetch(`/api/v1/namespaces/${encodeURIComponent(slug)}`, {
+		method: "DELETE",
+		headers: authHeaders(),
+		credentials: "same-origin",
+	});
+	if (!res.ok) {
+		throw new ApiError(res.status, await parseError(res));
+	}
+}
+
+/** One row in `GET /api/v1/audit-log`. */
+export interface AuditLogEntryView {
+	id: string;
+	actor_id: string;
+	actor_username: string;
+	action: string;
+	target_kind: string;
+	target_id: string;
+	target_label: string | null;
+	metadata: unknown;
+	created_at: string;
+}
+
+/** Response from `GET /api/v1/audit-log`. */
+export interface AuditLogListResponse {
+	items: AuditLogEntryView[];
+	next_cursor: string | null;
+}
+
+/** Filters for the audit log viewer. */
+export interface AuditLogQuery {
+	actor?: string;
+	action?: string;
+	since?: string;
+	until?: string;
+	limit?: number;
+	cursor?: string | null;
+}
+
+export async function listAuditLog(opts?: AuditLogQuery): Promise<AuditLogListResponse> {
+	const params = new URLSearchParams();
+	if (opts?.actor) params.set("actor", opts.actor);
+	if (opts?.action) params.set("action", opts.action);
+	if (opts?.since) params.set("since", opts.since);
+	if (opts?.until) params.set("until", opts.until);
+	if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+	if (opts?.cursor) params.set("cursor", opts.cursor);
+	const query = params.toString();
+	const url = query.length > 0 ? `/api/v1/audit-log?${query}` : "/api/v1/audit-log";
+	return jsonRequest<AuditLogListResponse>(url, {
+		method: "GET",
+		credentials: "same-origin",
+	});
+}
+
+/** Stable URL of the admin audit-log Atom feed. */
+export const AUDIT_LOG_ATOM_URL = "/api/v1/audit-log/atom";
+
+/**
+ * Set of permission names the SPA recognises as gating an admin tile.
+ * Used by the `/admin` landing to decide which sub-page to surface.
+ */
+export const ADMIN_PERMISSIONS = [
+	"MANAGE_USERS",
+	"MANAGE_ROLES",
+	"MANAGE_NAMESPACES",
+	"PROTECT",
+	"VIEW_AUDIT_LOG",
+	"MANAGE_BLOCKLIST",
+	"REVIEW_EDITS",
+] as const;
+
+/** Whether the user holds any permission that should expose the Admin nav. */
+export function hasAnyAdminPermission(perms: Set<string>): boolean {
+	return ADMIN_PERMISSIONS.some((p) => perms.has(p));
 }

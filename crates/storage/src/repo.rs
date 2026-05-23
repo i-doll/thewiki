@@ -232,6 +232,35 @@ pub trait UserRepository: Send + Sync {
     /// * [`StorageError::Conflict`] if the FK from `revisions.author_id` would
     ///   be violated (we use `ON DELETE RESTRICT`).
     fn delete(&self, id: UserId) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// List users, cursor-paginated.
+    ///
+    /// Order is `(created_at ASC, id ASC)` — stable and aligned with the
+    /// UUIDv7 prefix so the index walk stays sequential.
+    ///
+    /// `filter.search` filters on case-insensitive substring of `username`
+    /// (or `email` when set). `filter.role_id` restricts to users who hold
+    /// that role (inner join on `user_roles`).
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::InvalidInput`] if `cursor` is malformed for this
+    /// backend.
+    fn list(
+        &self,
+        filter: UserListFilter,
+        cursor: Option<Cursor>,
+        limit: u32,
+    ) -> impl Future<Output = Result<PageSlice<User>, StorageError>> + Send;
+}
+
+/// Filter for [`UserRepository::list`].
+#[derive(Debug, Clone, Default)]
+pub struct UserListFilter {
+    /// Substring match against `username` or `email` (case-insensitive).
+    pub search: Option<String>,
+    /// Restrict to users who currently hold this role.
+    pub role_id: Option<RoleId>,
 }
 
 /// Persistence operations for the [`Namespace`] aggregate.
@@ -400,6 +429,36 @@ pub trait RoleRepository: Send + Sync {
         &self,
         user_id: UserId,
     ) -> impl Future<Output = Result<Vec<Role>, StorageError>> + Send;
+
+    /// Update mutable role columns (`display_name`, `permissions`).
+    ///
+    /// `name` and `id` are immutable once written.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if no row matches `id`.
+    fn update(&self, role: &Role) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Delete a role.
+    ///
+    /// The caller is expected to verify the role has no assigned users
+    /// before invoking this — the API surface returns 409 in that case.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::NotFound`] if the row didn't exist.
+    /// * [`StorageError::Conflict`] if the role is still assigned to one
+    ///   or more users.
+    fn delete(&self, id: RoleId) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Count how many users currently hold this role.
+    ///
+    /// Used by the delete endpoint to decide between 204 and 409.
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures.
+    fn count_users(&self, id: RoleId) -> impl Future<Output = Result<u64, StorageError>> + Send;
 }
 
 /// Persistence operations for the [`Session`] aggregate.

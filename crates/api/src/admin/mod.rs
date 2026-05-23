@@ -11,6 +11,9 @@
 //! [`AuthSession`]: crate::auth::AuthSession
 
 pub mod blocklist;
+pub mod config;
+pub mod roles;
+pub mod users;
 
 use utoipa_axum::router::OpenApiRouter;
 
@@ -21,4 +24,7 @@ pub fn router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
     OpenApiRouter::new()
         .nest("/blocklist/ip", blocklist::ip_router::<S>())
         .nest("/blocklist/url", blocklist::url_router::<S>())
+        .nest("/users", users::router::<S>())
+        .nest("/roles", roles::router::<S>())
+        .nest("/config", config::router::<S>())
 }

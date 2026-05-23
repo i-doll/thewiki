@@ -201,6 +201,11 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         .context("hydrating blocklist snapshot from storage")?;
     app_state = app_state.with_blocklist(blocklist_state);
 
+    // Attach a snapshot of the loaded configuration so the admin UI can
+    // render the operator's settings (#47). `Arc` keeps clones cheap; the
+    // admin endpoint redacts secrets at serialisation time, not here.
+    app_state = app_state.with_runtime_config(Arc::new(config.clone()));
+
     // Build the rate-limit state with the configured backend. The in-memory
     // backend is infallible; the Redis backend (gated behind the `redis`
     // feature) connects up front so a malformed URL surfaces at startup

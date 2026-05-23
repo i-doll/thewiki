@@ -143,4 +143,75 @@ impl RoleRepository for LibsqlRoleRepository<'_> {
         }
         Ok(out)
     }
+
+    async fn update(&self, role: &Role) -> Result<(), StorageError> {
+        let id = uuid_bytes(role.id.into_uuid());
+        let permissions = permissions_to_i64(role.permissions);
+        let rows_affected = into_db(
+            self.conn
+                .execute(
+                    "UPDATE roles SET display_name = ?1, permissions = ?2 WHERE id = ?3",
+                    params![role.display_name.clone(), permissions, Value::Blob(id.to_vec())],
+                )
+                .await,
+        )?;
+        if rows_affected == 0 {
+            Err(StorageError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn delete(&self, id: RoleId) -> Result<(), StorageError> {
+        // user_roles.role_id is ON DELETE CASCADE — see the matching SQLite
+        // impl for the rationale of refusing here when the role is still
+        // assigned to one or more users.
+        let assigned = self.count_users(id).await?;
+        if assigned > 0 {
+            return Err(StorageError::conflict(
+                "role is still assigned to one or more users",
+            ));
+        }
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let rows_affected = into_db(
+            self.conn
+                .execute(
+                    "DELETE FROM roles WHERE id = ?1",
+                    params![Value::Blob(id_bytes.to_vec())],
+                )
+                .await,
+        )?;
+        if rows_affected == 0 {
+            Err(StorageError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn count_users(&self, id: RoleId) -> Result<u64, StorageError> {
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let mut rows = into_db(
+            self.conn
+                .query(
+                    "SELECT COUNT(*) FROM user_roles WHERE role_id = ?1",
+                    params![Value::Blob(id_bytes.to_vec())],
+                )
+                .await,
+        )?;
+        let row = into_db(rows.next().await)?
+            .ok_or_else(|| StorageError::invalid_input("count returned no rows"))?;
+        let val = row
+            .get_value(0)
+            .map_err(|err| StorageError::InvalidInput(format!("count: {err}")))?;
+        let count = match val {
+            Value::Integer(i) if i >= 0 => i as u64,
+            Value::Integer(_) => 0,
+            other => {
+                return Err(StorageError::InvalidInput(format!(
+                    "count is not INTEGER: {other:?}"
+                )))
+            }
+        };
+        Ok(count)
+    }
 }

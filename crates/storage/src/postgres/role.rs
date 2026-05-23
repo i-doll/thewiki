@@ -123,4 +123,55 @@ impl RoleRepository for PostgresRoleRepository<'_> {
 
         rows.into_iter().map(row_to_role).collect()
     }
+
+    async fn update(&self, role: &Role) -> Result<(), StorageError> {
+        let permissions = permissions_to_i64(role.permissions);
+        let out = sqlx::query(
+            "UPDATE roles SET display_name = $1, permissions = $2 WHERE id = $3",
+        )
+        .bind(&role.display_name)
+        .bind(permissions)
+        .bind(role.id.into_uuid())
+        .execute(self.pool)
+        .await?;
+        if out.rows_affected() == 0 {
+            Err(StorageError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn delete(&self, id: RoleId) -> Result<(), StorageError> {
+        // user_roles.role_id is ON DELETE CASCADE; refuse here when the role
+        // is still assigned to a user so the cascade doesn't silently
+        // disconnect them.
+        let assigned = self.count_users(id).await?;
+        if assigned > 0 {
+            return Err(StorageError::conflict(
+                "role is still assigned to one or more users",
+            ));
+        }
+        let out = sqlx::query("DELETE FROM roles WHERE id = $1")
+            .bind(id.into_uuid())
+            .execute(self.pool)
+            .await?;
+        if out.rows_affected() == 0 {
+            Err(StorageError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn count_users(&self, id: RoleId) -> Result<u64, StorageError> {
+        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM user_roles WHERE role_id = $1")
+            .bind(id.into_uuid())
+            .fetch_one(self.pool)
+            .await?;
+        #[allow(
+            clippy::cast_sign_loss,
+            reason = "COUNT(*) is non-negative"
+        )]
+        let count = if row.0 < 0 { 0 } else { row.0 as u64 };
+        Ok(count)
+    }
 }
