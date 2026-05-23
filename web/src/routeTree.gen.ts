@@ -19,6 +19,7 @@ import { Route as WikiSlugRouteImport } from './routes/wiki.$slug'
 import { Route as TagTagRouteImport } from './routes/tag.$tag'
 import { Route as CategorySlugRouteImport } from './routes/category.$slug'
 import { Route as AdminBlocklistsRouteImport } from './routes/admin.blocklists'
+import { Route as AdminApprovalQueueRouteImport } from './routes/admin.approval-queue'
 import { Route as WikiSlugEditRouteImport } from './routes/wiki_.$slug.edit'
 import { Route as WikiSlugHistoryRouteImport } from './routes/wiki.$slug.history'
 import { Route as WikiSlugDiffRouteImport } from './routes/wiki.$slug.diff'
@@ -77,6 +78,11 @@ const AdminBlocklistsRoute = AdminBlocklistsRouteImport.update({
   path: '/admin/blocklists',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminApprovalQueueRoute = AdminApprovalQueueRouteImport.update({
+  id: '/admin/approval-queue',
+  path: '/admin/approval-queue',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WikiSlugEditRoute = WikiSlugEditRouteImport.update({
   id: '/wiki_/$slug/edit',
   path: '/wiki/$slug/edit',
@@ -120,6 +126,7 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
   '/watchlist': typeof WatchlistRoute
+  '/admin/approval-queue': typeof AdminApprovalQueueRoute
   '/admin/blocklists': typeof AdminBlocklistsRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
@@ -139,6 +146,7 @@ export interface FileRoutesByTo {
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
   '/watchlist': typeof WatchlistRoute
+  '/admin/approval-queue': typeof AdminApprovalQueueRoute
   '/admin/blocklists': typeof AdminBlocklistsRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
@@ -159,6 +167,7 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
   '/watchlist': typeof WatchlistRoute
+  '/admin/approval-queue': typeof AdminApprovalQueueRoute
   '/admin/blocklists': typeof AdminBlocklistsRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
@@ -180,6 +189,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/search'
     | '/watchlist'
+    | '/admin/approval-queue'
     | '/admin/blocklists'
     | '/category/$slug'
     | '/tag/$tag'
@@ -199,6 +209,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/search'
     | '/watchlist'
+    | '/admin/approval-queue'
     | '/admin/blocklists'
     | '/category/$slug'
     | '/tag/$tag'
@@ -218,6 +229,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/search'
     | '/watchlist'
+    | '/admin/approval-queue'
     | '/admin/blocklists'
     | '/category/$slug'
     | '/tag/$tag'
@@ -238,6 +250,7 @@ export interface RootRouteChildren {
   RegisterRoute: typeof RegisterRoute
   SearchRoute: typeof SearchRoute
   WatchlistRoute: typeof WatchlistRoute
+  AdminApprovalQueueRoute: typeof AdminApprovalQueueRoute
   AdminBlocklistsRoute: typeof AdminBlocklistsRoute
   CategorySlugRoute: typeof CategorySlugRoute
   TagTagRoute: typeof TagTagRoute
@@ -318,6 +331,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/blocklists'
       fullPath: '/admin/blocklists'
       preLoaderRoute: typeof AdminBlocklistsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/approval-queue': {
+      id: '/admin/approval-queue'
+      path: '/admin/approval-queue'
+      fullPath: '/admin/approval-queue'
+      preLoaderRoute: typeof AdminApprovalQueueRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/wiki_/$slug/edit': {
@@ -405,6 +425,7 @@ const rootRouteChildren: RootRouteChildren = {
   RegisterRoute: RegisterRoute,
   SearchRoute: SearchRoute,
   WatchlistRoute: WatchlistRoute,
+  AdminApprovalQueueRoute: AdminApprovalQueueRoute,
   AdminBlocklistsRoute: AdminBlocklistsRoute,
   CategorySlugRoute: CategorySlugRoute,
   TagTagRoute: TagTagRoute,
