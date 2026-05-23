@@ -46,20 +46,35 @@ CREATE UNIQUE INDEX idx_namespaces_paired_namespace_id
 -- the immediate need of the schema migration, any unique 16-byte BLOB is
 -- enough.
 --
--- We avoid the `Talk_` prefix collision case by only inserting rows whose
--- partner doesn't already exist; if an admin manually created a
--- `Talk_Main` namespace before the migration ran, we leave it alone and
--- let the boot-time pairing in `get_or_create_default()` link them up
--- later.
+-- Step 1: promote any pre-existing namespace whose slug matches
+-- `Talk_<subject>` (e.g. an operator manually created `Talk_Foo` before
+-- this migration shipped) into a real talk namespace — `is_talk = 1`
+-- and the back-pointer wired up. We do this *before* the next INSERT
+-- pass so the existing rogue row is no longer eligible to be treated
+-- as a subject in step 2, and the partner doesn't get duplicated.
+UPDATE namespaces AS t
+SET is_talk = 1,
+    paired_namespace_id = (
+        SELECT s.id
+        FROM namespaces AS s
+        WHERE t.slug = 'Talk_' || s.slug
+          AND s.is_talk = 0
+    )
+WHERE t.is_talk = 0
+  AND EXISTS (
+      SELECT 1
+      FROM namespaces AS s
+      WHERE t.slug = 'Talk_' || s.slug
+        AND s.is_talk = 0
+  );
+
+-- Step 2: every remaining subject namespace (is_talk = 0) that has no
+-- `Talk_*` partner yet gets one freshly minted. We use `randomblob(16)`
+-- to mint the id; UUIDv7 generation lives in the application layer so
+-- we can't mint one in pure SQL.
 INSERT INTO namespaces (id, slug, display_name, created_at, is_talk, paired_namespace_id)
 SELECT
-    -- Synthesize a 16-byte BLOB id by xoring the source id with a fixed
-    -- 16-byte constant. Deterministic, collision-free w.r.t. the source
-    -- row, and fits the `BLOB(16)` shape the rest of the schema expects.
-    CAST(
-        randomblob(16)
-        AS BLOB
-    ),
+    CAST(randomblob(16) AS BLOB),
     'Talk_' || n.slug,
     'Talk: ' || n.display_name,
     n.created_at,
@@ -71,12 +86,14 @@ WHERE n.is_talk = 0
       SELECT 1 FROM namespaces t WHERE t.slug = 'Talk_' || n.slug
   );
 
--- Close the loop: now that every subject has a talk partner, point each
--- subject row at its paired talk row.
+-- Step 3: close the loop so every subject row points at its paired
+-- talk row. We match `t.is_talk = 1` so an unrelated non-talk row that
+-- happens to be named `Talk_<subject>` can't be paired by mistake.
 UPDATE namespaces
 SET paired_namespace_id = (
     SELECT t.id FROM namespaces t
     WHERE t.slug = 'Talk_' || namespaces.slug
+      AND t.is_talk = 1
 )
 WHERE is_talk = 0
   AND paired_namespace_id IS NULL;
