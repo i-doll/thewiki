@@ -516,3 +516,232 @@ async fn watchlist_atom_lists_watched_pages_for_session() {
         .expect("title");
     assert_eq!(title, "Main:watched-one");
 }
+
+// ─── Regression tests for the post-merge fix batch (issue #46 follow-up) ──
+
+/// Regression: the public Atom feed used to fetch `LIMIT 50` rows and then
+/// filter out protected pages in app code, so a head of the timeline
+/// dominated by protected edits could starve out public rows even when more
+/// public rows existed just past the cutoff. The fix pushes the protection
+/// predicate into SQL.
+///
+/// Seed 50 protected pages and 2 public ones; the feed must still return the
+/// 2 public entries.
+#[tokio::test]
+async fn public_feed_returns_public_pages_even_with_50_protected_at_head() {
+    let (router, storage, _user_id, session) = fresh_app().await;
+
+    // Two public pages first — they're the oldest, so naïve "fetch 50 then
+    // filter" would never reach them.
+    create_page(router.clone(), &session, "public-a").await;
+    create_page(router.clone(), &session, "public-b").await;
+
+    // Then 50 pages we'll bump up to `Protected`.
+    for i in 0..50 {
+        let slug = format!("locked-{i:02}");
+        let id_str = create_page(router.clone(), &session, &slug).await;
+        let uuid: uuid::Uuid = id_str.parse().expect("uuid");
+        let mut page = storage
+            .pages()
+            .get_by_id(thewiki_core::PageId::from_uuid(uuid))
+            .await
+            .expect("get page");
+        page.protection_level = ProtectionLevel::Protected;
+        storage.pages().update(&page).await.expect("update page");
+    }
+
+    let (status, _, bytes) =
+        request(router, "GET", "/api/v1/recent-changes.atom", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = String::from_utf8(bytes).expect("utf8");
+    let doc = roxmltree::Document::parse(&body).expect("XML");
+    let feed = doc.root_element();
+    let titles: Vec<_> = feed
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "entry")
+        .filter_map(|e| {
+            e.children()
+                .find(|n| n.is_element() && n.tag_name().name() == "title")
+                .and_then(|n| n.text())
+                .map(str::to_owned)
+        })
+        .collect();
+
+    assert!(
+        titles.iter().any(|t| t == "Main:public-a"),
+        "public-a missing; got titles: {titles:?}"
+    );
+    assert!(
+        titles.iter().any(|t| t == "Main:public-b"),
+        "public-b missing; got titles: {titles:?}"
+    );
+    assert!(
+        !titles.iter().any(|t| t.starts_with("Main:locked-")),
+        "protected page leaked into public feed: {titles:?}"
+    );
+}
+
+/// Regression: an empty feed used to emit `OffsetDateTime::now_utc()` as its
+/// `<updated>`, so a reader polling an empty namespace or watchlist would
+/// see the feed "change" on every fetch. The fix is to use the UNIX epoch
+/// instead so the timestamp is stable across publishes.
+#[tokio::test]
+async fn empty_feed_uses_epoch_for_updated() {
+    let (router, storage, _user_id, _session) = fresh_app().await;
+    // Seed a second empty namespace so the per-namespace feed has something
+    // to look up but no entries to return.
+    storage
+        .namespaces()
+        .create(&Namespace {
+            id: NamespaceId::new(),
+            slug: NamespaceSlug::new("Empty").expect("slug"),
+            display_name: "Empty".into(),
+        })
+        .await
+        .expect("seed Empty");
+
+    for path in [
+        "/api/v1/recent-changes.atom",
+        "/api/v1/recent-changes/Empty/atom",
+    ] {
+        let (status, _, bytes) = request(router.clone(), "GET", path, None, None).await;
+        assert_eq!(status, StatusCode::OK, "path: {path}");
+        let body = String::from_utf8(bytes).expect("utf8");
+        let doc = roxmltree::Document::parse(&body).expect("XML");
+        let feed = doc.root_element();
+        // No entries should be present.
+        assert!(
+            feed.children()
+                .filter(|n| n.is_element())
+                .all(|n| n.tag_name().name() != "entry"),
+            "{path} unexpectedly has entries"
+        );
+        let updated = feed
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "updated")
+            .and_then(|n| n.text())
+            .expect("updated element");
+        assert!(
+            updated.starts_with("1970-01-01T00:00:00"),
+            "{path} updated should be the unix epoch, got {updated}"
+        );
+    }
+}
+
+/// Same empty-feed-stability guarantee, this time for the watchlist Atom
+/// feed: a user whose watchlist is empty must still get the epoch.
+#[tokio::test]
+async fn empty_watchlist_feed_uses_epoch_for_updated() {
+    let (router, _storage, _user_id, session) = fresh_app().await;
+    let (status, _, bytes) =
+        request(router, "GET", "/api/v1/watchlist.atom", Some(&session), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = String::from_utf8(bytes).expect("utf8");
+    let doc = roxmltree::Document::parse(&body).expect("XML");
+    let feed = doc.root_element();
+    assert!(
+        feed.children()
+            .filter(|n| n.is_element())
+            .all(|n| n.tag_name().name() != "entry"),
+        "empty watchlist should have no entries"
+    );
+    let updated = feed
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "updated")
+        .and_then(|n| n.text())
+        .expect("updated element");
+    assert!(
+        updated.starts_with("1970-01-01T00:00:00"),
+        "watchlist updated should be the unix epoch, got {updated}"
+    );
+}
+
+/// Regression: duplicate `POST /watchlist` requests used to write a
+/// `watchlist.add` audit row every time even though the DB write was a
+/// no-op (the row was already there). The fix gates the audit emission on
+/// whether storage actually inserted a row.
+#[tokio::test]
+async fn duplicate_watch_post_writes_exactly_one_audit_row() {
+    let (router, storage, _user_id, session) = fresh_app().await;
+    let page_id = create_page(router.clone(), &session, "alpha").await;
+
+    // Three POSTs — the first inserts, the next two are no-ops.
+    for _ in 0..3 {
+        let (status, _) = json_request(
+            router.clone(),
+            "POST",
+            "/api/v1/watchlist",
+            Some(&session),
+            Some(json!({ "page_id": page_id })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+
+    let entries = storage
+        .audit_log()
+        .list(AuditLogFilter::default(), None, 50)
+        .await
+        .expect("audit list");
+    let adds: Vec<_> = entries
+        .items
+        .iter()
+        .filter(|e| e.action == "watchlist.add")
+        .collect();
+    assert_eq!(
+        adds.len(),
+        1,
+        "expected exactly one watchlist.add row, got {} -- entries: {:?}",
+        adds.len(),
+        adds
+    );
+}
+
+/// Companion: a duplicate `DELETE /watchlist/{page_id}` (i.e. the user
+/// wasn't watching it) must not write a spurious `watchlist.remove` row.
+#[tokio::test]
+async fn duplicate_unwatch_writes_exactly_one_audit_row() {
+    let (router, storage, _user_id, session) = fresh_app().await;
+    let page_id = create_page(router.clone(), &session, "alpha").await;
+
+    // Watch then unwatch twice. Only the first DELETE actually changes
+    // state; the second is a no-op and should not be audited.
+    let (status, _) = json_request(
+        router.clone(),
+        "POST",
+        "/api/v1/watchlist",
+        Some(&session),
+        Some(json!({ "page_id": page_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    for _ in 0..2 {
+        let (status, _, _) = request(
+            router.clone(),
+            "DELETE",
+            &format!("/api/v1/watchlist/{page_id}"),
+            Some(&session),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    let entries = storage
+        .audit_log()
+        .list(AuditLogFilter::default(), None, 50)
+        .await
+        .expect("audit list");
+    let removes: Vec<_> = entries
+        .items
+        .iter()
+        .filter(|e| e.action == "watchlist.remove")
+        .collect();
+    assert_eq!(
+        removes.len(),
+        1,
+        "expected exactly one watchlist.remove row, got {}",
+        removes.len()
+    );
+}

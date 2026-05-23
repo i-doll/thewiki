@@ -32,10 +32,12 @@ impl<'a> PostgresWatchRepository<'a> {
 }
 
 impl WatchRepository for PostgresWatchRepository<'_> {
-    async fn watch(&self, user_id: UserId, page_id: PageId) -> Result<(), StorageError> {
+    async fn watch(&self, user_id: UserId, page_id: PageId) -> Result<bool, StorageError> {
         // `ON CONFLICT DO NOTHING` keeps the original `created_at` if the row
-        // is already there — re-watching is idempotent.
-        sqlx::query(
+        // is already there — re-watching is idempotent. `rows_affected()`
+        // distinguishes "fresh insert" (1) from "already existed" (0); we
+        // surface that so duplicate POSTs don't write spurious audit rows.
+        let result = sqlx::query(
             "INSERT INTO watch (user_id, page_id, created_at)
              VALUES ($1, $2, $3)
              ON CONFLICT (user_id, page_id) DO NOTHING",
@@ -45,16 +47,16 @@ impl WatchRepository for PostgresWatchRepository<'_> {
         .bind(OffsetDateTime::now_utc())
         .execute(self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
-    async fn unwatch(&self, user_id: UserId, page_id: PageId) -> Result<(), StorageError> {
-        sqlx::query("DELETE FROM watch WHERE user_id = $1 AND page_id = $2")
+    async fn unwatch(&self, user_id: UserId, page_id: PageId) -> Result<bool, StorageError> {
+        let result = sqlx::query("DELETE FROM watch WHERE user_id = $1 AND page_id = $2")
             .bind(user_id.into_uuid())
             .bind(page_id.into_uuid())
             .execute(self.pool)
             .await?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
     async fn is_watched(&self, user_id: UserId, page_id: PageId) -> Result<bool, StorageError> {

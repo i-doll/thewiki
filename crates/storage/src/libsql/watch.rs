@@ -24,11 +24,14 @@ impl<'a> LibsqlWatchRepository<'a> {
 }
 
 impl WatchRepository for LibsqlWatchRepository<'_> {
-    async fn watch(&self, user_id: UserId, page_id: PageId) -> Result<(), StorageError> {
+    async fn watch(&self, user_id: UserId, page_id: PageId) -> Result<bool, StorageError> {
         let user_bytes = uuid_bytes(user_id.into_uuid());
         let page_bytes = uuid_bytes(page_id.into_uuid());
         let created_at = format_ts(OffsetDateTime::now_utc())?;
-        into_db(
+        // `Connection::execute` returns the affected-row count; `INSERT OR
+        // IGNORE` reports 0 when the row already exists, which the route
+        // handler uses to skip a redundant audit-log entry.
+        let affected = into_db(
             self.conn
                 .execute(
                     "INSERT OR IGNORE INTO watch (user_id, page_id, created_at)
@@ -41,13 +44,13 @@ impl WatchRepository for LibsqlWatchRepository<'_> {
                 )
                 .await,
         )?;
-        Ok(())
+        Ok(affected > 0)
     }
 
-    async fn unwatch(&self, user_id: UserId, page_id: PageId) -> Result<(), StorageError> {
+    async fn unwatch(&self, user_id: UserId, page_id: PageId) -> Result<bool, StorageError> {
         let user_bytes = uuid_bytes(user_id.into_uuid());
         let page_bytes = uuid_bytes(page_id.into_uuid());
-        into_db(
+        let affected = into_db(
             self.conn
                 .execute(
                     "DELETE FROM watch WHERE user_id = ?1 AND page_id = ?2",
@@ -58,7 +61,7 @@ impl WatchRepository for LibsqlWatchRepository<'_> {
                 )
                 .await,
         )?;
-        Ok(())
+        Ok(affected > 0)
     }
 
     async fn is_watched(&self, user_id: UserId, page_id: PageId) -> Result<bool, StorageError> {

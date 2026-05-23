@@ -3314,7 +3314,7 @@
           "watchlist"
         ],
         "summary": "`POST /api/v1/watchlist` — add a page to the caller's watchlist.",
-        "description": "Idempotent: re-watching a page already on the watchlist returns the same\n`200 { watched: true }` body without bumping the original timestamp.",
+        "description": "Idempotent: re-watching a page already on the watchlist returns the same\n`201 { watched: true }` body without bumping the original timestamp, and\nwithout writing a second `watchlist.add` audit row.",
         "operationId": "add_to_watchlist",
         "requestBody": {
           "content": {

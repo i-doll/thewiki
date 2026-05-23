@@ -61,7 +61,8 @@ pub async fn list_watchlist<S: AppStorage>(
 /// `POST /api/v1/watchlist` — add a page to the caller's watchlist.
 ///
 /// Idempotent: re-watching a page already on the watchlist returns the same
-/// `200 { watched: true }` body without bumping the original timestamp.
+/// `201 { watched: true }` body without bumping the original timestamp, and
+/// without writing a second `watchlist.add` audit row.
 #[utoipa::path(
     post,
     path = "",
@@ -87,24 +88,30 @@ pub async fn add_to_watchlist<S: AppStorage>(
     // fail" — the explicit check is also useful for the audit row.
     let page = state.storage.pages().get_by_id(req.page_id).await?;
 
-    state
+    let inserted = state
         .storage
         .watches()
         .watch(session.user.id, req.page_id)
         .await?;
 
-    let audit = NewAuditLogEntry {
-        actor_id: session.user.id,
-        actor_username: session.user.username.as_str().to_owned(),
-        action: "watchlist.add".to_owned(),
-        target_kind: "page".to_owned(),
-        target_id: page.id.into_uuid(),
-        target_label: Some(format!("{}/{}", page.namespace_id.into_uuid(), page.slug)),
-        metadata: json!({
-            "slug": page.slug,
-        }),
-    };
-    state.storage.audit_log().create(audit).await?;
+    // Audit only on the state-changing path. A duplicate POST (e.g. a retry)
+    // hits `INSERT OR IGNORE` and returns `false` — we don't want to clutter
+    // the audit log with bogus "watchlist.add" rows that didn't reflect an
+    // actual change.
+    if inserted {
+        let audit = NewAuditLogEntry {
+            actor_id: session.user.id,
+            actor_username: session.user.username.as_str().to_owned(),
+            action: "watchlist.add".to_owned(),
+            target_kind: "page".to_owned(),
+            target_id: page.id.into_uuid(),
+            target_label: Some(format!("{}/{}", page.namespace_id.into_uuid(), page.slug)),
+            metadata: json!({
+                "slug": page.slug,
+            }),
+        };
+        state.storage.audit_log().create(audit).await?;
+    }
 
     Ok((StatusCode::CREATED, Json(WatchStatus { watched: true })))
 }
@@ -141,24 +148,29 @@ pub async fn remove_from_watchlist<S: AppStorage>(
         Err(err) => return Err(err.into()),
     };
 
-    state
+    let removed = state
         .storage
         .watches()
         .unwatch(session.user.id, page_id)
         .await?;
 
-    let audit = NewAuditLogEntry {
-        actor_id: session.user.id,
-        actor_username: session.user.username.as_str().to_owned(),
-        action: "watchlist.remove".to_owned(),
-        target_kind: "page".to_owned(),
-        target_id: page.id.into_uuid(),
-        target_label: Some(format!("{}/{}", page.namespace_id.into_uuid(), page.slug)),
-        metadata: json!({
-            "slug": page.slug,
-        }),
-    };
-    state.storage.audit_log().create(audit).await?;
+    // Same rationale as `add_to_watchlist`: only audit when the DELETE
+    // actually changed state. Removing a page the user wasn't watching is a
+    // silent 204 with no audit entry.
+    if removed {
+        let audit = NewAuditLogEntry {
+            actor_id: session.user.id,
+            actor_username: session.user.username.as_str().to_owned(),
+            action: "watchlist.remove".to_owned(),
+            target_kind: "page".to_owned(),
+            target_id: page.id.into_uuid(),
+            target_label: Some(format!("{}/{}", page.namespace_id.into_uuid(), page.slug)),
+            metadata: json!({
+                "slug": page.slug,
+            }),
+        };
+        state.storage.audit_log().create(audit).await?;
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

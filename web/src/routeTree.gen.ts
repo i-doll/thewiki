@@ -119,8 +119,8 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
-  '/admin/blocklists': typeof AdminBlocklistsRoute
   '/watchlist': typeof WatchlistRoute
+  '/admin/blocklists': typeof AdminBlocklistsRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
@@ -138,8 +138,8 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
-  '/admin/blocklists': typeof AdminBlocklistsRoute
   '/watchlist': typeof WatchlistRoute
+  '/admin/blocklists': typeof AdminBlocklistsRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
@@ -158,8 +158,8 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
-  '/admin/blocklists': typeof AdminBlocklistsRoute
   '/watchlist': typeof WatchlistRoute
+  '/admin/blocklists': typeof AdminBlocklistsRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
@@ -179,8 +179,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/search'
-    | '/admin/blocklists'
     | '/watchlist'
+    | '/admin/blocklists'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
@@ -198,8 +198,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/search'
-    | '/admin/blocklists'
     | '/watchlist'
+    | '/admin/blocklists'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
@@ -217,8 +217,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/search'
-    | '/admin/blocklists'
     | '/watchlist'
+    | '/admin/blocklists'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
@@ -237,8 +237,8 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
   SearchRoute: typeof SearchRoute
-  AdminBlocklistsRoute: typeof AdminBlocklistsRoute
   WatchlistRoute: typeof WatchlistRoute
+  AdminBlocklistsRoute: typeof AdminBlocklistsRoute
   CategorySlugRoute: typeof CategorySlugRoute
   TagTagRoute: typeof TagTagRoute
   WikiSlugRoute: typeof WikiSlugRouteWithChildren
@@ -404,8 +404,8 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
   SearchRoute: SearchRoute,
-  AdminBlocklistsRoute: AdminBlocklistsRoute,
   WatchlistRoute: WatchlistRoute,
+  AdminBlocklistsRoute: AdminBlocklistsRoute,
   CategorySlugRoute: CategorySlugRoute,
   TagTagRoute: TagTagRoute,
   WikiSlugRoute: WikiSlugRouteWithChildren,

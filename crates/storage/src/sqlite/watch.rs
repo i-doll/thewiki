@@ -41,13 +41,16 @@ impl<'a> SqliteWatchRepository<'a> {
 }
 
 impl WatchRepository for SqliteWatchRepository<'_> {
-    async fn watch(&self, user_id: UserId, page_id: PageId) -> Result<(), StorageError> {
+    async fn watch(&self, user_id: UserId, page_id: PageId) -> Result<bool, StorageError> {
         let user_bytes = uuid_bytes(user_id.into_uuid());
         let page_bytes = uuid_bytes(page_id.into_uuid());
         let created_at = format_ts(OffsetDateTime::now_utc())?;
         // `INSERT OR IGNORE` keeps the original `created_at` if the row was
         // already there — re-watching is a no-op, not a "reset the date".
-        sqlx::query(
+        // `rows_affected()` reports 0 for the ignored case and 1 when a new
+        // row was inserted; we surface that to the caller so duplicate POSTs
+        // don't generate spurious audit-log entries.
+        let result = sqlx::query(
             "INSERT OR IGNORE INTO watch (user_id, page_id, created_at)
              VALUES (?1, ?2, ?3)",
         )
@@ -56,18 +59,18 @@ impl WatchRepository for SqliteWatchRepository<'_> {
         .bind(&created_at)
         .execute(self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
-    async fn unwatch(&self, user_id: UserId, page_id: PageId) -> Result<(), StorageError> {
+    async fn unwatch(&self, user_id: UserId, page_id: PageId) -> Result<bool, StorageError> {
         let user_bytes = uuid_bytes(user_id.into_uuid());
         let page_bytes = uuid_bytes(page_id.into_uuid());
-        sqlx::query("DELETE FROM watch WHERE user_id = ?1 AND page_id = ?2")
+        let result = sqlx::query("DELETE FROM watch WHERE user_id = ?1 AND page_id = ?2")
             .bind(user_bytes.as_slice())
             .bind(page_bytes.as_slice())
             .execute(self.pool)
             .await?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
     async fn is_watched(&self, user_id: UserId, page_id: PageId) -> Result<bool, StorageError> {
