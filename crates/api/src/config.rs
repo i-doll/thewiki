@@ -55,6 +55,9 @@ pub struct Config {
     /// so a fresh deploy doesn't require an hCaptcha account just to boot.
     #[serde(default)]
     pub captcha: CaptchaConfig,
+    /// Security policy: X-Forwarded-For trust and blocklist plumbing (#42).
+    #[serde(default)]
+    pub security: SecurityConfig,
 }
 
 /// CAPTCHA provider configuration (#41).
@@ -135,6 +138,38 @@ pub enum CaptchaProviderKind {
     /// hCaptcha (https://www.hcaptcha.com/). Verifies tokens against
     /// `https://api.hcaptcha.com/siteverify`.
     Hcaptcha,
+}
+
+/// Security policy — X-Forwarded-For trust and the runtime hooks for the
+/// blocklist subsystem (#42).
+///
+/// The reverse-proxy story here is intentionally separate from the
+/// rate-limit one ([`RateLimitConfig::client_ip_header`]): the blocklist
+/// runs *before* auth and rate limiting, so it owns its own resolution
+/// path. Operators who terminate TLS behind a single proxy will usually
+/// configure both blocks identically; we keep them split so a deploy that
+/// only trusts XFF for blocklisting (and not for rate limiting) is
+/// expressible.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityConfig {
+    /// When `true`, the blocklist middleware honours `X-Forwarded-For`
+    /// from upstream peers in `trusted_proxies`. Without this flag the
+    /// middleware always uses the socket peer, which is the safe default
+    /// for direct-bind deploys.
+    #[serde(default)]
+    pub trust_x_forwarded_for: bool,
+    /// CIDRs of upstream proxies whose `X-Forwarded-For` header is
+    /// honoured. The middleware walks the chain right-to-left and selects
+    /// the first IP that is not inside any of these CIDRs — i.e. it
+    /// strips trusted hops to find the perceived client IP.
+    ///
+    /// Stored as strings in the wire form (`["10.0.0.0/8", "::1/128"]`)
+    /// so the operator can drop them straight into `thewiki.toml` without
+    /// custom serde. The middleware parses them once on boot via
+    /// [`ipnet::IpNet`](https://docs.rs/ipnet) and caches the result.
+    #[serde(default)]
+    pub trusted_proxies: Vec<String>,
 }
 
 /// GraphQL endpoint configuration.
@@ -714,6 +749,7 @@ impl Config {
             },
             graphql: GraphQLConfig::default(),
             captcha: CaptchaConfig::default(),
+            security: SecurityConfig::default(),
         }
     }
 
@@ -901,6 +937,18 @@ impl Config {
                     "captcha.secret_key must be non-empty when captcha.provider = \"hcaptcha\""
                         .to_string(),
                 ));
+            }
+        }
+
+        // Security/blocklist (#42): make sure every operator-supplied CIDR
+        // parses as an `ipnet::IpNet`. We do this at config load so a typo
+        // in `thewiki.toml` surfaces as a clean startup error rather than
+        // an opaque runtime warning when the middleware tries to use it.
+        for cidr in &self.security.trusted_proxies {
+            if cidr.parse::<ipnet::IpNet>().is_err() {
+                return Err(ConfigError::Invalid(format!(
+                    "security.trusted_proxies: {cidr:?} is not a valid CIDR"
+                )));
             }
         }
 

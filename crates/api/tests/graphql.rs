@@ -119,6 +119,7 @@ async fn build_app() -> TestApp {
         false,
         rate_limit_state,
         GraphQLConfig::default(),
+        Config::defaults().security,
     );
 
     let alice_session = seed_session(&storage, alice.id).await;
@@ -451,6 +452,7 @@ async fn build_app_with_seeded_search() -> (Router, TempDir) {
         false,
         rate_limit_state,
         GraphQLConfig::default(),
+        Config::defaults().security,
     );
     (router, dir)
 }

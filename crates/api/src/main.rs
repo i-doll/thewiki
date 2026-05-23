@@ -174,6 +174,17 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!("media backend init: {e}"))?;
     app_state = app_state.with_media(config.storage.media.clone(), media_backend);
 
+    // Blocklist (#42): hydrate the in-memory snapshot from storage before
+    // we bind the listener so the first request is already gated. A read
+    // failure here aborts startup — the operator asked for this protection
+    // and we should not silently serve un-blocked traffic.
+    let blocklist_state = thewiki_api::blocklist::BlocklistState::empty();
+    blocklist_state
+        .refresh_from(&storage.ip_blocklist(), &storage.url_blocklist())
+        .await
+        .context("hydrating blocklist snapshot from storage")?;
+    app_state = app_state.with_blocklist(blocklist_state);
+
     // Build the rate-limit state with the configured backend. The in-memory
     // backend is infallible; the Redis backend (gated behind the `redis`
     // feature) connects up front so a malformed URL surfaces at startup
@@ -190,6 +201,7 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         config.server.serve_frontend,
         rate_limit_state,
         config.graphql.clone(),
+        config.security.clone(),
     );
 
     let listener = tokio::net::TcpListener::bind(&config.server.bind)

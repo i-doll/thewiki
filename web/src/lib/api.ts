@@ -428,6 +428,115 @@ export async function autocompleteTags(prefix: string, limit?: number): Promise<
 }
 
 /**
+ * One IP blocklist row, mirroring `IpBlocklistView` from
+ * `crates/api/src/admin/blocklist.rs` (#42).
+ */
+export interface IpBlocklistEntry {
+	id: string;
+	cidr: string;
+	reason: string;
+	created_by: string;
+	created_at: string;
+}
+
+/** One URL blocklist row, mirroring `UrlBlocklistView`. */
+export interface UrlBlocklistEntry {
+	id: string;
+	pattern: string;
+	reason: string;
+	created_by: string;
+	created_at: string;
+}
+
+/** Response from `GET /api/v1/admin/blocklist/ip`. */
+export interface IpBlocklistListResponse {
+	items: IpBlocklistEntry[];
+}
+
+/** Response from `GET /api/v1/admin/blocklist/url`. */
+export interface UrlBlocklistListResponse {
+	items: UrlBlocklistEntry[];
+}
+
+/** Body for `POST /api/v1/admin/blocklist/ip`. */
+export interface CreateIpEntryRequest {
+	cidr: string;
+	reason?: string;
+}
+
+/** Body for `POST /api/v1/admin/blocklist/url`. */
+export interface CreateUrlEntryRequest {
+	pattern: string;
+	reason?: string;
+}
+
+/** Fetch every IP blocklist row. Requires `MANAGE_BLOCKLIST`. */
+export async function listIpBlocklist(): Promise<IpBlocklistListResponse> {
+	return jsonRequest<IpBlocklistListResponse>("/api/v1/admin/blocklist/ip", {
+		method: "GET",
+		credentials: "same-origin",
+	});
+}
+
+/** Add a new IP blocklist row. */
+export async function createIpBlocklistEntry(
+	body: CreateIpEntryRequest,
+): Promise<IpBlocklistEntry> {
+	return jsonRequest<IpBlocklistEntry>("/api/v1/admin/blocklist/ip", {
+		method: "POST",
+		headers: authHeaders(),
+		credentials: "same-origin",
+		body: JSON.stringify(body),
+	});
+}
+
+/** Remove an IP blocklist row. */
+export async function deleteIpBlocklistEntry(id: string): Promise<void> {
+	const res = await fetch(`/api/v1/admin/blocklist/ip/${encodeURIComponent(id)}`, {
+		method: "DELETE",
+		headers: authHeaders(),
+		credentials: "same-origin",
+	});
+	if (!res.ok) {
+		const message = await parseError(res);
+		throw new ApiError(res.status, message);
+	}
+}
+
+/** Fetch every URL blocklist row. */
+export async function listUrlBlocklist(): Promise<UrlBlocklistListResponse> {
+	return jsonRequest<UrlBlocklistListResponse>("/api/v1/admin/blocklist/url", {
+		method: "GET",
+		credentials: "same-origin",
+	});
+}
+
+/** Add a new URL blocklist row. */
+export async function createUrlBlocklistEntry(
+	body: CreateUrlEntryRequest,
+): Promise<UrlBlocklistEntry> {
+	return jsonRequest<UrlBlocklistEntry>("/api/v1/admin/blocklist/url", {
+		method: "POST",
+		headers: authHeaders(),
+		credentials: "same-origin",
+		body: JSON.stringify(body),
+	});
+}
+
+/** Remove a URL blocklist row. */
+export async function deleteUrlBlocklistEntry(id: string): Promise<void> {
+	const res = await fetch(`/api/v1/admin/blocklist/url/${encodeURIComponent(id)}`, {
+		method: "DELETE",
+		headers: authHeaders(),
+		credentials: "same-origin",
+	});
+	if (!res.ok) {
+		const message = await parseError(res);
+		throw new ApiError(res.status, message);
+	}
+}
+
+/**
  * Compute whether the supplied permission set is allowed to mutate a page
  * at the given protection level. Mirrors `check_protection` in
  * `crates/api/src/pages/protection.rs`; SPA logic only — server still

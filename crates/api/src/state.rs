@@ -22,13 +22,14 @@ use thewiki_core::{CaptchaProvider, NoopCaptcha};
 use thewiki_search::{IndexerHandle, Searcher};
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
-    AuditLogRepository, CategoryRepository, MediaBlobRepository, MediaRepository,
-    MediaVariantRepository, NamespaceRepository, NewAuditLogEntry, PageAuditMutation,
-    PageLinkRepository, PageRepository, RecentChangesRepository, RevisionRepository, TagRepository,
-    UserRepository,
+    AuditLogRepository, CategoryRepository, IpBlocklistRepository, MediaBlobRepository,
+    MediaRepository, MediaVariantRepository, NamespaceRepository, NewAuditLogEntry,
+    PageAuditMutation, PageLinkRepository, PageRepository, RecentChangesRepository,
+    RevisionRepository, TagRepository, UrlBlocklistRepository, UserRepository,
 };
 
 use crate::auth::AuthState;
+use crate::blocklist::BlocklistState;
 use crate::config::{AuthConfig, CaptchaConfig};
 use crate::media::MediaBackend;
 
@@ -89,6 +90,14 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     type Tags<'a>: TagRepository + 'a
     where
         Self: 'a;
+    /// IP blocklist repository borrowed from this handle (#42).
+    type IpBlocklist<'a>: IpBlocklistRepository + 'a
+    where
+        Self: 'a;
+    /// URL blocklist repository borrowed from this handle (#42).
+    type UrlBlocklist<'a>: UrlBlocklistRepository + 'a
+    where
+        Self: 'a;
 
     /// Borrow a [`PageRepository`].
     fn pages(&self) -> Self::Pages<'_>;
@@ -114,6 +123,10 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     fn categories(&self) -> Self::Categories<'_>;
     /// Borrow a [`TagRepository`] (#29).
     fn tags(&self) -> Self::Tags<'_>;
+    /// Borrow an [`IpBlocklistRepository`] (#42).
+    fn ip_blocklist(&self) -> Self::IpBlocklist<'_>;
+    /// Borrow a [`UrlBlocklistRepository`] (#42).
+    fn url_blocklist(&self) -> Self::UrlBlocklist<'_>;
 
     /// Commit a page mutation and its required audit row atomically.
     fn commit_page_audit(
@@ -136,6 +149,8 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     type MediaVariants<'a> = thewiki_storage::sqlite::SqliteMediaVariantRepository<'a>;
     type Categories<'a> = thewiki_storage::sqlite::SqliteCategoryRepository<'a>;
     type Tags<'a> = thewiki_storage::sqlite::SqliteTagRepository<'a>;
+    type IpBlocklist<'a> = thewiki_storage::sqlite::SqliteIpBlocklistRepository<'a>;
+    type UrlBlocklist<'a> = thewiki_storage::sqlite::SqliteUrlBlocklistRepository<'a>;
 
     fn pages(&self) -> Self::Pages<'_> {
         Self::pages(self)
@@ -172,6 +187,12 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     }
     fn tags(&self) -> Self::Tags<'_> {
         Self::tags(self)
+    }
+    fn ip_blocklist(&self) -> Self::IpBlocklist<'_> {
+        Self::ip_blocklist(self)
+    }
+    fn url_blocklist(&self) -> Self::UrlBlocklist<'_> {
+        Self::url_blocklist(self)
     }
 
     fn commit_page_audit(
@@ -256,6 +277,11 @@ pub struct AppState<S: AppStorage> {
     /// `apply_to_*` flags without reading the wider `AppState`. Cloned
     /// cheaply (the type is small `String` + `bool` fields).
     pub captcha_config: CaptchaConfig,
+    /// In-memory IP / URL blocklist snapshot shared with the middleware
+    /// and the admin endpoints (#42). `None` in test fixtures that don't
+    /// wire the layer; otherwise refreshed on boot and on every admin
+    /// mutation.
+    pub blocklist: Option<BlocklistState>,
 }
 
 impl<S: AppStorage> AppState<S> {
@@ -277,6 +303,7 @@ impl<S: AppStorage> AppState<S> {
             media_backend: None,
             captcha: Arc::new(NoopCaptcha),
             captcha_config: CaptchaConfig::default(),
+            blocklist: None,
         }
     }
 
@@ -357,6 +384,14 @@ impl<S: AppStorage> AppState<S> {
         self.captcha_config = captcha_config;
         self
     }
+
+    /// Attach the blocklist state (#42). The middleware reads from this
+    /// shared snapshot; the admin handlers mutate it.
+    #[must_use]
+    pub fn with_blocklist(mut self, blocklist: BlocklistState) -> Self {
+        self.blocklist = Some(blocklist);
+        self
+    }
 }
 
 impl<S: AppStorage> Clone for AppState<S> {
@@ -373,6 +408,7 @@ impl<S: AppStorage> Clone for AppState<S> {
             media_backend: self.media_backend.clone(),
             captcha: Arc::clone(&self.captcha),
             captcha_config: self.captcha_config.clone(),
+            blocklist: self.blocklist.clone(),
         }
     }
 }

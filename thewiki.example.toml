@@ -357,3 +357,23 @@ log_format = "json"
 # `tracing_subscriber` env-filter directive. Mirrors `RUST_LOG` syntax.
 # Default: "info,thewiki=debug".
 log_filter = "info,thewiki=debug"
+
+[security]
+# IP / URL blocklist trust policy (#42).
+#
+# The blocklist middleware runs ahead of auth and rate-limit checks. By
+# default it always uses the socket peer as the client IP. Set
+# `trust_x_forwarded_for = true` and list the CIDRs of your upstream
+# proxies in `trusted_proxies` to honour the `X-Forwarded-For` header for
+# requests that arrive from those upstreams.
+#
+# Spoofing rule: if the socket peer is *not* in `trusted_proxies`, the
+# header is ignored — so an arbitrary client can never forge their IP.
+trust_x_forwarded_for = false
+
+# CIDRs of upstream proxies whose `X-Forwarded-For` header is trusted.
+# Empty by default. Example for a setup with a single front-end load
+# balancer on the loopback interface and a private LAN reverse proxy:
+#
+# trusted_proxies = ["127.0.0.1/32", "10.0.0.0/8"]
+trusted_proxies = []

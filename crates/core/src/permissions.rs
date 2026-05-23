@@ -45,6 +45,8 @@ bitflags! {
         const MANAGE_NAMESPACES = 1 << 8;
         /// View the administrative audit log.
         const VIEW_AUDIT_LOG    = 1 << 9;
+        /// Manage the IP / URL blocklists (#42).
+        const MANAGE_BLOCKLIST  = 1 << 10;
     }
 }
 
@@ -119,6 +121,7 @@ mod tests {
             Permissions::MANAGE_ROLES,
             Permissions::MANAGE_NAMESPACES,
             Permissions::VIEW_AUDIT_LOG,
+            Permissions::MANAGE_BLOCKLIST,
         ] {
             assert!(all.contains(flag), "missing {flag:?}");
         }

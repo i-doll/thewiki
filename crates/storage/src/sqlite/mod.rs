@@ -57,6 +57,7 @@ use crate::error::StorageError;
 mod audit_log;
 mod category;
 mod codec;
+mod ip_blocklist;
 mod media;
 mod namespace;
 mod page;
@@ -67,10 +68,12 @@ mod revision;
 mod role;
 mod session;
 mod tag;
+mod url_blocklist;
 mod user;
 
 pub use audit_log::SqliteAuditLogRepository;
 pub use category::SqliteCategoryRepository;
+pub use ip_blocklist::SqliteIpBlocklistRepository;
 pub use media::{SqliteMediaBlobRepository, SqliteMediaRepository, SqliteMediaVariantRepository};
 pub use namespace::SqliteNamespaceRepository;
 pub use page::SqlitePageRepository;
@@ -80,6 +83,7 @@ pub use revision::SqliteRevisionRepository;
 pub use role::SqliteRoleRepository;
 pub use session::SqliteSessionRepository;
 pub use tag::SqliteTagRepository;
+pub use url_blocklist::SqliteUrlBlocklistRepository;
 pub use user::SqliteUserRepository;
 
 /// Migration set baked into the binary at compile time. See `/migrations/`.
@@ -267,6 +271,20 @@ impl SqliteStorage {
     #[must_use]
     pub fn tags(&self) -> SqliteTagRepository<'_> {
         SqliteTagRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as an
+    /// [`IpBlocklistRepository`](crate::repo::IpBlocklistRepository) (#42).
+    #[must_use]
+    pub fn ip_blocklist(&self) -> SqliteIpBlocklistRepository<'_> {
+        SqliteIpBlocklistRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`UrlBlocklistRepository`](crate::repo::UrlBlocklistRepository) (#42).
+    #[must_use]
+    pub fn url_blocklist(&self) -> SqliteUrlBlocklistRepository<'_> {
+        SqliteUrlBlocklistRepository::new(&self.pool)
     }
 
     /// Commit a page mutation together with its audit-log row.

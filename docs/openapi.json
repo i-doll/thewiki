@@ -13,6 +13,428 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/admin/blocklist/ip": {
+      "get": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`GET /api/v1/admin/blocklist/ip` — list every IP blocklist row.",
+        "operationId": "list_ip",
+        "responses": {
+          "200": {
+            "description": "IP blocklist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpBlocklistListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`POST /api/v1/admin/blocklist/ip` — add a new IP blocklist row.",
+        "operationId": "create_ip",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIpEntryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Row created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpBlocklistView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid CIDR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CIDR already in list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/blocklist/ip/{id}": {
+      "delete": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`DELETE /api/v1/admin/blocklist/ip/{id}` — remove a blocklist row.",
+        "operationId": "delete_ip",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Row identifier",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Row removed"
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Row not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/blocklist/url": {
+      "get": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`GET /api/v1/admin/blocklist/url` — list every URL blocklist row.",
+        "operationId": "list_url",
+        "responses": {
+          "200": {
+            "description": "URL blocklist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrlBlocklistListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`POST /api/v1/admin/blocklist/url` — add a new URL blocklist row.",
+        "operationId": "create_url",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUrlEntryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Row created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrlBlocklistView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid regex",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Pattern already in list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/blocklist/url/{id}": {
+      "delete": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`DELETE /api/v1/admin/blocklist/url/{id}` — remove a blocklist row.",
+        "operationId": "delete_url",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Row identifier",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Row removed"
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Row not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/audit-log": {
       "get": {
         "tags": [
@@ -533,140 +955,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AuthPolicyPayload"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RateLimitErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/register": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "`POST /api/v1/auth/register` — create a new user account (#41 wiring).",
-        "description": "Honours `auth.registration`:\n\n| Policy   | Behaviour                                                 |\n|----------|-----------------------------------------------------------|\n| `open`   | Anyone can register (subject to CAPTCHA if configured).   |\n| `invite` | Returns 403 — invite codes ship with #38.                 |\n| `closed` | Returns 403; admins create accounts manually.             |\n\nWhen `captcha.apply_to_registration = true`, the handler runs\n`captcha.verify` against `captcha_response` before creating the user.\nA failed verification short-circuits with 400 (`captcha_failed`); a\nnetwork error with the upstream surfaces as 502 (`captcha_upstream`)\nso the SPA can offer a retry.\n\nThe created user holds no roles by default — operators promote them\nout-of-band. The endpoint does **not** issue a session; the SPA is\nexpected to redirect to `/login` after a successful 201.",
-        "operationId": "register",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RegisterRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Account created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserPayload"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation or captcha failure",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Registration is closed or requires an invite",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Username already taken",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthErrorBody"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RateLimitErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Storage or hashing failure",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthErrorBody"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "Captcha upstream unreachable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {}
-        ]
-      }
-    },
-    "/api/v1/captcha/config": {
-      "get": {
-        "tags": [
-          "captcha"
-        ],
-        "summary": "`GET /api/v1/captcha/config` — return the provider's frontend config or\n`null` when no widget should be rendered.",
-        "description": "The response is `application/json`; the body is either a\n[`CaptchaFrontendConfig`] object or the JSON literal `null`. The SPA\nbranches on the latter to skip mounting the widget.",
-        "operationId": "captcha_config",
-        "responses": {
-          "200": {
-            "description": "Frontend CAPTCHA config (object) or `null` when no widget should be rendered.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CaptchaFrontendConfig"
-                    }
-                  ]
                 }
               }
             }
@@ -3825,24 +4113,6 @@
           }
         }
       },
-      "CaptchaFrontendConfig": {
-        "type": "object",
-        "description": "Public configuration the SPA needs to render a CAPTCHA challenge.\n\nSurfaced through `GET /api/v1/captcha/config`. `provider` is a stable\nshort identifier (`\"hcaptcha\"`, `\"turnstile\"`, …) the SPA branches on to\npick the right widget; `site_key` is the public key the widget receives.\n\nSensitive material (the secret) is never included.",
-        "required": [
-          "provider",
-          "site_key"
-        ],
-        "properties": {
-          "provider": {
-            "type": "string",
-            "description": "Short stable identifier the SPA matches on (e.g. `\"hcaptcha\"`)."
-          },
-          "site_key": {
-            "type": "string",
-            "description": "Public site key. Safe to embed in HTML / JS — never the secret."
-          }
-        }
-      },
       "CategoryDetailResponse": {
         "type": "object",
         "description": "Response from `GET /api/v1/categories/{slug}`.",
@@ -3989,6 +4259,23 @@
           }
         }
       },
+      "CreateIpEntryRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/v1/admin/blocklist/ip`.",
+        "required": [
+          "cidr"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "description": "CIDR in canonical form. The handler parses with `ipnet::IpNet::from_str`\nbefore persisting — invalid input returns 400 without touching the DB."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional reason. Omitting it stores an empty string."
+          }
+        }
+      },
       "CreateNamespaceRequest": {
         "type": "object",
         "description": "Body of `POST /api/v1/namespaces`.",
@@ -4054,6 +4341,23 @@
           "title": {
             "type": "string",
             "description": "Human-readable title shown in the UI."
+          }
+        }
+      },
+      "CreateUrlEntryRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/v1/admin/blocklist/url`.",
+        "required": [
+          "pattern"
+        ],
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Rust `regex` pattern. Compiled with `regex::Regex::new` for validation\nbefore persisting."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional reason."
           }
         }
       },
@@ -4174,6 +4478,58 @@
           "message": {
             "type": "string",
             "description": "Human-readable description of what went wrong."
+          }
+        }
+      },
+      "IpBlocklistListResponse": {
+        "type": "object",
+        "description": "Wrapper response for `GET` endpoints.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpBlocklistView"
+            },
+            "description": "Rows, newest first."
+          }
+        }
+      },
+      "IpBlocklistView": {
+        "type": "object",
+        "description": "IP blocklist row as returned by the API.",
+        "required": [
+          "id",
+          "cidr",
+          "reason",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "description": "CIDR in canonical human form (`203.0.113.0/24`, `2001:db8::/32`)."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC3339 timestamp."
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User who created the entry."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable row identifier (UUIDv7)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Free-form reason (may be empty)."
           }
         }
       },
@@ -4561,45 +4917,6 @@
           }
         }
       },
-      "RegisterRequest": {
-        "type": "object",
-        "description": "JSON body for [`register`].",
-        "required": [
-          "username",
-          "password"
-        ],
-        "properties": {
-          "captcha_response": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "CAPTCHA challenge token returned by the rendered widget. Required\nwhen `captcha.apply_to_registration = true` on the server; ignored\notherwise. Empty / missing when the noop provider is wired."
-          },
-          "display_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Optional human-readable display name. Falls back to `username` on\nthe UI side when absent."
-          },
-          "email": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Optional email address. Stored normalised to lowercase via\n[`EmailAddress`]."
-          },
-          "password": {
-            "type": "string",
-            "description": "Plain-text password. Hashed via Argon2id before storage."
-          },
-          "username": {
-            "type": "string",
-            "description": "Desired login handle. Validated through [`Username`]."
-          }
-        }
-      },
       "RevertRequest": {
         "type": "object",
         "description": "Body of `POST /api/v1/pages/{slug}/revert`.",
@@ -4881,6 +5198,58 @@
           }
         }
       },
+      "UrlBlocklistListResponse": {
+        "type": "object",
+        "description": "Wrapper response for `GET` endpoints.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UrlBlocklistView"
+            },
+            "description": "Rows, newest first."
+          }
+        }
+      },
+      "UrlBlocklistView": {
+        "type": "object",
+        "description": "URL blocklist row as returned by the API.",
+        "required": [
+          "id",
+          "pattern",
+          "reason",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC3339 timestamp."
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User who created the entry."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable row identifier (UUIDv7)."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Rust `regex` pattern."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Free-form reason (may be empty)."
+          }
+        }
+      },
       "UserId": {
         "type": "string",
         "format": "uuid",
@@ -4994,8 +5363,8 @@
       "description": "Flat tags (#29)"
     },
     {
-      "name": "captcha",
-      "description": "CAPTCHA provider frontend config (#41)"
+      "name": "admin-blocklist",
+      "description": "IP / URL blocklists (#42)"
     }
   ]
 }

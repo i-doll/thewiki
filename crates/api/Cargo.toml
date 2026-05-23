@@ -123,6 +123,12 @@ async-graphql-axum = { workspace = true }
 # in `src/captcha/hcaptcha.rs` to POST against `hcaptcha.com/siteverify`.
 reqwest = { workspace = true }
 
+# Blocklist (#42). `ipnet` parses CIDRs and answers IP-in-CIDR. `regex`
+# compiles operator-supplied URL patterns into a `RegexSet` for fast
+# match-against-many on every page edit.
+ipnet = { workspace = true }
+regex = { workspace = true }
+
 [features]
 default = []
 # Enable the Redis-backed rate-limit store. See
