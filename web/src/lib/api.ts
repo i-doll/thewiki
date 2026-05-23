@@ -270,6 +270,36 @@ export async function fetchAuthMe(): Promise<AuthMePayload | null> {
 }
 
 /**
+ * Body for `POST /api/v1/auth/register` (#41).
+ *
+ * `captcha_response` is required when the server has
+ * `captcha.apply_to_registration = true` — the SPA discovers that via
+ * `GET /api/v1/captcha/config` returning a non-null body. When the
+ * config is `null` (the noop provider, default), the field can be
+ * omitted.
+ */
+export interface RegisterRequest {
+	username: string;
+	password: string;
+	email?: string;
+	display_name?: string;
+	captcha_response?: string;
+}
+
+/**
+ * Submit a registration request. Resolves with the created user payload
+ * on 201, throws an [`ApiError`] otherwise.
+ */
+export async function register(body: RegisterRequest): Promise<AuthMePayload> {
+	return jsonRequest<AuthMePayload>("/api/v1/auth/register", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		credentials: "same-origin",
+		body: JSON.stringify(body),
+	});
+}
+
+/**
  * Parse the `"READ | EDIT"` permissions string into a Set for ergonomic
  * `has(...)` checks.
  */
@@ -304,6 +334,8 @@ export interface NamespaceListResponse {
  */
 export async function listNamespaces(): Promise<NamespaceListResponse> {
 	return jsonRequest<NamespaceListResponse>("/api/v1/namespaces", { method: "GET" });
+}
+
 /** Response from `GET /api/v1/categories`. */
 export interface CategoryListResponse {
 	items: CategoryView[];

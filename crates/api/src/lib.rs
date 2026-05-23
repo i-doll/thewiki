@@ -8,6 +8,7 @@
 pub mod app;
 pub mod audit_log;
 pub mod auth;
+pub mod captcha;
 pub mod categories;
 pub mod cli;
 pub mod config;

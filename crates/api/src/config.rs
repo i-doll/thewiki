@@ -51,6 +51,90 @@ pub struct Config {
     /// introspection knobs typically get flipped off in production via env.
     #[serde(default)]
     pub graphql: GraphQLConfig,
+    /// CAPTCHA provider configuration (#41). Defaults to the noop provider,
+    /// so a fresh deploy doesn't require an hCaptcha account just to boot.
+    #[serde(default)]
+    pub captcha: CaptchaConfig,
+}
+
+/// CAPTCHA provider configuration (#41).
+///
+/// Operators flip `provider = "hcaptcha"` and supply both keys when they
+/// expose the wiki publicly; the noop default is the right call for
+/// private deployments where the auth wall is already enough. The
+/// `apply_to_*` flags decide which surfaces consult the provider — both
+/// land in this struct so they can be toggled independently of the
+/// provider choice (e.g. require CAPTCHA on registration but not on
+/// anonymous edits when the latter are also moderated through the
+/// approval queue).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaptchaConfig {
+    /// Which provider to instantiate. `"noop"` (the default) skips
+    /// verification entirely; `"hcaptcha"` POSTs to the upstream verifier.
+    #[serde(default)]
+    pub provider: CaptchaProviderKind,
+    /// Public site key handed to the rendered widget. Required when
+    /// `provider = "hcaptcha"`; ignored otherwise.
+    #[serde(default)]
+    pub site_key: String,
+    /// Server-side secret. Required when `provider = "hcaptcha"`; never
+    /// emitted to the SPA.
+    #[serde(default)]
+    pub secret_key: String,
+    /// When `true`, the registration handler requires a non-empty
+    /// `captcha_response` field and runs it through the provider before
+    /// creating the user. Defaults to `true` — the most common attack
+    /// surface for a public wiki.
+    #[serde(default = "default_captcha_apply_to_registration")]
+    pub apply_to_registration: bool,
+    /// When `true`, anonymous edits (the configurable-auth fallback that
+    /// fires when `auth.anonymous_edits = true`) also require a verified
+    /// CAPTCHA token. Defaults to `false` — operators who want
+    /// anonymous edits at all usually pair the flag with the approval
+    /// queue (`auth.approval_required_for = "anonymous"`) which is the
+    /// stronger gate.
+    ///
+    /// TODO(#41-followup): this field is currently **inert**. There is no
+    /// anonymous-edit code path yet — every page create/update goes
+    /// through `EditorExtractor`, which requires an `AuthSession`. Once
+    /// the SPA ships an anonymous-edit affordance we'll thread
+    /// `captcha_response` through `CreatePageRequest` / `UpdatePageRequest`
+    /// and consult this flag from the page handlers. Until then, flipping
+    /// it has no observable effect.
+    #[serde(default)]
+    pub apply_to_anonymous_edits: bool,
+}
+
+/// `serde` default for [`CaptchaConfig::apply_to_registration`].
+fn default_captcha_apply_to_registration() -> bool {
+    true
+}
+
+impl Default for CaptchaConfig {
+    fn default() -> Self {
+        Self {
+            provider: CaptchaProviderKind::default(),
+            site_key: String::new(),
+            secret_key: String::new(),
+            apply_to_registration: default_captcha_apply_to_registration(),
+            apply_to_anonymous_edits: false,
+        }
+    }
+}
+
+/// Which CAPTCHA implementation the API should wire up at startup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum CaptchaProviderKind {
+    /// No-op provider that accepts every token. Used as the default and
+    /// in private deploys where the auth wall is the protection.
+    #[default]
+    Noop,
+    /// hCaptcha (https://www.hcaptcha.com/). Verifies tokens against
+    /// `https://api.hcaptcha.com/siteverify`.
+    Hcaptcha,
 }
 
 /// GraphQL endpoint configuration.
@@ -629,6 +713,7 @@ impl Config {
                 log_filter: "info,thewiki=debug".to_string(),
             },
             graphql: GraphQLConfig::default(),
+            captcha: CaptchaConfig::default(),
         }
     }
 
@@ -801,6 +886,24 @@ impl Config {
             ));
         }
 
+        // CAPTCHA: when an upstream provider is selected, both keys must be
+        // set. A half-configured provider would fail at the first request
+        // anyway; we want it loud at startup instead.
+        if self.captcha.provider == CaptchaProviderKind::Hcaptcha {
+            if self.captcha.site_key.trim().is_empty() {
+                return Err(ConfigError::Invalid(
+                    "captcha.site_key must be non-empty when captcha.provider = \"hcaptcha\""
+                        .to_string(),
+                ));
+            }
+            if self.captcha.secret_key.trim().is_empty() {
+                return Err(ConfigError::Invalid(
+                    "captcha.secret_key must be non-empty when captcha.provider = \"hcaptcha\""
+                        .to_string(),
+                ));
+            }
+        }
+
         Ok(())
     }
 }
@@ -864,5 +967,40 @@ mod tests {
         cfg.auth.argon2.memory_kib = 1024;
         let err = cfg.validate().expect_err("weak argon2 must be rejected");
         assert!(matches!(err, ConfigError::Invalid(_)));
+    }
+
+    #[test]
+    fn validate_rejects_hcaptcha_with_missing_keys() {
+        let mut cfg = Config::defaults();
+        cfg.captcha.provider = CaptchaProviderKind::Hcaptcha;
+        let err = cfg
+            .validate()
+            .expect_err("hcaptcha without site_key must be rejected");
+        let msg = match err {
+            ConfigError::Invalid(m) => m,
+            other => panic!("expected Invalid, got {other:?}"),
+        };
+        assert!(msg.contains("site_key"), "{msg}");
+
+        cfg.captcha.site_key = "public-site".to_string();
+        let err = cfg
+            .validate()
+            .expect_err("hcaptcha without secret_key must be rejected");
+        let msg = match err {
+            ConfigError::Invalid(m) => m,
+            other => panic!("expected Invalid, got {other:?}"),
+        };
+        assert!(msg.contains("secret_key"), "{msg}");
+
+        cfg.captcha.secret_key = "server-side".to_string();
+        cfg.validate().expect("fully configured hcaptcha validates");
+    }
+
+    #[test]
+    fn captcha_default_is_noop_with_registration_gate_enabled() {
+        let cfg = Config::defaults();
+        assert_eq!(cfg.captcha.provider, CaptchaProviderKind::Noop);
+        assert!(cfg.captcha.apply_to_registration);
+        assert!(!cfg.captcha.apply_to_anonymous_edits);
     }
 }

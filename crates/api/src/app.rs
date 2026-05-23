@@ -43,6 +43,7 @@ use uuid::Uuid;
 
 use crate::audit_log;
 use crate::auth::{self, AuthState, csrf};
+use crate::captcha;
 use crate::categories;
 use crate::config::{Config, GraphQLConfig, RateLimitConfig};
 use crate::graphql::{self, GraphQLState};
@@ -93,6 +94,7 @@ const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
         (name = "search", description = "Full-text search"),
         (name = "categories", description = "Hierarchical categories (#29)"),
         (name = "tags", description = "Flat tags (#29)"),
+        (name = "captcha", description = "CAPTCHA provider frontend config (#41)"),
     )
 )]
 pub struct ApiDoc;
@@ -109,6 +111,7 @@ fn api_router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
         .nest("/api/v1/search", search::router::<S>())
         .nest("/api/v1/categories", categories::categories_router::<S>())
         .nest("/api/v1/tags", categories::tags_router::<S>())
+        .nest("/api/v1/captcha", captcha::routes::build_router::<S>())
 }
 
 /// Generate the full public REST OpenAPI document.
@@ -167,6 +170,15 @@ fn add_operation_security(api_doc: &mut OpenApiDoc) {
         "/api/v1/auth/me",
         HttpMethod::Get,
         vec![session_requirement()],
+    );
+    // Register is open by design — anyone can post a signup request when the
+    // operator allows it. CSRF is not required because the request creates
+    // the session-bearer; the caller has no session to forge against.
+    set_operation_security(
+        api_doc,
+        "/api/v1/auth/register",
+        HttpMethod::Post,
+        vec![SecurityRequirement::default()],
     );
     set_operation_security(
         api_doc,

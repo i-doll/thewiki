@@ -15,6 +15,7 @@ use thewiki_api::auth::state::AuthState;
 use thewiki_api::rate_limit::RateLimitState;
 use thewiki_api::{
     app,
+    captcha as captcha_module,
     cli::{self, ConfigCommand, RegenThumbnailsArgs, ReindexArgs},
     config::Config,
     media, telemetry,
@@ -106,13 +107,27 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
              local dev only, do not use over plain HTTP in production"
         );
     }
+    // Build the CAPTCHA provider once, share it across the auth + app
+    // state. The factory rejects half-configured upstream providers up
+    // front so a missing key surfaces on boot rather than at the first
+    // verify.
+    let captcha_provider = captcha_module::build_provider(&config.captcha)
+        .map_err(|e| anyhow::anyhow!("initialising captcha provider: {e}"))?;
+    tracing::info!(
+        provider = ?config.captcha.provider,
+        apply_to_registration = config.captcha.apply_to_registration,
+        apply_to_anonymous_edits = config.captcha.apply_to_anonymous_edits,
+        "captcha provider wired",
+    );
+
     let auth_state = AuthState::new(
         storage.clone(),
         hasher,
         session_ttl,
         secure_cookies,
         config.auth.clone(),
-    );
+    )
+    .with_captcha(config.captcha.clone(), Arc::clone(&captcha_provider));
     // Bring up the Tantivy index + indexer worker. Opening the index is
     // synchronous; we run it through `spawn_blocking` so the runtime stays
     // responsive even when the directory is cold. On startup we check the
@@ -150,7 +165,8 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         .with_auth_state(auth_state.clone())
         .with_search(indexer_handle)
         .with_searcher(searcher)
-        .with_search_title_boost(config.search.title_boost);
+        .with_search_title_boost(config.search.title_boost)
+        .with_captcha(config.captcha.clone(), Arc::clone(&captcha_provider));
     let media_backend = thewiki_api::media::build_media_backend(
         &config.storage.backend,
         std::sync::Arc::clone(&app_state.storage),

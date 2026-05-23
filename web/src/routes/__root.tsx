@@ -27,6 +27,9 @@ function RootComponent() {
 						<Link to="/login" className="hover:text-neutral-900">
 							Login
 						</Link>
+						<Link to="/register" className="hover:text-neutral-900">
+							Register
+						</Link>
 					</nav>
 				</div>
 			</header>

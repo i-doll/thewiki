@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use axum::extract::FromRef;
+use thewiki_core::{CaptchaProvider, NoopCaptcha};
 use thewiki_search::{IndexerHandle, Searcher};
 use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
@@ -28,7 +29,7 @@ use thewiki_storage::repo::{
 };
 
 use crate::auth::AuthState;
-use crate::config::AuthConfig;
+use crate::config::{AuthConfig, CaptchaConfig};
 use crate::media::MediaBackend;
 
 /// A cloneable storage facade that hands out per-aggregate repositories.
@@ -247,6 +248,14 @@ pub struct AppState<S: AppStorage> {
     /// roots that don't wire media routes; otherwise an `Arc<dyn …>`
     /// because [`MediaBackend`] is dyn-compatible.
     pub media_backend: Option<Arc<dyn MediaBackend>>,
+    /// CAPTCHA provider (#41). Defaults to `Arc<NoopCaptcha>` so test
+    /// fixtures don't have to know about the captcha wiring. Production
+    /// wires the operator-configured provider via [`Self::with_captcha`].
+    pub captcha: Arc<dyn CaptchaProvider>,
+    /// Snapshot of `Config::captcha` so handlers can branch on the
+    /// `apply_to_*` flags without reading the wider `AppState`. Cloned
+    /// cheaply (the type is small `String` + `bool` fields).
+    pub captcha_config: CaptchaConfig,
 }
 
 impl<S: AppStorage> AppState<S> {
@@ -266,6 +275,8 @@ impl<S: AppStorage> AppState<S> {
             search_title_boost: 2.0,
             media_config: crate::config::MediaConfig::default(),
             media_backend: None,
+            captcha: Arc::new(NoopCaptcha),
+            captcha_config: CaptchaConfig::default(),
         }
     }
 
@@ -332,6 +343,20 @@ impl<S: AppStorage> AppState<S> {
         self.media_backend = Some(backend);
         self
     }
+
+    /// Wire the CAPTCHA provider (#41) into the state. Production callers
+    /// build the provider once at startup via [`crate::captcha::build_provider`]
+    /// and pass it in here so every handler observes the same `Arc<dyn …>`.
+    #[must_use]
+    pub fn with_captcha(
+        mut self,
+        captcha_config: CaptchaConfig,
+        provider: Arc<dyn CaptchaProvider>,
+    ) -> Self {
+        self.captcha = provider;
+        self.captcha_config = captcha_config;
+        self
+    }
 }
 
 impl<S: AppStorage> Clone for AppState<S> {
@@ -346,6 +371,8 @@ impl<S: AppStorage> Clone for AppState<S> {
             search_title_boost: self.search_title_boost,
             media_config: self.media_config.clone(),
             media_backend: self.media_backend.clone(),
+            captcha: Arc::clone(&self.captcha),
+            captcha_config: self.captcha_config.clone(),
         }
     }
 }
