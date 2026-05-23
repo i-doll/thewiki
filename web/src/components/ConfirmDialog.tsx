@@ -24,6 +24,12 @@ export interface ConfirmDialogProps {
 	cancelLabel?: string;
 	/** Disable both buttons (e.g. while the mutation is in flight). */
 	busy?: boolean;
+	/**
+	 * Optional supplemental content rendered between the message and the
+	 * action buttons. Used by the role-delete dialog to surface a
+	 * "View affected users" deep-link when the role is still assigned.
+	 */
+	footer?: React.ReactNode;
 	/** Called when the user clicks `Confirm`. */
 	onConfirm: () => void;
 	/** Called when the user clicks `Cancel`, presses Esc, or backdrop-clicks. */
@@ -37,6 +43,7 @@ export function ConfirmDialog({
 	confirmLabel = "Confirm",
 	cancelLabel = "Cancel",
 	busy,
+	footer,
 	onConfirm,
 	onCancel,
 }: ConfirmDialogProps) {
@@ -86,7 +93,8 @@ export function ConfirmDialog({
 		>
 			<div className="w-[min(28rem,calc(100vw-2rem))] p-6">
 				<h2 className="mb-2 text-lg font-semibold text-neutral-900">{title}</h2>
-				<div className="mb-6 text-sm text-neutral-700">{message}</div>
+				<div className="mb-4 text-sm text-neutral-700">{message}</div>
+				{footer && <div className="mb-4 text-sm">{footer}</div>}
 				<div className="flex justify-end gap-2">
 					<button
 						type="button"

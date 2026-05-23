@@ -24,6 +24,14 @@ import {
 
 export const Route = createFileRoute("/admin/users")({
 	component: AdminUsersComponent,
+	// Accept `?role=<uuid>` so other admin pages can deep-link in with a
+	// role filter pre-applied (most notably the role-delete 409 dialog
+	// surfacing the affected users). Unknown keys are dropped — TanStack
+	// Router throws otherwise.
+	validateSearch: (search: Record<string, unknown>) => {
+		const role = typeof search.role === "string" ? search.role : "";
+		return { role };
+	},
 });
 
 function AdminUsersComponent() {
@@ -45,8 +53,11 @@ function AdminUsersComponent() {
 
 function UsersPanel() {
 	const qc = useQueryClient();
+	// Seed the role filter from `?role=` so role-delete 409 dialogs can
+	// deep-link admins to the list of assigned users.
+	const { role: initialRoleFilter } = Route.useSearch();
 	const [search, setSearch] = useState("");
-	const [roleFilter, setRoleFilter] = useState<string>("");
+	const [roleFilter, setRoleFilter] = useState<string>(initialRoleFilter);
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [bulkRoleId, setBulkRoleId] = useState<string>("");
 	const [confirm, setConfirm] = useState<
@@ -275,6 +286,7 @@ function UsersPanel() {
 										<Link
 											to="/admin/users/$id"
 											params={{ id: u.id }}
+											search={{ role: "" }}
 											className="text-xs text-blue-700 hover:underline"
 										>
 											Edit

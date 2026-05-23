@@ -430,6 +430,29 @@ pub trait RoleRepository: Send + Sync {
         user_id: UserId,
     ) -> impl Future<Output = Result<Vec<Role>, StorageError>> + Send;
 
+    /// Batched form of [`Self::list_for_user`] — enumerate the roles held
+    /// by every user in `user_ids` in one round-trip.
+    ///
+    /// Returns a map keyed by [`UserId`]. Users in `user_ids` that hold
+    /// no roles are present with an empty `Vec` so callers can iterate
+    /// the input list without a follow-up lookup. An empty input slice
+    /// returns an empty map without touching the database.
+    ///
+    /// Used by the admin user-list endpoint to avoid the N+1
+    /// `list_for_user` fan-out that would otherwise fire one query per
+    /// row in the page (up to 500 sequential queries for a maxed-out
+    /// page).
+    ///
+    /// # Errors
+    ///
+    /// Propagates lower-level driver failures.
+    fn list_roles_for_users(
+        &self,
+        user_ids: &[UserId],
+    ) -> impl Future<
+        Output = Result<std::collections::HashMap<UserId, Vec<Role>>, StorageError>,
+    > + Send;
+
     /// Update mutable role columns (`display_name`, `permissions`).
     ///
     /// `name` and `id` are immutable once written.

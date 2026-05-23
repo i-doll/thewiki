@@ -72,6 +72,11 @@ const TILES: Tile[] = [
 		title: "Configuration",
 		description: "Read-only viewer of the loaded runtime configuration.",
 		to: "/admin/config",
+		// MANAGE_USERS chosen as the closest existing "real admin"
+		// permission per #47 (which explicitly asks us not to add a new
+		// flag for the viewer). Widen later if a dedicated
+		// MANAGE_CONFIG bit lands — `MANAGE_ROLES`-only admins can't see
+		// this tile today.
 		requires: "MANAGE_USERS",
 	},
 ];

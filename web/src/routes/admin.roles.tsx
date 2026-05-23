@@ -4,7 +4,7 @@
 //! create / edit / delete; delete is gated by a confirmation dialog.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
@@ -177,6 +177,20 @@ function RolesPanel() {
 							: `Delete the "${confirmDelete.display_name}" role permanently? This cannot be undone.`
 						: ""
 				}
+				// Surface a deep-link to the affected users on the pre-check
+				// "assigned_users > 0" path so the admin can act on the
+				// blocker without hand-rolling a URL.
+				footer={
+					confirmDelete && confirmDelete.assigned_users > 0 ? (
+						<Link
+							to="/admin/users"
+							search={{ role: confirmDelete.id }}
+							className="text-sm text-blue-700 underline hover:text-blue-900"
+						>
+							View affected users →
+						</Link>
+					) : undefined
+				}
 				confirmLabel="Delete"
 				busy={deleteMutation.isPending}
 				onConfirm={() => {
@@ -189,7 +203,23 @@ function RolesPanel() {
 				onCancel={() => setConfirmDelete(null)}
 			/>
 			{deleteMutation.isError && (
-				<p className="mt-3 text-sm text-red-700">{(deleteMutation.error as ApiError).message}</p>
+				<div className="mt-3 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+					<p>{(deleteMutation.error as ApiError).message}</p>
+					{/* The server returns 409 when the role is still assigned
+					    to one or more users (a concurrent assignment that
+					    slipped past the cached `assigned_users` pre-check).
+					    Offer the same deep-link as the dialog so the admin
+					    can act on the blocker. */}
+					{(deleteMutation.error as ApiError).status === 409 && deleteMutation.variables && (
+						<Link
+							to="/admin/users"
+							search={{ role: deleteMutation.variables }}
+							className="mt-1 inline-block text-blue-700 underline hover:text-blue-900"
+						>
+							View affected users →
+						</Link>
+					)}
+				</div>
 			)}
 		</main>
 	);

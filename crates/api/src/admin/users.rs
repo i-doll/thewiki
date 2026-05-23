@@ -25,8 +25,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thewiki_core::{Permissions, RoleId, UserId};
 use thewiki_storage::repo::{
-    AuditLogRepository, Cursor, DEFAULT_PAGE_SIZE, NewAuditLogEntry, PageSlice, RoleRepository,
-    UserListFilter, UserRepository,
+    AuditLogRepository, Cursor, NewAuditLogEntry, PageSlice, RoleRepository, UserListFilter,
+    UserRepository,
 };
 use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
@@ -172,21 +172,30 @@ pub async fn list_users<S: AppStorage>(
         search: query.search,
         role_id: query.role_id.map(RoleId::from_uuid),
     };
-    let limit = query.limit.unwrap_or(DEFAULT_PAGE_SIZE);
+    // Honour the operator's per-deployment override
+    // (`state.route_config.default_page_size`) rather than the
+    // module-level constant — matches every other paginated endpoint.
+    let limit = query
+        .limit
+        .unwrap_or(state.route_config.default_page_size);
     let cursor = query.cursor.map(Cursor);
 
     let PageSlice { items, next } = state.storage.users().list(filter, cursor, limit).await?;
 
-    // Hydrate each row with its assigned roles. The admin UI shows the
-    // roles inline so we batch them here rather than forcing the SPA to
-    // do an N+1 follow-up. For very large lists this is still bounded by
-    // `limit` (max 500 per page).
-    let mut views = Vec::with_capacity(items.len());
-    let roles_repo = state.storage.roles();
-    for user in items {
-        let roles = roles_repo.list_for_user(user.id).await?;
-        views.push(admin_user_view(user, roles));
-    }
+    // Hydrate each row with its assigned roles in a single batched query
+    // instead of fanning out one `list_for_user` per row. A maxed-out
+    // page is 500 users; the old loop fired 500 sequential queries
+    // (plus the initial list), turning into a noticeable stall on
+    // anything beyond a single-machine deploy.
+    let user_ids: Vec<_> = items.iter().map(|u| u.id).collect();
+    let mut roles_by_user = state.storage.roles().list_roles_for_users(&user_ids).await?;
+    let views: Vec<_> = items
+        .into_iter()
+        .map(|user| {
+            let roles = roles_by_user.remove(&user.id).unwrap_or_default();
+            admin_user_view(user, roles)
+        })
+        .collect();
     Ok(Json(AdminUserListResponse {
         items: views,
         next_cursor: next.map(|c| c.0),
@@ -249,6 +258,19 @@ pub async fn assign_roles<S: AppStorage>(
     ensure_manage_users(&actor)?;
     if req.role_ids.is_empty() {
         return Err(ApiError::InvalidInput("role_ids must not be empty".into()));
+    }
+    // Reject duplicate ids up front. The assign call itself is
+    // idempotent, but a duplicate slips through the "skip already-held
+    // roles" filter on the *first* iteration and would otherwise emit
+    // two `user.role.assign` audit rows for the same logical
+    // assignment.
+    let mut seen = std::collections::HashSet::with_capacity(req.role_ids.len());
+    for rid in &req.role_ids {
+        if !seen.insert(*rid) {
+            return Err(ApiError::InvalidInput(
+                "role_ids must not contain duplicates".into(),
+            ));
+        }
     }
     let user_id = UserId::from_uuid(id);
     let user = state.storage.users().get_by_id(user_id).await?;

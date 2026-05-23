@@ -217,6 +217,49 @@ async fn config_returns_redacted_secret_when_available() {
 }
 
 #[tokio::test]
+async fn config_response_never_leaks_database_url_credentials() {
+    // The /admin/config viewer is gated by MANAGE_USERS. A Postgres deploy
+    // configures `database.url = "postgres://user:pass@host/db"`; if the
+    // redaction step misses that field the admin can read the database
+    // password without shell access. Regression guard: assert the
+    // credentials never appear in the wire response.
+    let mut cfg = Config::defaults();
+    cfg.database.url =
+        "postgres://wiki_app:hunter2-do-not-leak@db.internal:5432/wiki".into();
+    let (router, storage) = boot_with_config(cfg).await;
+    let admin = seed_user(&storage, "admin").await;
+    seed_role_for(&storage, admin.id, "admin", Permissions::MANAGE_USERS).await;
+    let session = seed_session(&storage, admin.id).await;
+
+    let (status, body) =
+        json_request(router, "GET", "/api/v1/admin/config", Some(&session)).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+
+    // The leaf itself is redacted.
+    assert_eq!(
+        body.pointer("/config/database/url").and_then(|v| v.as_str()),
+        Some("<redacted>"),
+    );
+
+    // Defence in depth: serialise the whole response and grep for the
+    // password / URL-shape strings. If a future schema change introduces
+    // another leaf that surfaces the URL verbatim, this fails loud.
+    let serialised = serde_json::to_string(&body).expect("serialise body");
+    assert!(
+        !serialised.contains("hunter2-do-not-leak"),
+        "db password leaked in response: {serialised}"
+    );
+    assert!(
+        !serialised.contains("postgres://"),
+        "raw db URL leaked in response: {serialised}"
+    );
+    assert!(
+        !serialised.contains("wiki_app:"),
+        "db username leaked in response: {serialised}"
+    );
+}
+
+#[tokio::test]
 async fn config_returns_null_when_no_runtime_config_wired() {
     let (router, storage) = boot_without_config().await;
     let admin = seed_user(&storage, "admin").await;

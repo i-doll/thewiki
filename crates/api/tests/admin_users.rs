@@ -281,6 +281,65 @@ async fn list_users_role_filter_restricts_to_assigned() {
 }
 
 #[tokio::test]
+async fn list_users_hydrates_roles_for_every_row_in_one_batch() {
+    // Regression test for the N+1 fan-out fix. Three users on the page,
+    // each with a different role profile (two roles / one role / none).
+    // The handler now calls `list_roles_for_users` once and groups the
+    // result server-side; this test asserts the wire response carries
+    // the right roles per user regardless of how the rows are grouped.
+    let (router, storage) = boot().await;
+    let admin = seed_user(&storage, "admin").await;
+    let admin_role = seed_role(&storage, "admin", Permissions::MANAGE_USERS).await;
+    assign_role(&storage, admin.id, admin_role.id).await;
+
+    let alice = seed_user(&storage, "alice").await;
+    let editor_role = seed_role(&storage, "editor", Permissions::EDIT).await;
+    let reviewer_role = seed_role(&storage, "reviewer", Permissions::READ).await;
+    assign_role(&storage, alice.id, editor_role.id).await;
+    assign_role(&storage, alice.id, reviewer_role.id).await;
+
+    let bob = seed_user(&storage, "bob").await;
+    assign_role(&storage, bob.id, editor_role.id).await;
+
+    // carol holds no roles — must still appear in the listing with `roles: []`.
+    let _carol = seed_user(&storage, "carol").await;
+
+    let session = seed_session(&storage, admin.id).await;
+    let (status, body) = json_request(
+        router,
+        "GET",
+        "/api/v1/admin/users",
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 4, "admin + alice + bob + carol");
+
+    let by_username: std::collections::HashMap<&str, &Value> = items
+        .iter()
+        .map(|u| (u["username"].as_str().expect("username"), u))
+        .collect();
+
+    let role_names = |entry: &Value| -> Vec<String> {
+        let mut names: Vec<String> = entry["roles"]
+            .as_array()
+            .expect("roles array")
+            .iter()
+            .map(|r| r["name"].as_str().expect("role name").to_string())
+            .collect();
+        names.sort();
+        names
+    };
+
+    assert_eq!(role_names(by_username["alice"]), vec!["editor", "reviewer"]);
+    assert_eq!(role_names(by_username["bob"]), vec!["editor"]);
+    assert_eq!(role_names(by_username["carol"]), Vec::<String>::new());
+    assert_eq!(role_names(by_username["admin"]), vec!["admin"]);
+}
+
+#[tokio::test]
 async fn get_user_returns_attached_roles() {
     let (router, storage) = boot().await;
     let admin = seed_user(&storage, "admin").await;

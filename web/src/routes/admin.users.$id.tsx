@@ -112,7 +112,7 @@ function Editor({ userId }: { userId: string }) {
 	return (
 		<main className="mx-auto max-w-3xl px-6 py-10">
 			<nav className="mb-4 text-xs text-neutral-500">
-				<Link to="/admin/users" className="hover:underline">
+				<Link to="/admin/users" search={{ role: "" }} className="hover:underline">
 					← Back to users
 				</Link>
 			</nav>

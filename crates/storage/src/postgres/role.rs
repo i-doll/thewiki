@@ -1,5 +1,7 @@
 //! Postgres [`RoleRepository`](crate::repo::RoleRepository) impl.
 
+use std::collections::HashMap;
+
 use sqlx::PgPool;
 use thewiki_core::{Role, RoleId, RoleName, UserId};
 use uuid::Uuid;
@@ -124,6 +126,39 @@ impl RoleRepository for PostgresRoleRepository<'_> {
         rows.into_iter().map(row_to_role).collect()
     }
 
+    async fn list_roles_for_users(
+        &self,
+        user_ids: &[UserId],
+    ) -> Result<HashMap<UserId, Vec<Role>>, StorageError> {
+        let mut out: HashMap<UserId, Vec<Role>> = HashMap::with_capacity(user_ids.len());
+        for uid in user_ids {
+            out.entry(*uid).or_default();
+        }
+        if user_ids.is_empty() {
+            return Ok(out);
+        }
+        // Postgres has native array binding, so the IN list is just one
+        // parameter (no QueryBuilder dance like sqlite needs).
+        let uuids: Vec<Uuid> = user_ids.iter().map(|u| u.into_uuid()).collect();
+        let rows: Vec<(Uuid, Uuid, String, String, i64)> = sqlx::query_as(
+            "SELECT ur.user_id, r.id, r.name, r.display_name, r.permissions
+             FROM roles r
+             JOIN user_roles ur ON ur.role_id = r.id
+             WHERE ur.user_id = ANY($1)
+             ORDER BY ur.user_id, r.name ASC",
+        )
+        .bind(&uuids)
+        .fetch_all(self.pool)
+        .await?;
+
+        for (user_uuid, id, name, display_name, permissions) in rows {
+            let user_id = UserId::from_uuid(user_uuid);
+            let role = role_from_row(id, name, display_name, permissions)?;
+            out.entry(user_id).or_default().push(role);
+        }
+        Ok(out)
+    }
+
     async fn update(&self, role: &Role) -> Result<(), StorageError> {
         let permissions = permissions_to_i64(role.permissions);
         let out = sqlx::query(
@@ -144,21 +179,32 @@ impl RoleRepository for PostgresRoleRepository<'_> {
     async fn delete(&self, id: RoleId) -> Result<(), StorageError> {
         // user_roles.role_id is ON DELETE CASCADE; refuse here when the role
         // is still assigned to a user so the cascade doesn't silently
-        // disconnect them.
-        let assigned = self.count_users(id).await?;
-        if assigned > 0 {
-            return Err(StorageError::conflict(
-                "role is still assigned to one or more users",
-            ));
+        // disconnect them. Folding the assignment check into the DELETE
+        // statement keeps the precondition race-safe — a separate
+        // `count_users` + `DELETE` would admit a concurrent assignment
+        // between the two statements.
+        let out = sqlx::query(
+            "DELETE FROM roles r
+             WHERE r.id = $1
+               AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.role_id = r.id)",
+        )
+        .bind(id.into_uuid())
+        .execute(self.pool)
+        .await?;
+        if out.rows_affected() != 0 {
+            return Ok(());
         }
-        let out = sqlx::query("DELETE FROM roles WHERE id = $1")
+        // Zero rows affected — disambiguate 404 vs 409.
+        let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM roles WHERE id = $1")
             .bind(id.into_uuid())
-            .execute(self.pool)
+            .fetch_optional(self.pool)
             .await?;
-        if out.rows_affected() == 0 {
-            Err(StorageError::NotFound)
+        if exists.is_some() {
+            Err(StorageError::conflict(
+                "role is still assigned to one or more users",
+            ))
         } else {
-            Ok(())
+            Err(StorageError::NotFound)
         }
     }
 

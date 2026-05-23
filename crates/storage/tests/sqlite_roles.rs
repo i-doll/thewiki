@@ -154,6 +154,84 @@ async fn list_for_user_returns_only_their_roles() {
 }
 
 #[tokio::test]
+async fn list_roles_for_users_batches_correctly() {
+    // Regression test for the admin /users N+1 fan-out fix. Three users,
+    // mixed role assignments — one with two roles, one with one, one
+    // with none. A single batched call should group server-side and
+    // hand back the correct mapping including the role-less user's
+    // empty Vec.
+    let storage = fresh_storage().await;
+
+    let alice = make_user("alice");
+    let bob = make_user("bob");
+    let carol = make_user("carol");
+    storage.users().create(&alice, None).await.expect("alice");
+    storage.users().create(&bob, None).await.expect("bob");
+    storage.users().create(&carol, None).await.expect("carol");
+
+    let editor = make_role("editor", Permissions::EDIT);
+    let admin = make_role("admin", Permissions::all());
+    let reviewer = make_role("reviewer", Permissions::READ);
+    storage.roles().create(&editor).await.expect("editor");
+    storage.roles().create(&admin).await.expect("admin");
+    storage.roles().create(&reviewer).await.expect("reviewer");
+
+    // alice holds two roles, bob holds one, carol holds none.
+    storage
+        .roles()
+        .assign_to_user(alice.id, editor.id)
+        .await
+        .expect("alice/editor");
+    storage
+        .roles()
+        .assign_to_user(alice.id, reviewer.id)
+        .await
+        .expect("alice/reviewer");
+    storage
+        .roles()
+        .assign_to_user(bob.id, admin.id)
+        .await
+        .expect("bob/admin");
+
+    let by_user = storage
+        .roles()
+        .list_roles_for_users(&[alice.id, bob.id, carol.id])
+        .await
+        .expect("batched roles");
+
+    // Every requested user must appear in the result, including carol
+    // who holds no roles — callers must be able to iterate the input
+    // list without a follow-up presence check.
+    assert_eq!(by_user.len(), 3, "all three users should be present");
+
+    let mut alice_roles: Vec<&str> =
+        by_user[&alice.id].iter().map(|r| r.name.as_str()).collect();
+    alice_roles.sort_unstable();
+    assert_eq!(alice_roles, vec!["editor", "reviewer"]);
+
+    let bob_roles: Vec<&str> = by_user[&bob.id].iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(bob_roles, vec!["admin"]);
+
+    assert!(
+        by_user[&carol.id].is_empty(),
+        "carol holds no roles but must be present"
+    );
+}
+
+#[tokio::test]
+async fn list_roles_for_users_empty_input_returns_empty_map() {
+    // An empty input slice should not touch the database (the SQL would
+    // otherwise be `IN ()` which sqlite rejects); the impl short-circuits.
+    let storage = fresh_storage().await;
+    let by_user = storage
+        .roles()
+        .list_roles_for_users(&[])
+        .await
+        .expect("empty batched roles");
+    assert!(by_user.is_empty());
+}
+
+#[tokio::test]
 async fn permissions_round_trip_through_storage() {
     let storage = fresh_storage().await;
     let perms = Permissions::READ
