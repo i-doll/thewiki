@@ -15,15 +15,23 @@ import { Route as RegisterRouteImport } from './routes/register'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WikiIndexRouteImport } from './routes/wiki.index'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as WikiSlugRouteImport } from './routes/wiki.$slug'
 import { Route as TagTagRouteImport } from './routes/tag.$tag'
 import { Route as CategorySlugRouteImport } from './routes/category.$slug'
+import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as AdminRolesRouteImport } from './routes/admin.roles'
+import { Route as AdminProtectionRouteImport } from './routes/admin.protection'
+import { Route as AdminNamespacesRouteImport } from './routes/admin.namespaces'
+import { Route as AdminConfigRouteImport } from './routes/admin.config'
 import { Route as AdminBlocklistsRouteImport } from './routes/admin.blocklists'
+import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
 import { Route as AdminApprovalQueueRouteImport } from './routes/admin.approval-queue'
 import { Route as WikiSlugEditRouteImport } from './routes/wiki_.$slug.edit'
 import { Route as WikiSlugHistoryRouteImport } from './routes/wiki.$slug.history'
 import { Route as WikiSlugDiffRouteImport } from './routes/wiki.$slug.diff'
 import { Route as WikiNamespaceSlugRouteImport } from './routes/wiki.$namespace.$slug'
+import { Route as AdminUsersIdRouteImport } from './routes/admin.users.$id'
 import { Route as WikiNamespaceSlugEditRouteImport } from './routes/wiki_.$namespace.$slug.edit'
 import { Route as WikiNamespaceSlugHistoryRouteImport } from './routes/wiki.$namespace.$slug.history'
 import { Route as WikiNamespaceSlugDiffRouteImport } from './routes/wiki.$namespace.$slug.diff'
@@ -58,6 +66,11 @@ const WikiIndexRoute = WikiIndexRouteImport.update({
   path: '/wiki/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WikiSlugRoute = WikiSlugRouteImport.update({
   id: '/wiki/$slug',
   path: '/wiki/$slug',
@@ -73,9 +86,39 @@ const CategorySlugRoute = CategorySlugRouteImport.update({
   path: '/category/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/admin/users',
+  path: '/admin/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRolesRoute = AdminRolesRouteImport.update({
+  id: '/admin/roles',
+  path: '/admin/roles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminProtectionRoute = AdminProtectionRouteImport.update({
+  id: '/admin/protection',
+  path: '/admin/protection',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminNamespacesRoute = AdminNamespacesRouteImport.update({
+  id: '/admin/namespaces',
+  path: '/admin/namespaces',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminConfigRoute = AdminConfigRouteImport.update({
+  id: '/admin/config',
+  path: '/admin/config',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminBlocklistsRoute = AdminBlocklistsRouteImport.update({
   id: '/admin/blocklists',
   path: '/admin/blocklists',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminAuditLogRoute = AdminAuditLogRouteImport.update({
+  id: '/admin/audit-log',
+  path: '/admin/audit-log',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminApprovalQueueRoute = AdminApprovalQueueRouteImport.update({
@@ -103,6 +146,11 @@ const WikiNamespaceSlugRoute = WikiNamespaceSlugRouteImport.update({
   path: '/wiki/$namespace/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminUsersIdRoute = AdminUsersIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AdminUsersRoute,
+} as any)
 const WikiNamespaceSlugEditRoute = WikiNamespaceSlugEditRouteImport.update({
   id: '/wiki_/$namespace/$slug/edit',
   path: '/wiki/$namespace/$slug/edit',
@@ -127,11 +175,19 @@ export interface FileRoutesByFullPath {
   '/search': typeof SearchRoute
   '/watchlist': typeof WatchlistRoute
   '/admin/approval-queue': typeof AdminApprovalQueueRoute
+  '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/blocklists': typeof AdminBlocklistsRoute
+  '/admin/config': typeof AdminConfigRoute
+  '/admin/namespaces': typeof AdminNamespacesRoute
+  '/admin/protection': typeof AdminProtectionRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/users': typeof AdminUsersRouteWithChildren
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
+  '/admin/': typeof AdminIndexRoute
   '/wiki/': typeof WikiIndexRoute
+  '/admin/users/$id': typeof AdminUsersIdRoute
   '/wiki/$namespace/$slug': typeof WikiNamespaceSlugRouteWithChildren
   '/wiki/$slug/diff': typeof WikiSlugDiffRoute
   '/wiki/$slug/history': typeof WikiSlugHistoryRoute
@@ -147,11 +203,19 @@ export interface FileRoutesByTo {
   '/search': typeof SearchRoute
   '/watchlist': typeof WatchlistRoute
   '/admin/approval-queue': typeof AdminApprovalQueueRoute
+  '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/blocklists': typeof AdminBlocklistsRoute
+  '/admin/config': typeof AdminConfigRoute
+  '/admin/namespaces': typeof AdminNamespacesRoute
+  '/admin/protection': typeof AdminProtectionRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/users': typeof AdminUsersRouteWithChildren
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
+  '/admin': typeof AdminIndexRoute
   '/wiki': typeof WikiIndexRoute
+  '/admin/users/$id': typeof AdminUsersIdRoute
   '/wiki/$namespace/$slug': typeof WikiNamespaceSlugRouteWithChildren
   '/wiki/$slug/diff': typeof WikiSlugDiffRoute
   '/wiki/$slug/history': typeof WikiSlugHistoryRoute
@@ -168,11 +232,19 @@ export interface FileRoutesById {
   '/search': typeof SearchRoute
   '/watchlist': typeof WatchlistRoute
   '/admin/approval-queue': typeof AdminApprovalQueueRoute
+  '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/blocklists': typeof AdminBlocklistsRoute
+  '/admin/config': typeof AdminConfigRoute
+  '/admin/namespaces': typeof AdminNamespacesRoute
+  '/admin/protection': typeof AdminProtectionRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/users': typeof AdminUsersRouteWithChildren
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
+  '/admin/': typeof AdminIndexRoute
   '/wiki/': typeof WikiIndexRoute
+  '/admin/users/$id': typeof AdminUsersIdRoute
   '/wiki/$namespace/$slug': typeof WikiNamespaceSlugRouteWithChildren
   '/wiki/$slug/diff': typeof WikiSlugDiffRoute
   '/wiki/$slug/history': typeof WikiSlugHistoryRoute
@@ -190,11 +262,19 @@ export interface FileRouteTypes {
     | '/search'
     | '/watchlist'
     | '/admin/approval-queue'
+    | '/admin/audit-log'
     | '/admin/blocklists'
+    | '/admin/config'
+    | '/admin/namespaces'
+    | '/admin/protection'
+    | '/admin/roles'
+    | '/admin/users'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
+    | '/admin/'
     | '/wiki/'
+    | '/admin/users/$id'
     | '/wiki/$namespace/$slug'
     | '/wiki/$slug/diff'
     | '/wiki/$slug/history'
@@ -210,11 +290,19 @@ export interface FileRouteTypes {
     | '/search'
     | '/watchlist'
     | '/admin/approval-queue'
+    | '/admin/audit-log'
     | '/admin/blocklists'
+    | '/admin/config'
+    | '/admin/namespaces'
+    | '/admin/protection'
+    | '/admin/roles'
+    | '/admin/users'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
+    | '/admin'
     | '/wiki'
+    | '/admin/users/$id'
     | '/wiki/$namespace/$slug'
     | '/wiki/$slug/diff'
     | '/wiki/$slug/history'
@@ -230,11 +318,19 @@ export interface FileRouteTypes {
     | '/search'
     | '/watchlist'
     | '/admin/approval-queue'
+    | '/admin/audit-log'
     | '/admin/blocklists'
+    | '/admin/config'
+    | '/admin/namespaces'
+    | '/admin/protection'
+    | '/admin/roles'
+    | '/admin/users'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
+    | '/admin/'
     | '/wiki/'
+    | '/admin/users/$id'
     | '/wiki/$namespace/$slug'
     | '/wiki/$slug/diff'
     | '/wiki/$slug/history'
@@ -251,10 +347,17 @@ export interface RootRouteChildren {
   SearchRoute: typeof SearchRoute
   WatchlistRoute: typeof WatchlistRoute
   AdminApprovalQueueRoute: typeof AdminApprovalQueueRoute
+  AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminBlocklistsRoute: typeof AdminBlocklistsRoute
+  AdminConfigRoute: typeof AdminConfigRoute
+  AdminNamespacesRoute: typeof AdminNamespacesRoute
+  AdminProtectionRoute: typeof AdminProtectionRoute
+  AdminRolesRoute: typeof AdminRolesRoute
+  AdminUsersRoute: typeof AdminUsersRouteWithChildren
   CategorySlugRoute: typeof CategorySlugRoute
   TagTagRoute: typeof TagTagRoute
   WikiSlugRoute: typeof WikiSlugRouteWithChildren
+  AdminIndexRoute: typeof AdminIndexRoute
   WikiIndexRoute: typeof WikiIndexRoute
   WikiNamespaceSlugRoute: typeof WikiNamespaceSlugRouteWithChildren
   WikiSlugEditRoute: typeof WikiSlugEditRoute
@@ -305,6 +408,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WikiIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/': {
+      id: '/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/wiki/$slug': {
       id: '/wiki/$slug'
       path: '/wiki/$slug'
@@ -326,11 +436,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CategorySlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/admin/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/roles': {
+      id: '/admin/roles'
+      path: '/admin/roles'
+      fullPath: '/admin/roles'
+      preLoaderRoute: typeof AdminRolesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/protection': {
+      id: '/admin/protection'
+      path: '/admin/protection'
+      fullPath: '/admin/protection'
+      preLoaderRoute: typeof AdminProtectionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/namespaces': {
+      id: '/admin/namespaces'
+      path: '/admin/namespaces'
+      fullPath: '/admin/namespaces'
+      preLoaderRoute: typeof AdminNamespacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/config': {
+      id: '/admin/config'
+      path: '/admin/config'
+      fullPath: '/admin/config'
+      preLoaderRoute: typeof AdminConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/blocklists': {
       id: '/admin/blocklists'
       path: '/admin/blocklists'
       fullPath: '/admin/blocklists'
       preLoaderRoute: typeof AdminBlocklistsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/audit-log': {
+      id: '/admin/audit-log'
+      path: '/admin/audit-log'
+      fullPath: '/admin/audit-log'
+      preLoaderRoute: typeof AdminAuditLogRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/approval-queue': {
@@ -368,6 +520,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WikiNamespaceSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/users/$id': {
+      id: '/admin/users/$id'
+      path: '/$id'
+      fullPath: '/admin/users/$id'
+      preLoaderRoute: typeof AdminUsersIdRouteImport
+      parentRoute: typeof AdminUsersRoute
+    }
     '/wiki_/$namespace/$slug/edit': {
       id: '/wiki_/$namespace/$slug/edit'
       path: '/wiki/$namespace/$slug/edit'
@@ -391,6 +550,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AdminUsersRouteChildren {
+  AdminUsersIdRoute: typeof AdminUsersIdRoute
+}
+
+const AdminUsersRouteChildren: AdminUsersRouteChildren = {
+  AdminUsersIdRoute: AdminUsersIdRoute,
+}
+
+const AdminUsersRouteWithChildren = AdminUsersRoute._addFileChildren(
+  AdminUsersRouteChildren,
+)
 
 interface WikiSlugRouteChildren {
   WikiSlugDiffRoute: typeof WikiSlugDiffRoute
@@ -426,10 +597,17 @@ const rootRouteChildren: RootRouteChildren = {
   SearchRoute: SearchRoute,
   WatchlistRoute: WatchlistRoute,
   AdminApprovalQueueRoute: AdminApprovalQueueRoute,
+  AdminAuditLogRoute: AdminAuditLogRoute,
   AdminBlocklistsRoute: AdminBlocklistsRoute,
+  AdminConfigRoute: AdminConfigRoute,
+  AdminNamespacesRoute: AdminNamespacesRoute,
+  AdminProtectionRoute: AdminProtectionRoute,
+  AdminRolesRoute: AdminRolesRoute,
+  AdminUsersRoute: AdminUsersRouteWithChildren,
   CategorySlugRoute: CategorySlugRoute,
   TagTagRoute: TagTagRoute,
   WikiSlugRoute: WikiSlugRouteWithChildren,
+  AdminIndexRoute: AdminIndexRoute,
   WikiIndexRoute: WikiIndexRoute,
   WikiNamespaceSlugRoute: WikiNamespaceSlugRouteWithChildren,
   WikiSlugEditRoute: WikiSlugEditRoute,

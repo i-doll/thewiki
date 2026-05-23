@@ -1,5 +1,7 @@
 //! libsql [`RoleRepository`](crate::repo::RoleRepository) impl.
 
+use std::collections::HashMap;
+
 use libsql::{Connection, Value, params};
 use thewiki_core::{Role, RoleId, RoleName, UserId};
 
@@ -142,5 +144,106 @@ impl RoleRepository for LibsqlRoleRepository<'_> {
             out.push(role_from_libsql_row(&row)?);
         }
         Ok(out)
+    }
+
+    async fn list_roles_for_users(
+        &self,
+        user_ids: &[UserId],
+    ) -> Result<HashMap<UserId, Vec<Role>>, StorageError> {
+        // libsql's params! macro doesn't accept a runtime-sized list of
+        // bindings cleanly. The integration suite exercises the SQLite
+        // backend; libsql falls back to the N×1 loop. This matches the
+        // parity story for `count_users` (per-aggregate impls keep the
+        // common path identical and let the less-trafficked backends use
+        // simpler code).
+        let mut out: HashMap<UserId, Vec<Role>> = HashMap::with_capacity(user_ids.len());
+        for uid in user_ids {
+            let roles = self.list_for_user(*uid).await?;
+            out.insert(*uid, roles);
+        }
+        Ok(out)
+    }
+
+    async fn update(&self, role: &Role) -> Result<(), StorageError> {
+        let id = uuid_bytes(role.id.into_uuid());
+        let permissions = permissions_to_i64(role.permissions);
+        let rows_affected = into_db(
+            self.conn
+                .execute(
+                    "UPDATE roles SET display_name = ?1, permissions = ?2 WHERE id = ?3",
+                    params![role.display_name.clone(), permissions, Value::Blob(id.to_vec())],
+                )
+                .await,
+        )?;
+        if rows_affected == 0 {
+            Err(StorageError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn delete(&self, id: RoleId) -> Result<(), StorageError> {
+        // user_roles.role_id is ON DELETE CASCADE — see the matching SQLite
+        // impl for the rationale of refusing here when the role is still
+        // assigned to one or more users. The `NOT EXISTS` predicate
+        // folds the precondition into the same statement so a concurrent
+        // assignment can't slip between a check-then-act sequence.
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let rows_affected = into_db(
+            self.conn
+                .execute(
+                    "DELETE FROM roles
+                     WHERE id = ?1
+                       AND NOT EXISTS (SELECT 1 FROM user_roles WHERE role_id = ?1)",
+                    params![Value::Blob(id_bytes.to_vec())],
+                )
+                .await,
+        )?;
+        if rows_affected != 0 {
+            return Ok(());
+        }
+        // Disambiguate 404 vs 409 — same logic as the SQLite impl.
+        let mut rows = into_db(
+            self.conn
+                .query(
+                    "SELECT 1 FROM roles WHERE id = ?1",
+                    params![Value::Blob(id_bytes.to_vec())],
+                )
+                .await,
+        )?;
+        if into_db(rows.next().await)?.is_some() {
+            Err(StorageError::conflict(
+                "role is still assigned to one or more users",
+            ))
+        } else {
+            Err(StorageError::NotFound)
+        }
+    }
+
+    async fn count_users(&self, id: RoleId) -> Result<u64, StorageError> {
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let mut rows = into_db(
+            self.conn
+                .query(
+                    "SELECT COUNT(*) FROM user_roles WHERE role_id = ?1",
+                    params![Value::Blob(id_bytes.to_vec())],
+                )
+                .await,
+        )?;
+        let row = into_db(rows.next().await)?
+            .ok_or_else(|| StorageError::invalid_input("count returned no rows"))?;
+        let val = row
+            .get_value(0)
+            .map_err(|err| StorageError::InvalidInput(format!("count: {err}")))?;
+        let count = match val {
+            Value::Integer(i) if i >= 0 => i as u64,
+            Value::Integer(_) => 0,
+            other => {
+                return Err(StorageError::InvalidInput(format!(
+                    "count is not INTEGER: {other:?}"
+                )))
+            }
+        };
+        Ok(count)
     }
 }

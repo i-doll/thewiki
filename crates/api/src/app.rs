@@ -103,6 +103,9 @@ const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
         (name = "tags", description = "Flat tags (#29)"),
         (name = "captcha", description = "CAPTCHA provider frontend config (#41)"),
         (name = "admin-blocklist", description = "IP / URL blocklists (#42)"),
+        (name = "admin-users", description = "User management (#47)"),
+        (name = "admin-roles", description = "Role management (#47)"),
+        (name = "admin-config", description = "Runtime configuration viewer (#47)"),
         (name = "watchlist", description = "Per-user page watchlist + Atom feed (#46)"),
         (name = "pending-revisions", description = "Edit approval queue (#40)"),
         (name = "notifications", description = "In-app inbox (#40)"),
@@ -337,6 +340,62 @@ fn add_operation_security(api_doc: &mut OpenApiDoc) {
         "/api/v1/admin/blocklist/url/{id}",
         HttpMethod::Delete,
         vec![session_and_csrf_requirement()],
+    );
+    // Admin user/role management (#47). Reads need a session; mutations
+    // also need the double-submit CSRF token because they change state.
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/users",
+        HttpMethod::Get,
+        vec![session_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/users/{id}",
+        HttpMethod::Get,
+        vec![session_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/users/{id}/roles",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/users/{id}/roles/{role_id}",
+        HttpMethod::Delete,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/roles",
+        HttpMethod::Get,
+        vec![session_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/roles",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/roles/{id}",
+        HttpMethod::Put,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/roles/{id}",
+        HttpMethod::Delete,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/config",
+        HttpMethod::Get,
+        vec![session_requirement()],
     );
     // Watchlist (#46). Reads require a session; mutations also require the
     // double-submit CSRF token because they affect server state.

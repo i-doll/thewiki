@@ -1,11 +1,15 @@
 //! SQLite [`RoleRepository`](crate::repo::RoleRepository) impl.
 
-use sqlx::SqlitePool;
+use std::collections::HashMap;
+
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use thewiki_core::{Role, RoleId, RoleName, UserId};
 
 use crate::error::StorageError;
 use crate::repo::RoleRepository;
-use crate::sqlite::codec::{map_unique_violation, permissions_to_i64, role_from_row, uuid_bytes};
+use crate::sqlite::codec::{
+    decode_uuid, map_unique_violation, permissions_to_i64, role_from_row, uuid_bytes,
+};
 
 type RoleRow = (
     Vec<u8>, // id
@@ -128,5 +132,134 @@ impl RoleRepository for SqliteRoleRepository<'_> {
         .await?;
 
         rows.into_iter().map(row_to_role).collect()
+    }
+
+    async fn list_roles_for_users(
+        &self,
+        user_ids: &[UserId],
+    ) -> Result<HashMap<UserId, Vec<Role>>, StorageError> {
+        // Seed the result with every requested user mapped to an empty
+        // Vec so callers can iterate the input list without a follow-up
+        // existence check. Users with no roles never appear in the JOIN
+        // below; this is the only place they're populated.
+        let mut out: HashMap<UserId, Vec<Role>> = HashMap::with_capacity(user_ids.len());
+        for uid in user_ids {
+            out.entry(*uid).or_default();
+        }
+        if user_ids.is_empty() {
+            return Ok(out);
+        }
+
+        // SQLite has no array type; emit a parameterised
+        // `user_id IN (?, ?, ...)` list via `QueryBuilder::push_tuples`
+        // so each id stays bound (no string interpolation).
+        let mut builder: QueryBuilder<'_, Sqlite> = QueryBuilder::new(
+            "SELECT ur.user_id, r.id, r.name, r.display_name, r.permissions
+             FROM roles r
+             JOIN user_roles ur ON ur.role_id = r.id
+             WHERE ur.user_id IN (",
+        );
+        let mut separated = builder.separated(", ");
+        for uid in user_ids {
+            separated.push_bind(uuid_bytes(uid.into_uuid()).to_vec());
+        }
+        separated.push_unseparated(")");
+        builder.push(" ORDER BY ur.user_id, r.name ASC");
+
+        let rows = builder
+            .build_query_as::<(
+                Vec<u8>, // user_id
+                Vec<u8>, // role.id
+                String,  // role.name
+                String,  // role.display_name
+                i64,     // role.permissions
+            )>()
+            .fetch_all(self.pool)
+            .await?;
+
+        for (user_bytes, id, name, display_name, permissions) in rows {
+            let user_id = UserId::from_uuid(decode_uuid(&user_bytes)?);
+            let role = role_from_row(id, name, display_name, permissions)?;
+            // The seed above guarantees the entry exists; using
+            // `entry().or_default()` here would silently absorb a row
+            // for an unknown id (which can't happen given the IN list
+            // is exactly `user_ids`) but keeps the code defensively
+            // correct.
+            out.entry(user_id).or_default().push(role);
+        }
+        Ok(out)
+    }
+
+    async fn update(&self, role: &Role) -> Result<(), StorageError> {
+        let id = uuid_bytes(role.id.into_uuid());
+        let permissions = permissions_to_i64(role.permissions);
+        let result = sqlx::query(
+            "UPDATE roles SET display_name = ?1, permissions = ?2 WHERE id = ?3",
+        )
+        .bind(&role.display_name)
+        .bind(permissions)
+        .bind(id.as_slice())
+        .execute(self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            Err(StorageError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn delete(&self, id: RoleId) -> Result<(), StorageError> {
+        // The `user_roles.role_id` FK is `ON DELETE CASCADE` in the
+        // schema, so deleting a role with assignments would silently
+        // detach all users from it. That's a footgun.
+        //
+        // Folding the assignment check into the DELETE itself makes the
+        // operation race-safe — a check-then-act sequence
+        // (`count_users` + `DELETE`) admits a concurrent assignment that
+        // would land between the two statements and still cascade-detach
+        // users when the DELETE fires. The `NOT EXISTS` predicate makes
+        // the precondition part of the same statement.
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let out = sqlx::query(
+            "DELETE FROM roles
+             WHERE id = ?1
+               AND NOT EXISTS (SELECT 1 FROM user_roles WHERE role_id = ?1)",
+        )
+        .bind(id_bytes.as_slice())
+        .execute(self.pool)
+        .await?;
+        if out.rows_affected() != 0 {
+            return Ok(());
+        }
+        // Zero rows affected means either the role doesn't exist or it
+        // still has assignments. Disambiguate so the API layer can pick
+        // 404 vs 409.
+        let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM roles WHERE id = ?1")
+            .bind(id_bytes.as_slice())
+            .fetch_optional(self.pool)
+            .await?;
+        if exists.is_some() {
+            Err(StorageError::conflict(
+                "role is still assigned to one or more users",
+            ))
+        } else {
+            Err(StorageError::NotFound)
+        }
+    }
+
+    async fn count_users(&self, id: RoleId) -> Result<u64, StorageError> {
+        let id_bytes = uuid_bytes(id.into_uuid());
+        let row: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM user_roles WHERE role_id = ?1")
+                .bind(id_bytes.as_slice())
+                .fetch_one(self.pool)
+                .await?;
+        // Counts are non-negative by construction.
+        #[allow(
+            clippy::cast_sign_loss,
+            reason = "COUNT(*) is non-negative; representation in sqlite is i64"
+        )]
+        let count = if row.0 < 0 { 0 } else { row.0 as u64 };
+        Ok(count)
     }
 }

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::error::StorageError;
 use crate::postgres::codec::{is_fk_violation, map_unique_violation, user_from_row};
-use crate::repo::UserRepository;
+use crate::repo::{Cursor, PageSlice, UserListFilter, UserRepository};
 
 type UserRow = (
     Uuid,                   // id
@@ -137,4 +137,128 @@ impl UserRepository for PostgresUserRepository<'_> {
             }
         }
     }
+
+    async fn list(
+        &self,
+        filter: UserListFilter,
+        cursor: Option<Cursor>,
+        limit: u32,
+    ) -> Result<PageSlice<User>, StorageError> {
+        let raw_limit = if limit == 0 {
+            crate::repo::DEFAULT_PAGE_SIZE
+        } else {
+            limit.min(crate::repo::MAX_PAGE_SIZE)
+        };
+        let scan_limit = raw_limit as i64 + 1;
+
+        let cursor_parts = cursor
+            .as_ref()
+            .map(|c| parse_cursor(&c.0))
+            .transpose()?
+            .flatten();
+
+        // Build the statement dynamically — sqlx::query lacks dynamic-bind
+        // ergonomics, so we splice `$N` placeholders and bind in order.
+        let mut next_placeholder: usize = 1;
+        let mut take_ph = || {
+            let p = next_placeholder;
+            next_placeholder += 1;
+            format!("${p}")
+        };
+        let mut sql = String::from(
+            "SELECT u.id, u.username, u.email, u.display_name, u.created_at, u.last_login_at \
+             FROM users u",
+        );
+        if filter.role_id.is_some() {
+            sql.push_str(" INNER JOIN user_roles ur ON ur.user_id = u.id");
+        }
+        sql.push_str(" WHERE TRUE");
+        let role_ph = if filter.role_id.is_some() {
+            let p = take_ph();
+            sql.push_str(&format!(" AND ur.role_id = {p}"));
+            Some(p)
+        } else {
+            None
+        };
+        let _ = role_ph; // captured implicitly by bind ordering below
+        let needle = filter
+            .search
+            .as_ref()
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty());
+        if needle.is_some() {
+            let p1 = take_ph();
+            let p2 = take_ph();
+            sql.push_str(&format!(
+                " AND (lower(u.username) LIKE {p1} OR (u.email IS NOT NULL AND lower(u.email) LIKE {p2}))"
+            ));
+        }
+        if cursor_parts.is_some() {
+            let p1 = take_ph();
+            let p2 = take_ph();
+            sql.push_str(&format!(" AND (u.created_at, u.id) > ({p1}, {p2})"));
+        }
+        let lim_p = take_ph();
+        sql.push_str(&format!(
+            " ORDER BY u.created_at ASC, u.id ASC LIMIT {lim_p}"
+        ));
+
+        let mut q = sqlx::query_as::<_, UserRow>(&sql);
+        if let Some(role_id) = filter.role_id {
+            q = q.bind(role_id.into_uuid());
+        }
+        if let Some(n) = needle.as_ref() {
+            let like = format!("%{n}%");
+            q = q.bind(like.clone()).bind(like);
+        }
+        if let Some((ts, id)) = cursor_parts.as_ref() {
+            q = q.bind(*ts).bind(*id);
+        }
+        q = q.bind(scan_limit);
+
+        let rows: Vec<UserRow> = q.fetch_all(self.pool).await?;
+        let overshoot = rows.len() > raw_limit as usize;
+
+        let take = rows.into_iter().take(raw_limit as usize);
+        let mut items = Vec::with_capacity(raw_limit as usize);
+        let mut next_seed: Option<(OffsetDateTime, Uuid)> = None;
+        for row in take {
+            next_seed = Some((row.4, row.0));
+            items.push(row_to_user(row)?);
+        }
+
+        let next = if overshoot {
+            next_seed.map(|(ts, id)| Cursor(encode_cursor(ts, id)))
+        } else {
+            None
+        };
+        Ok(PageSlice { items, next })
+    }
+}
+
+/// Encode the `(created_at, id)` pair as the opaque cursor token.
+///
+/// Format: `<rfc3339>|<uuid-hyphenated>` — both halves are URL-safe ASCII.
+fn encode_cursor(ts: OffsetDateTime, id: Uuid) -> String {
+    use time::format_description::well_known::Rfc3339;
+    // `format` on a UTC offset is infallible for OffsetDateTime values
+    // we constructed ourselves; fall back to the Display impl so we don't
+    // panic on a hypothetical bad format-description error.
+    let ts_str = ts.format(&Rfc3339).unwrap_or_else(|_| ts.to_string());
+    format!("{ts_str}|{}", id.as_hyphenated())
+}
+
+fn parse_cursor(raw: &str) -> Result<Option<(OffsetDateTime, Uuid)>, StorageError> {
+    use time::format_description::well_known::Rfc3339;
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let (ts_str, id_str) = raw
+        .split_once('|')
+        .ok_or_else(|| StorageError::invalid_input("malformed user cursor"))?;
+    let ts = OffsetDateTime::parse(ts_str, &Rfc3339)
+        .map_err(|_| StorageError::invalid_input("malformed user cursor (timestamp)"))?;
+    let id = Uuid::parse_str(id_str)
+        .map_err(|_| StorageError::invalid_input("malformed user cursor (uuid)"))?;
+    Ok(Some((ts, id)))
 }

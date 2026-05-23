@@ -25,8 +25,8 @@ use thewiki_storage::repo::{
     AuditLogRepository, CategoryRepository, IpBlocklistRepository, MediaBlobRepository,
     MediaRepository, MediaVariantRepository, NamespaceRepository, NewAuditLogEntry,
     NotificationRepository, PageAuditMutation, PageLinkRepository, PageRepository,
-    PendingRevisionRepository, RecentChangesRepository, RevisionRepository, TagRepository,
-    UrlBlocklistRepository, UserRepository, WatchRepository,
+    PendingRevisionRepository, RecentChangesRepository, RevisionRepository, RoleRepository,
+    TagRepository, UrlBlocklistRepository, UserRepository, WatchRepository,
 };
 
 use crate::auth::AuthState;
@@ -64,6 +64,10 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
         Self: 'a;
     /// User repository borrowed from this handle.
     type Users<'a>: UserRepository + 'a
+    where
+        Self: 'a;
+    /// Role repository borrowed from this handle (#47).
+    type Roles<'a>: RoleRepository + 'a
     where
         Self: 'a;
     /// Page-link (wikilink graph) repository borrowed from this handle.
@@ -125,6 +129,8 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     fn audit_log(&self) -> Self::AuditLog<'_>;
     /// Borrow a [`UserRepository`].
     fn users(&self) -> Self::Users<'_>;
+    /// Borrow a [`RoleRepository`] (#47).
+    fn roles(&self) -> Self::Roles<'_>;
     /// Borrow a [`PageLinkRepository`] (powers backlinks API, #30).
     fn page_links(&self) -> Self::PageLinks<'_>;
     /// Borrow a [`MediaRepository`] (powers media uploads, #32).
@@ -163,6 +169,7 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     type RecentChanges<'a> = thewiki_storage::sqlite::SqliteRecentChangesRepository<'a>;
     type AuditLog<'a> = thewiki_storage::sqlite::SqliteAuditLogRepository<'a>;
     type Users<'a> = thewiki_storage::sqlite::SqliteUserRepository<'a>;
+    type Roles<'a> = thewiki_storage::sqlite::SqliteRoleRepository<'a>;
     type PageLinks<'a> = thewiki_storage::sqlite::SqlitePageLinkRepository<'a>;
     type Media<'a> = thewiki_storage::sqlite::SqliteMediaRepository<'a>;
     type MediaBlobs<'a> = thewiki_storage::sqlite::SqliteMediaBlobRepository<'a>;
@@ -192,6 +199,9 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     }
     fn users(&self) -> Self::Users<'_> {
         Self::users(self)
+    }
+    fn roles(&self) -> Self::Roles<'_> {
+        Self::roles(self)
     }
     fn page_links(&self) -> Self::PageLinks<'_> {
         Self::page_links(self)
@@ -323,6 +333,13 @@ pub struct AppState<S: AppStorage> {
     /// wire the layer; otherwise refreshed on boot and on every admin
     /// mutation.
     pub blocklist: Option<BlocklistState>,
+    /// Snapshot of the runtime [`crate::config::Config`] this binary was
+    /// booted with. `None` in test fixtures that don't wire a full
+    /// configuration; populated by the `serve` subcommand so the
+    /// `/api/v1/admin/config` viewer (#47) can render the redacted current
+    /// configuration. Wrapped in an `Arc` because the type is non-trivial
+    /// to clone and the handlers only need shared read access.
+    pub runtime_config: Option<Arc<crate::config::Config>>,
 }
 
 impl<S: AppStorage> AppState<S> {
@@ -348,6 +365,7 @@ impl<S: AppStorage> AppState<S> {
             captcha_config: CaptchaConfig::default(),
             blocklist: None,
             render_config: crate::config::RenderConfig::default(),
+            runtime_config: None,
         }
     }
 
@@ -484,6 +502,16 @@ impl<S: AppStorage> AppState<S> {
         self.blocklist = Some(blocklist);
         self
     }
+
+    /// Attach a snapshot of the loaded runtime configuration so the
+    /// `/api/v1/admin/config` viewer (#47) can render the operator's
+    /// settings. Wrapped in an `Arc` because [`crate::config::Config`] is
+    /// non-trivial and the handler only needs shared read access.
+    #[must_use]
+    pub fn with_runtime_config(mut self, config: Arc<crate::config::Config>) -> Self {
+        self.runtime_config = Some(config);
+        self
+    }
 }
 
 impl<S: AppStorage> Clone for AppState<S> {
@@ -504,6 +532,7 @@ impl<S: AppStorage> Clone for AppState<S> {
             captcha_config: self.captcha_config.clone(),
             blocklist: self.blocklist.clone(),
             render_config: self.render_config.clone(),
+            runtime_config: self.runtime_config.clone(),
         }
     }
 }
