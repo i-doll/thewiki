@@ -67,15 +67,31 @@ use crate::error::StorageError;
 /// We can't just ask the parsed `SqliteConnectOptions` whether it's
 /// in-memory — its `in_memory` flag is `pub(crate)` — so we sniff the raw
 /// URL the caller passed before we try to materialize any parent
-/// directories on disk. The query-string scan is deliberately narrow:
-/// matching `mode=memory` only as a `?…&`-delimited parameter avoids
-/// misclassifying file paths that happen to contain that substring
-/// (e.g. `sqlite:///tmp/mode=memory.db`).
+/// directories on disk.
+///
+/// Per the SQLite docs (<https://sqlite.org/inmemorydb.html>), the
+/// `:memory:` filename is only special when it's exact — any extra text
+/// in the filename token makes it a (weirdly named) file-backed database.
+/// So we accept the in-memory sentinels only when they're either the
+/// whole URL or immediately followed by a `?` query string; URLs like
+/// `file::memory:backup.db` or `sqlite://:memory:backup.db` fall through
+/// to the file-backed path so the parent-dir guard still runs.
+///
+/// The query-string scan for `mode=memory` is deliberately narrow:
+/// matching it only as a `?…&`-delimited parameter avoids misclassifying
+/// file paths that happen to contain that substring (e.g.
+/// `sqlite:///tmp/mode=memory.db`).
 fn is_in_memory_sqlite_url(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
-    if lower.starts_with("sqlite::memory:")
-        || lower.contains("://:memory:")
-        || lower.starts_with("file::memory:")
+    let is_exact_or_query_delimited = |prefix: &str| {
+        lower
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('?'))
+    };
+
+    if is_exact_or_query_delimited("sqlite::memory:")
+        || is_exact_or_query_delimited("sqlite://:memory:")
+        || is_exact_or_query_delimited("file::memory:")
     {
         return true;
     }
@@ -448,5 +464,34 @@ mod tests {
     #[test]
     fn plain_file_url_is_not_in_memory() {
         assert!(!is_in_memory_sqlite_url("sqlite:///tmp/db.sqlite"));
+    }
+
+    #[test]
+    fn file_memory_with_trailing_filename_is_not_in_memory() {
+        // Regression: per https://sqlite.org/inmemorydb.html, `:memory:` is
+        // only special when the filename token is exactly `:memory:`. Extra
+        // text in the filename makes it a (weirdly named) file-backed db.
+        // The previous `starts_with("file::memory:")` check wrongly
+        // classified this as in-memory and skipped the parent-dir guard.
+        assert!(!is_in_memory_sqlite_url("file::memory:backup.db"));
+    }
+
+    #[test]
+    fn sqlite_authority_memory_with_trailing_filename_is_not_in_memory() {
+        // Regression: same issue as above — the previous
+        // `contains("://:memory:")` check matched this file-backed URL.
+        assert!(!is_in_memory_sqlite_url("sqlite://:memory:backup.db"));
+    }
+
+    #[test]
+    fn file_memory_with_query_string_is_in_memory() {
+        // Query-delimited form must keep working.
+        assert!(is_in_memory_sqlite_url("file::memory:?cache=shared"));
+    }
+
+    #[test]
+    fn sqlite_memory_scheme_with_query_string_is_in_memory() {
+        // Query-delimited form must keep working.
+        assert!(is_in_memory_sqlite_url("sqlite::memory:?cache=shared"));
     }
 }
