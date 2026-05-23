@@ -65,7 +65,20 @@ export const Captcha = forwardRef<CaptchaHandle, CaptchaProps>(function Captcha(
 ) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const widgetIdRef = useRef<string | number | null>(null);
+	// Keep the latest callbacks in refs so the render effect can stay
+	// independent of their identity. Parents (e.g. `register.tsx`) typically
+	// pass inline lambdas that change on every re-render — including those
+	// in the render effect's deps would tear down and re-create the widget
+	// on every keystroke in a sibling input, which both flickers the
+	// challenge and bumps the user back to "unsolved".
+	const onVerifyRef = useRef(onVerify);
+	const onExpireRef = useRef(onExpire);
 	const [ready, setReady] = useState<boolean>(() => hcaptchaGlobal() !== null);
+
+	useEffect(() => {
+		onVerifyRef.current = onVerify;
+		onExpireRef.current = onExpire;
+	}, [onVerify, onExpire]);
 
 	// Expose `resetCaptcha()` to the parent so a failed submit can clear
 	// the burned token. Safe to call before the widget has rendered — we
@@ -132,12 +145,12 @@ export const Captcha = forwardRef<CaptchaHandle, CaptchaProps>(function Captcha(
 		try {
 			widgetIdRef.current = hcaptcha.render(containerRef.current, {
 				sitekey: config.site_key,
-				callback: (token: string) => onVerify(token),
+				callback: (token: string) => onVerifyRef.current(token),
 				"expired-callback": () => {
-					if (onExpire) onExpire();
+					onExpireRef.current?.();
 				},
 				"error-callback": () => {
-					if (onExpire) onExpire();
+					onExpireRef.current?.();
 				},
 			});
 		} catch (err) {
@@ -159,7 +172,7 @@ export const Captcha = forwardRef<CaptchaHandle, CaptchaProps>(function Captcha(
 			}
 			widgetIdRef.current = null;
 		};
-	}, [ready, config.provider, config.site_key, onVerify, onExpire]);
+	}, [ready, config.provider, config.site_key]);
 
 	if (config.provider !== "hcaptcha") {
 		// Future providers (Turnstile, reCAPTCHA, …) can be wired in here
