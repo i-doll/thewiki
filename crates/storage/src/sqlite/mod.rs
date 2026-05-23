@@ -56,14 +56,34 @@ use crate::error::StorageError;
 
 /// Heuristic: does this sqlx URL designate an in-memory database?
 ///
-/// sqlx accepts a handful of spellings for in-memory SQLite
-/// (`sqlite::memory:`, `sqlite://:memory:`, `sqlite://?mode=memory`, plus
-/// `file::memory:?cache=shared`-style variants). We can't ask the parsed
-/// `SqliteConnectOptions` directly — its `in_memory` flag is `pub(crate)` —
-/// so we sniff the raw URL the caller passed before we try to materialize
-/// any parent directories on disk.
+/// sqlx accepts a handful of spellings for in-memory SQLite:
+///
+/// * `sqlite::memory:`
+/// * `sqlite://:memory:`
+/// * `file::memory:` (optionally followed by `?cache=shared` etc.)
+/// * any of the above plus a `mode=memory` query parameter
+///   (e.g. `sqlite:///foo.db?mode=memory`)
+///
+/// We can't just ask the parsed `SqliteConnectOptions` whether it's
+/// in-memory — its `in_memory` flag is `pub(crate)` — so we sniff the raw
+/// URL the caller passed before we try to materialize any parent
+/// directories on disk. The query-string scan is deliberately narrow:
+/// matching `mode=memory` only as a `?…&`-delimited parameter avoids
+/// misclassifying file paths that happen to contain that substring
+/// (e.g. `sqlite:///tmp/mode=memory.db`).
 fn is_in_memory_sqlite_url(url: &str) -> bool {
-    url.contains(":memory:") || url.contains("mode=memory")
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("sqlite::memory:")
+        || lower.contains("://:memory:")
+        || lower.starts_with("file::memory:")
+    {
+        return true;
+    }
+
+    lower
+        .split_once('?')
+        .map(|(_, query)| query.split('&').any(|param| param == "mode=memory"))
+        .unwrap_or(false)
 }
 
 mod audit_log;
@@ -381,5 +401,52 @@ impl SqliteStorage {
             .await
             .map_err(|err| StorageError::Migration(err.to_string()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_in_memory_sqlite_url;
+
+    #[test]
+    fn detects_sqlite_memory_scheme() {
+        assert!(is_in_memory_sqlite_url("sqlite::memory:"));
+    }
+
+    #[test]
+    fn detects_sqlite_authority_memory() {
+        assert!(is_in_memory_sqlite_url("sqlite://:memory:"));
+    }
+
+    #[test]
+    fn detects_file_memory_with_query() {
+        assert!(is_in_memory_sqlite_url("file::memory:?cache=shared"));
+    }
+
+    #[test]
+    fn detects_mode_memory_query_param() {
+        assert!(is_in_memory_sqlite_url(
+            "sqlite:///tmp/db.sqlite?mode=memory"
+        ));
+    }
+
+    #[test]
+    fn file_path_containing_mode_equals_memory_is_not_in_memory() {
+        // Regression: previously the naive `contains("mode=memory")` check
+        // classified this file path as in-memory and skipped the
+        // `create_dir_all` parent-dir guard in `SqliteStorage::new`.
+        assert!(!is_in_memory_sqlite_url("sqlite:///tmp/mode=memory.db"));
+    }
+
+    #[test]
+    fn file_path_with_mode_memory_substring_is_not_in_memory() {
+        assert!(!is_in_memory_sqlite_url(
+            "sqlite:///tmp/some_mode=memory_file.db"
+        ));
+    }
+
+    #[test]
+    fn plain_file_url_is_not_in_memory() {
+        assert!(!is_in_memory_sqlite_url("sqlite:///tmp/db.sqlite"));
     }
 }
