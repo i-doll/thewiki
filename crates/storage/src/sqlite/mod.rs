@@ -54,6 +54,18 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 use crate::error::StorageError;
 
+/// Heuristic: does this sqlx URL designate an in-memory database?
+///
+/// sqlx accepts a handful of spellings for in-memory SQLite
+/// (`sqlite::memory:`, `sqlite://:memory:`, `sqlite://?mode=memory`, plus
+/// `file::memory:?cache=shared`-style variants). We can't ask the parsed
+/// `SqliteConnectOptions` directly — its `in_memory` flag is `pub(crate)` —
+/// so we sniff the raw URL the caller passed before we try to materialize
+/// any parent directories on disk.
+fn is_in_memory_sqlite_url(url: &str) -> bool {
+    url.contains(":memory:") || url.contains("mode=memory")
+}
+
 mod audit_log;
 mod category;
 mod codec;
@@ -149,8 +161,38 @@ impl SqliteStorage {
             .parse()
             .map_err(|err: sqlx::Error| StorageError::invalid_input(err.to_string()))?;
         // Foreign keys are off in sqlx by default; the schema relies on FK
-        // cascades, so opt in explicitly.
-        let connect_opts = connect_opts.foreign_keys(opts.foreign_keys);
+        // cascades, so opt in explicitly. `create_if_missing` lets a fresh
+        // deploy boot against an empty `/data` volume without operators
+        // having to `touch` the file first.
+        let connect_opts = connect_opts
+            .foreign_keys(opts.foreign_keys)
+            .create_if_missing(true);
+
+        // For file-backed databases, make sure the parent directory exists.
+        // `sqlite:///data/nested/db.sqlite` is a perfectly reasonable thing
+        // for an operator to write, but sqlx will fail to open the file if
+        // `/data/nested` doesn't already exist. We sniff the original URL
+        // for the in-memory sentinels because the parsed options don't
+        // expose their `in_memory` flag.
+        if !is_in_memory_sqlite_url(url)
+            && let Some(parent) = connect_opts.get_filename().parent()
+            && !parent.as_os_str().is_empty()
+        {
+            match tokio::fs::create_dir_all(parent).await {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // `create_dir_all` normally treats AlreadyExists as
+                    // success; we still match it explicitly so that any
+                    // future tightening of its semantics doesn't surprise us.
+                }
+                Err(err) => {
+                    return Err(StorageError::invalid_input(format!(
+                        "creating sqlite parent dir {}: {err}",
+                        parent.display()
+                    )));
+                }
+            }
+        }
 
         let pool = SqlitePoolOptions::new()
             .max_connections(opts.max_connections)

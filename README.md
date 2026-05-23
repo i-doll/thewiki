@@ -35,8 +35,10 @@ For the full picture — crate layout, the `Renderer` trait, the database story,
 Multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR at [`ghcr.io/i-doll/thewiki`](https://github.com/i-doll/thewiki/pkgs/container/thewiki). The `:edge` tag tracks `main`; release tags (`v0.1.0`, etc.) follow semver and additionally publish `:latest`.
 
 ```sh
-docker run --rm -p 8080:8080 ghcr.io/i-doll/thewiki:edge
+docker run --rm -p 8080:8080 -v thewiki-data:/data ghcr.io/i-doll/thewiki:edge
 ```
+
+The container's working directory is `/data`; mount a volume there and the binary creates `thewiki.db` and `search/` on first boot.
 
 The image is built on `gcr.io/distroless/cc-debian12:nonroot` — non-root by default (uid `65532`), no shell, no package manager. The Rust binary lives at `/usr/local/bin/thewiki` and bakes the SPA bundle directly into the executable via [`rust-embed`](https://docs.rs/rust-embed) — no separate static-file mount needed. The server listens on `0.0.0.0:8080`; probe `GET /healthz` for liveness.
 

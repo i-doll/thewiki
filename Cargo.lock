@@ -4729,6 +4729,7 @@ dependencies = [
  "libsql",
  "serde_json",
  "sqlx",
+ "tempfile",
  "thewiki-core",
  "thiserror 2.0.18",
  "time",
