@@ -41,11 +41,13 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
 
+use crate::admin;
 use crate::audit_log;
 use crate::auth::{self, AuthState, csrf};
+use crate::blocklist::{self, BlocklistState, peer_ip::SecurityRuntime};
 use crate::captcha;
 use crate::categories;
-use crate::config::{Config, GraphQLConfig, RateLimitConfig};
+use crate::config::{Config, GraphQLConfig, RateLimitConfig, SecurityConfig};
 use crate::graphql::{self, GraphQLState};
 use crate::media;
 use crate::namespaces;
@@ -56,6 +58,7 @@ use crate::search;
 use crate::state::{AppState, AppStorage};
 use crate::static_assets;
 use crate::wiki;
+use std::sync::Arc;
 
 /// HTTP header used to carry the per-request correlation ID.
 const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
@@ -95,6 +98,7 @@ const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
         (name = "categories", description = "Hierarchical categories (#29)"),
         (name = "tags", description = "Flat tags (#29)"),
         (name = "captcha", description = "CAPTCHA provider frontend config (#41)"),
+        (name = "admin-blocklist", description = "IP / URL blocklists (#42)"),
     )
 )]
 pub struct ApiDoc;
@@ -112,6 +116,7 @@ fn api_router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
         .nest("/api/v1/categories", categories::categories_router::<S>())
         .nest("/api/v1/tags", categories::tags_router::<S>())
         .nest("/api/v1/captcha", captcha::routes::build_router::<S>())
+        .nest("/api/v1/admin", admin::router::<S>())
 }
 
 /// Generate the full public REST OpenAPI document.
@@ -288,6 +293,33 @@ fn add_operation_security(api_doc: &mut OpenApiDoc) {
         HttpMethod::Post,
         vec![session_and_csrf_requirement()],
     );
+    // Admin blocklist mutations (#42). All write endpoints sit behind the
+    // CSRF layer in build_full, so the OpenAPI spec must surface both
+    // requirements; reads (GET) only need the session cookie.
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/blocklist/ip",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/blocklist/ip/{id}",
+        HttpMethod::Delete,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/blocklist/url",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/blocklist/url/{id}",
+        HttpMethod::Delete,
+        vec![session_and_csrf_requirement()],
+    );
 }
 
 fn session_requirement() -> SecurityRequirement {
@@ -429,6 +461,14 @@ pub fn build_with_state<S: AppStorage>(state: AppState<S>) -> Router {
 ///
 /// Integration tests that are not specifically exercising rate limits should
 /// pass a disabled config so they do not inherit production defaults.
+///
+/// **Middlewares NOT attached** (compared to [`build_full_with_rate_limit_state`]):
+/// * CSRF — see [`build_full`] / [`build_full_with_rate_limit_state`].
+/// * The blocklist layer ([`blocklist::blocklist_layer`]) — even if the
+///   caller wires `AppState::with_blocklist`, this builder does *not* mount
+///   the layer. Tests that need to assert on IP / URL blocking at the
+///   middleware level must boot through [`build_full_with_rate_limit_state`]
+///   instead (see `tests/blocklist.rs::ip_middleware_blocks_listed_ipv4_and_passes_others`).
 pub fn build_with_state_with_rate_limit<S: AppStorage>(
     state: AppState<S>,
     rate_limit_config: RateLimitConfig,
@@ -510,6 +550,7 @@ pub fn build_full<S: AppStorage>(
         serve_frontend,
         rate_limit_state,
         GraphQLConfig::default(),
+        SecurityConfig::default(),
     )
 }
 
@@ -525,6 +566,7 @@ pub fn build_full_with_rate_limit_state<S: AppStorage>(
     serve_frontend: bool,
     rate_limit_state: RateLimitState,
     graphql_config: GraphQLConfig,
+    security_config: SecurityConfig,
 ) -> Router {
     // Page CRUD + recent-changes + OpenAPI subrouter.
     let api_router = api_router::<S>()
@@ -546,7 +588,7 @@ pub fn build_full_with_rate_limit_state<S: AppStorage>(
 
     // GraphQL subrouter (#37). The schema is generic over the storage facade
     // so its router carries its own typed state — see `graphql/mod.rs`.
-    let graphql_state = GraphQLState::new(app_state, graphql_config);
+    let graphql_state = GraphQLState::new(app_state.clone(), graphql_config);
     let graphql_router: Router = graphql::router::<S>().with_state(graphql_state);
 
     let mut router = Router::new()
@@ -569,8 +611,55 @@ pub fn build_full_with_rate_limit_state<S: AppStorage>(
 
     let router = router.layer(CookieManagerLayer::new());
 
+    // Blocklist (#42): the layer applies only when the operator wired a
+    // BlocklistState on the AppState. The middleware reads the snapshot
+    // and the per-request security runtime via axum extensions, both
+    // attached here. Health probes are skipped inside the middleware
+    // itself, not via routing — see `blocklist::middleware`.
+    let security_runtime = Arc::new(build_security_runtime(&security_config));
+    let router = if let Some(blocklist_state) = app_state.blocklist.clone() {
+        router
+            .layer(middleware::from_fn(blocklist::blocklist_layer))
+            .layer(axum::Extension(blocklist_state))
+            .layer(axum::Extension(security_runtime))
+    } else {
+        // Even without a blocklist, the runtime extension is harmless and
+        // keeps the `effective_client_ip` helper usable from non-middleware
+        // call sites (e.g. logging).
+        router.layer(axum::Extension(security_runtime))
+    };
+
     with_middleware(router)
 }
+
+/// Build the runtime [`SecurityRuntime`] from the operator-facing config.
+///
+/// `Config::validate` already accepted every `trusted_proxies` entry, so
+/// the parse here is effectively infallible — but we still log + drop a bad
+/// row instead of panicking, in case validation is bypassed in tests.
+fn build_security_runtime(config: &SecurityConfig) -> SecurityRuntime {
+    let mut trusted_proxies = Vec::with_capacity(config.trusted_proxies.len());
+    for raw in &config.trusted_proxies {
+        match raw.parse::<ipnet::IpNet>() {
+            Ok(net) => trusted_proxies.push(net),
+            Err(err) => tracing::warn!(
+                cidr = %raw,
+                error = %err,
+                "skipping invalid trusted_proxies CIDR"
+            ),
+        }
+    }
+    SecurityRuntime {
+        trust_x_forwarded_for: config.trust_x_forwarded_for,
+        trusted_proxies,
+    }
+}
+
+// Silence the unused-import warning when the blocklist layer isn't compiled
+// into a given binary configuration. The build above always references
+// `BlocklistState` via `app_state.blocklist`, so this is documentation only.
+#[allow(dead_code)]
+fn _force_blocklist_state_import(_: BlocklistState) {}
 
 /// Catch-all for unmatched `/api/...` paths. Returns a plain 404 so the SPA
 /// fallback service never sees an API miss.

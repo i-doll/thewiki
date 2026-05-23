@@ -206,6 +206,13 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 wiremock = "0.6"
 
+# Blocklist (#42). `ipnet` parses CIDR strings and answers containment over
+# the in-memory `Vec<IpNet>` snapshot held under `tokio::sync::RwLock`. The
+# `regex` crate compiles operator-supplied URL patterns into a `RegexSet`
+# for O(N) match-against-many on every page edit.
+ipnet = { version = "2", features = ["serde"] }
+regex = "1"
+
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 unwrap_used = "warn"

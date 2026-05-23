@@ -17,6 +17,7 @@ import { Route as WikiIndexRouteImport } from './routes/wiki.index'
 import { Route as WikiSlugRouteImport } from './routes/wiki.$slug'
 import { Route as TagTagRouteImport } from './routes/tag.$tag'
 import { Route as CategorySlugRouteImport } from './routes/category.$slug'
+import { Route as AdminBlocklistsRouteImport } from './routes/admin.blocklists'
 import { Route as WikiSlugEditRouteImport } from './routes/wiki_.$slug.edit'
 import { Route as WikiSlugHistoryRouteImport } from './routes/wiki.$slug.history'
 import { Route as WikiSlugDiffRouteImport } from './routes/wiki.$slug.diff'
@@ -65,6 +66,11 @@ const CategorySlugRoute = CategorySlugRouteImport.update({
   path: '/category/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminBlocklistsRoute = AdminBlocklistsRouteImport.update({
+  id: '/admin/blocklists',
+  path: '/admin/blocklists',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WikiSlugEditRoute = WikiSlugEditRouteImport.update({
   id: '/wiki_/$slug/edit',
   path: '/wiki/$slug/edit',
@@ -107,6 +113,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
+  '/admin/blocklists': typeof AdminBlocklistsRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
@@ -124,6 +131,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
+  '/admin/blocklists': typeof AdminBlocklistsRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
@@ -142,6 +150,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/search': typeof SearchRoute
+  '/admin/blocklists': typeof AdminBlocklistsRoute
   '/category/$slug': typeof CategorySlugRoute
   '/tag/$tag': typeof TagTagRoute
   '/wiki/$slug': typeof WikiSlugRouteWithChildren
@@ -161,6 +170,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/search'
+    | '/admin/blocklists'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
@@ -178,6 +188,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/search'
+    | '/admin/blocklists'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
@@ -195,6 +206,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/search'
+    | '/admin/blocklists'
     | '/category/$slug'
     | '/tag/$tag'
     | '/wiki/$slug'
@@ -213,6 +225,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
   SearchRoute: typeof SearchRoute
+  AdminBlocklistsRoute: typeof AdminBlocklistsRoute
   CategorySlugRoute: typeof CategorySlugRoute
   TagTagRoute: typeof TagTagRoute
   WikiSlugRoute: typeof WikiSlugRouteWithChildren
@@ -278,6 +291,13 @@ declare module '@tanstack/react-router' {
       path: '/category/$slug'
       fullPath: '/category/$slug'
       preLoaderRoute: typeof CategorySlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/blocklists': {
+      id: '/admin/blocklists'
+      path: '/admin/blocklists'
+      fullPath: '/admin/blocklists'
+      preLoaderRoute: typeof AdminBlocklistsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/wiki_/$slug/edit': {
@@ -364,6 +384,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
   SearchRoute: SearchRoute,
+  AdminBlocklistsRoute: AdminBlocklistsRoute,
   CategorySlugRoute: CategorySlugRoute,
   TagTagRoute: TagTagRoute,
   WikiSlugRoute: WikiSlugRouteWithChildren,

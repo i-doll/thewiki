@@ -13,6 +13,432 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/admin/blocklist/ip": {
+      "get": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`GET /api/v1/admin/blocklist/ip` — list every IP blocklist row.",
+        "operationId": "list_ip",
+        "responses": {
+          "200": {
+            "description": "IP blocklist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpBlocklistListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`POST /api/v1/admin/blocklist/ip` — add a new IP blocklist row.",
+        "operationId": "create_ip",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIpEntryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Row created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpBlocklistView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid CIDR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CIDR already in list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/blocklist/ip/{id}": {
+      "delete": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`DELETE /api/v1/admin/blocklist/ip/{id}` — remove a blocklist row.",
+        "operationId": "delete_ip",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Row identifier",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Row removed"
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Row not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/blocklist/url": {
+      "get": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`GET /api/v1/admin/blocklist/url` — list every URL blocklist row.",
+        "operationId": "list_url",
+        "responses": {
+          "200": {
+            "description": "URL blocklist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrlBlocklistListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`POST /api/v1/admin/blocklist/url` — add a new URL blocklist row.",
+        "operationId": "create_url",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUrlEntryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Row created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrlBlocklistView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid regex",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Pattern already in list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/blocklist/url/{id}": {
+      "delete": {
+        "tags": [
+          "admin-blocklist"
+        ],
+        "summary": "`DELETE /api/v1/admin/blocklist/url/{id}` — remove a blocklist row.",
+        "operationId": "delete_url",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Row identifier",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Row removed"
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks MANAGE_BLOCKLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Row not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/audit-log": {
       "get": {
         "tags": [
@@ -3989,6 +4415,23 @@
           }
         }
       },
+      "CreateIpEntryRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/v1/admin/blocklist/ip`.",
+        "required": [
+          "cidr"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "description": "CIDR in canonical form. The handler parses with `ipnet::IpNet::from_str`\nbefore persisting — invalid input returns 400 without touching the DB."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional reason. Omitting it stores an empty string."
+          }
+        }
+      },
       "CreateNamespaceRequest": {
         "type": "object",
         "description": "Body of `POST /api/v1/namespaces`.",
@@ -4054,6 +4497,23 @@
           "title": {
             "type": "string",
             "description": "Human-readable title shown in the UI."
+          }
+        }
+      },
+      "CreateUrlEntryRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/v1/admin/blocklist/url`.",
+        "required": [
+          "pattern"
+        ],
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Rust `regex` pattern. Compiled with `regex::Regex::new` for validation\nbefore persisting."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional reason."
           }
         }
       },
@@ -4174,6 +4634,58 @@
           "message": {
             "type": "string",
             "description": "Human-readable description of what went wrong."
+          }
+        }
+      },
+      "IpBlocklistListResponse": {
+        "type": "object",
+        "description": "Wrapper response for `GET` endpoints.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpBlocklistView"
+            },
+            "description": "Rows, newest first."
+          }
+        }
+      },
+      "IpBlocklistView": {
+        "type": "object",
+        "description": "IP blocklist row as returned by the API.",
+        "required": [
+          "id",
+          "cidr",
+          "reason",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "description": "CIDR in canonical human form (`203.0.113.0/24`, `2001:db8::/32`)."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC3339 timestamp."
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User who created the entry."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable row identifier (UUIDv7)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Free-form reason (may be empty)."
           }
         }
       },
@@ -4881,6 +5393,58 @@
           }
         }
       },
+      "UrlBlocklistListResponse": {
+        "type": "object",
+        "description": "Wrapper response for `GET` endpoints.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UrlBlocklistView"
+            },
+            "description": "Rows, newest first."
+          }
+        }
+      },
+      "UrlBlocklistView": {
+        "type": "object",
+        "description": "URL blocklist row as returned by the API.",
+        "required": [
+          "id",
+          "pattern",
+          "reason",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC3339 timestamp."
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User who created the entry."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable row identifier (UUIDv7)."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Rust `regex` pattern."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Free-form reason (may be empty)."
+          }
+        }
+      },
       "UserId": {
         "type": "string",
         "format": "uuid",
@@ -4996,6 +5560,10 @@
     {
       "name": "captcha",
       "description": "CAPTCHA provider frontend config (#41)"
+    },
+    {
+      "name": "admin-blocklist",
+      "description": "IP / URL blocklists (#42)"
     }
   ]
 }

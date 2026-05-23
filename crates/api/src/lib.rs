@@ -5,9 +5,11 @@
 //! a library lets integration tests construct a [`Router`](axum::Router)
 //! directly via [`app::build_with_state`] without spinning up a real listener.
 
+pub mod admin;
 pub mod app;
 pub mod audit_log;
 pub mod auth;
+pub mod blocklist;
 pub mod captcha;
 pub mod categories;
 pub mod cli;

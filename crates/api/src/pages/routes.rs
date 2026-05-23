@@ -23,6 +23,7 @@ use thewiki_storage::repo::{
 };
 use time::OffsetDateTime;
 
+use crate::blocklist::url_check::check_body_against_snapshot;
 use crate::categories::routes::category_view;
 use crate::config::ApprovalScope;
 use crate::error::ApiError;
@@ -123,6 +124,32 @@ async fn queue_or_publish<S: AppStorage>(
     } else {
         Ok(true)
     }
+}
+
+/// Reject the edit if any URL in `body` matches the URL blocklist (#42).
+///
+/// No-op when the blocklist state isn't wired (test fixtures) or when the
+/// pattern set is empty.
+pub(super) async fn ensure_body_passes_url_blocklist<S: AppStorage>(
+    state: &AppState<S>,
+    body: &str,
+) -> Result<(), ApiError> {
+    let Some(blocklist) = state.blocklist.as_ref() else {
+        return Ok(());
+    };
+    let snapshot = blocklist.snapshot().await;
+    if let Some(matches) = check_body_against_snapshot(body, &snapshot) {
+        // Surface the first offender + a compact summary so the SPA can
+        // render a "your edit links to a blocklisted URL" toast without
+        // leaking the full pattern set.
+        let first = &matches[0];
+        let pattern = first.matched_patterns.first().cloned().unwrap_or_default();
+        return Err(ApiError::InvalidInput(format!(
+            "url {url:?} matches blocklisted pattern {pattern:?}",
+            url = first.url
+        )));
+    }
+    Ok(())
 }
 
 /// Parse a caller-supplied namespace slug, falling back to [`DEFAULT_NAMESPACE`].
@@ -391,6 +418,10 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
     let parsed_tags = parse_tag_list(&req.tags)?;
     let parsed_categories = parse_category_list(&req.categories)?;
 
+    // Blocklist (#42): reject the edit before any storage write if the
+    // body contains a URL that matches an operator-supplied pattern.
+    ensure_body_passes_url_blocklist(&state, &req.content).await?;
+
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();
 
@@ -588,6 +619,11 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
     };
     let parsed_tags = parse_tag_list(&req.tags)?;
     let parsed_categories = parse_category_list(&req.categories)?;
+
+    // Blocklist (#42): reject the edit before any storage write if the
+    // body contains a URL that matches an operator-supplied pattern.
+    ensure_body_passes_url_blocklist(&state, &req.content).await?;
+
     let namespace_slug = parse_namespace_slug(None)?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();

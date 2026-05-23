@@ -1141,3 +1141,136 @@ pub trait TagRepository: Send + Sync {
         limit: u32,
     ) -> impl Future<Output = Result<Vec<Tag>, StorageError>> + Send;
 }
+
+/// One persisted row from the IP blocklist (#42).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IpBlocklistEntry {
+    /// UUIDv7 primary key.
+    pub id: uuid::Uuid,
+    /// CIDR string in its canonical human form (`203.0.113.0/24`,
+    /// `2001:db8::/32`). The repository stores whatever the caller hands it;
+    /// validation happens above the storage layer.
+    pub cidr: String,
+    /// Free-form reason. Stored as the empty string when the caller didn't
+    /// supply one.
+    pub reason: String,
+    /// User who created the row.
+    pub created_by: UserId,
+    /// When the row was created.
+    pub created_at: OffsetDateTime,
+}
+
+/// One persisted row from the URL blocklist (#42).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UrlBlocklistEntry {
+    /// UUIDv7 primary key.
+    pub id: uuid::Uuid,
+    /// Rust `regex` crate pattern. The caller is expected to have
+    /// successfully compiled this with `regex::Regex::new` before persisting
+    /// — the storage layer treats it as opaque text.
+    pub pattern: String,
+    /// Free-form reason.
+    pub reason: String,
+    /// User who created the row.
+    pub created_by: UserId,
+    /// When the row was created.
+    pub created_at: OffsetDateTime,
+}
+
+/// Input for inserting an IP blocklist row.
+#[derive(Debug, Clone)]
+pub struct NewIpBlocklistEntry {
+    /// CIDR in its canonical form.
+    pub cidr: String,
+    /// Free-form reason (`""` is fine).
+    pub reason: String,
+    /// User creating the entry.
+    pub created_by: UserId,
+}
+
+/// Input for inserting a URL blocklist row.
+#[derive(Debug, Clone)]
+pub struct NewUrlBlocklistEntry {
+    /// Validated `regex` pattern.
+    pub pattern: String,
+    /// Free-form reason.
+    pub reason: String,
+    /// User creating the entry.
+    pub created_by: UserId,
+}
+
+/// Persistence operations for the IP blocklist (#42).
+///
+/// The blocklist is loaded into memory on boot (and on every mutation) by
+/// the API layer; queries against this repository do not happen on the
+/// request hot path. Listing is unpaginated because operator-curated
+/// blocklists stay small in v1.
+pub trait IpBlocklistRepository: Send + Sync {
+    /// Insert a row and return the stored entry.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::Conflict`] if `cidr` already exists.
+    /// * [`StorageError::Database`] on driver failure.
+    fn create(
+        &self,
+        entry: NewIpBlocklistEntry,
+    ) -> impl Future<Output = Result<IpBlocklistEntry, StorageError>> + Send;
+
+    /// List every row, ordered newest first.
+    fn list_all(&self)
+    -> impl Future<Output = Result<Vec<IpBlocklistEntry>, StorageError>> + Send;
+
+    /// Fetch a single row by primary key.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the row didn't exist. Used by the admin
+    /// delete handler to capture the CIDR for the audit log before the row is
+    /// removed.
+    fn get_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> impl Future<Output = Result<IpBlocklistEntry, StorageError>> + Send;
+
+    /// Delete a row by primary key.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the row didn't exist.
+    fn delete(&self, id: uuid::Uuid) -> impl Future<Output = Result<(), StorageError>> + Send;
+}
+
+/// Persistence operations for the URL blocklist (#42).
+pub trait UrlBlocklistRepository: Send + Sync {
+    /// Insert a row and return the stored entry.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::Conflict`] if `pattern` already exists.
+    /// * [`StorageError::Database`] on driver failure.
+    fn create(
+        &self,
+        entry: NewUrlBlocklistEntry,
+    ) -> impl Future<Output = Result<UrlBlocklistEntry, StorageError>> + Send;
+
+    /// List every row, ordered newest first.
+    fn list_all(
+        &self,
+    ) -> impl Future<Output = Result<Vec<UrlBlocklistEntry>, StorageError>> + Send;
+
+    /// Fetch a single row by primary key.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the row didn't exist. Used by the admin
+    /// delete handler to capture the pattern for the audit log before the row
+    /// is removed.
+    fn get_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> impl Future<Output = Result<UrlBlocklistEntry, StorageError>> + Send;
+
+    /// Delete a row by primary key.
+    fn delete(&self, id: uuid::Uuid) -> impl Future<Output = Result<(), StorageError>> + Send;
+}
