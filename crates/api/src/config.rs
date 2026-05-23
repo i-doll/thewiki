@@ -94,6 +94,14 @@ pub struct CaptchaConfig {
     /// anonymous edits at all usually pair the flag with the approval
     /// queue (`auth.approval_required_for = "anonymous"`) which is the
     /// stronger gate.
+    ///
+    /// TODO(#41-followup): this field is currently **inert**. There is no
+    /// anonymous-edit code path yet — every page create/update goes
+    /// through `EditorExtractor`, which requires an `AuthSession`. Once
+    /// the SPA ships an anonymous-edit affordance we'll thread
+    /// `captcha_response` through `CreatePageRequest` / `UpdatePageRequest`
+    /// and consult this flag from the page handlers. Until then, flipping
+    /// it has no observable effect.
     #[serde(default)]
     pub apply_to_anonymous_edits: bool,
 }
