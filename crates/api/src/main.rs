@@ -238,10 +238,60 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
         listener,
         router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await
     .context("axum server terminated with an error")?;
 
     Ok(())
+}
+
+/// Resolve when the process should start draining and exit.
+///
+/// Listens for SIGINT (Ctrl+C on every platform) and, on Unix, SIGTERM
+/// (what `docker stop` and `kubectl delete pod` send). Both branches are
+/// raced via `tokio::select!`; whichever fires first wins.
+///
+/// Why this exists at all: in the Docker image the binary runs as PID 1
+/// (no init shim in the distroless ENTRYPOINT). The Linux kernel skips the
+/// *default* signal action for PID 1, so SIGTERM and SIGINT are no-ops
+/// unless we install handlers ourselves. Without this, `docker stop` waited
+/// the full 10-second grace period and then SIGKILL'd the container —
+/// operators saw the terminal freeze for ~10s on every shutdown.
+///
+/// Installing a `tokio::signal` handler registers a Unix signal handler
+/// underneath, which makes the kernel deliver the signal to us; awaiting
+/// it then resolves this future and `axum::serve` drains in-flight
+/// connections before returning.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            warn!(error = %err, "failed to install Ctrl+C handler");
+            // Park forever so the SIGTERM branch in the select! decides.
+            std::future::pending::<()>().await;
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut stream) => {
+                stream.recv().await;
+            }
+            Err(err) => {
+                warn!(error = %err, "failed to install SIGTERM handler");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
+    info!("shutdown signal received, draining in-flight requests");
 }
 
 async fn prune_expired_audit_log(
