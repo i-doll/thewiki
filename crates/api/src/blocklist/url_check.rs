@@ -25,6 +25,10 @@ use crate::blocklist::state::BlocklistSnapshot;
 /// non-whitespace characters that are also not common terminators
 /// (`)`, `>`, `"`, `'`, `]`). That conservative tail trim keeps the
 /// captured URL out of trailing Markdown / HTML punctuation.
+///
+/// The scheme group uses the inline `(?i:...)` flag so unusual casings
+/// (`HTTPS://`, `Http://`) still match — without this, a spammer could
+/// trivially bypass the blocklist by uppercasing the scheme.
 fn url_extractor() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     #[allow(
@@ -33,7 +37,7 @@ fn url_extractor() -> &'static Regex {
                   failure here is a programmer error and should surface loudly"
     )]
     REGEX.get_or_init(|| {
-        Regex::new(r#"https?://[^\s)>"'\]]+"#).expect("URL extractor regex compiles")
+        Regex::new(r#"(?i:https?)://[^\s)>"'\]]+"#).expect("URL extractor regex compiles")
     })
 }
 
@@ -112,6 +116,15 @@ mod tests {
     #[test]
     fn extracts_no_urls_from_plain_text() {
         assert!(extract_urls("nothing to see here").is_empty());
+    }
+
+    #[test]
+    fn extracts_urls_with_uppercase_or_mixed_scheme() {
+        let urls = extract_urls("see HTTPS://example.com/path and Http://x.test/y");
+        assert_eq!(
+            urls,
+            vec!["HTTPS://example.com/path", "Http://x.test/y"]
+        );
     }
 
     #[test]

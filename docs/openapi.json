@@ -148,6 +148,7 @@
         },
         "security": [
           {
+            "CsrfToken": [],
             "SessionCookie": []
           }
         ]
@@ -219,6 +220,7 @@
         },
         "security": [
           {
+            "CsrfToken": [],
             "SessionCookie": []
           }
         ]
@@ -359,6 +361,7 @@
         },
         "security": [
           {
+            "CsrfToken": [],
             "SessionCookie": []
           }
         ]
@@ -430,6 +433,7 @@
         },
         "security": [
           {
+            "CsrfToken": [],
             "SessionCookie": []
           }
         ]

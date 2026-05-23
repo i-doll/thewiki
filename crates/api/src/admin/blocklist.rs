@@ -10,6 +10,17 @@
 //! Each mutation (`POST`, `DELETE`) writes an audit row before it returns,
 //! using the standard `(actor_id, actor_username, action, target_kind,
 //! target_id, target_label, metadata)` shape. Reads do not emit audit rows.
+//! The delete handlers fetch the target row *before* writing the audit
+//! entry so the CIDR / pattern can be embedded in `target_label`, and so a
+//! missing row 404s without leaving a "deletion-of-nothing" trail.
+//!
+//! Within each handler the order is: persist DB change → refresh in-memory
+//! snapshot → write audit. The snapshot refresh is the security-critical
+//! step (a stale snapshot leaves a persisted block unenforced or a
+//! persisted unblock still rejecting traffic), so we prioritise it over
+//! the audit write. A missing audit row can be recovered with a
+//! reconciliation pass; a stale middleware snapshot cannot be detected
+//! after the fact.
 //!
 //! After a successful mutation the in-memory [`BlocklistState`] is
 //! refreshed by re-reading both tables — the cheapest way to keep the
@@ -202,8 +213,13 @@ pub async fn create_ip<S: AppStorage>(
         })
         .await?;
 
-    // Audit + refresh snapshot. The audit row goes first so a successful
-    // reply implies a durable record.
+    // Refresh the middleware snapshot *before* writing the audit row: a
+    // persisted-but-not-enforced blocklist entry is a security gap, while a
+    // persisted-and-enforced entry without an audit row is a compliance gap
+    // we can fix by re-running an audit reconciliation. The snapshot refresh
+    // is therefore the more time-sensitive of the two.
+    refresh_blocklist_snapshot(&state).await?;
+
     let audit = NewAuditLogEntry {
         actor_id: session.user.id,
         actor_username: session.user.username.as_str().to_owned(),
@@ -214,8 +230,6 @@ pub async fn create_ip<S: AppStorage>(
         metadata: json!({ "cidr": stored.cidr, "reason": stored.reason }),
     };
     state.storage.audit_log().create(audit).await?;
-
-    refresh_blocklist_snapshot(&state).await?;
 
     Ok((StatusCode::CREATED, Json(stored.into())))
 }
@@ -241,7 +255,17 @@ pub async fn delete_ip<S: AppStorage>(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     ensure_manage_blocklist(&session)?;
+
+    // Fetch first so the audit row preserves the CIDR (and creator) after the
+    // backing row is gone, and so a missing row 404s *before* we'd otherwise
+    // write a misleading "deletion" audit entry.
+    let existing = state.storage.ip_blocklist().get_by_id(id).await?;
     state.storage.ip_blocklist().delete(id).await?;
+
+    // Refresh the middleware snapshot before writing the audit row — same
+    // ordering rationale as `create_ip`: a stale snapshot here keeps a
+    // formerly-blocked peer rejected, which is the security-relevant case.
+    refresh_blocklist_snapshot(&state).await?;
 
     let audit = NewAuditLogEntry {
         actor_id: session.user.id,
@@ -249,12 +273,16 @@ pub async fn delete_ip<S: AppStorage>(
         action: "blocklist.ip.delete".to_owned(),
         target_kind: "ip_blocklist".to_owned(),
         target_id: id,
-        target_label: None,
-        metadata: json!({ "id": id }),
+        target_label: Some(existing.cidr.clone()),
+        metadata: json!({
+            "id": id,
+            "cidr": existing.cidr,
+            "reason": existing.reason,
+            "created_by": existing.created_by.into_uuid(),
+        }),
     };
     state.storage.audit_log().create(audit).await?;
 
-    refresh_blocklist_snapshot(&state).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -321,6 +349,10 @@ pub async fn create_url<S: AppStorage>(
         })
         .await?;
 
+    // Refresh first so the middleware enforces the new pattern even if the
+    // audit insert below fails — see `create_ip` for the full rationale.
+    refresh_blocklist_snapshot(&state).await?;
+
     let audit = NewAuditLogEntry {
         actor_id: session.user.id,
         actor_username: session.user.username.as_str().to_owned(),
@@ -331,8 +363,6 @@ pub async fn create_url<S: AppStorage>(
         metadata: json!({ "pattern": stored.pattern, "reason": stored.reason }),
     };
     state.storage.audit_log().create(audit).await?;
-
-    refresh_blocklist_snapshot(&state).await?;
 
     Ok((StatusCode::CREATED, Json(stored.into())))
 }
@@ -358,7 +388,13 @@ pub async fn delete_url<S: AppStorage>(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     ensure_manage_blocklist(&session)?;
+
+    // Fetch first so the audit row preserves the pattern (and creator) after
+    // the backing row is gone, and so a missing row 404s *before* we'd
+    // otherwise write a misleading "deletion" audit entry.
+    let existing = state.storage.url_blocklist().get_by_id(id).await?;
     state.storage.url_blocklist().delete(id).await?;
+    refresh_blocklist_snapshot(&state).await?;
 
     let audit = NewAuditLogEntry {
         actor_id: session.user.id,
@@ -366,12 +402,16 @@ pub async fn delete_url<S: AppStorage>(
         action: "blocklist.url.delete".to_owned(),
         target_kind: "url_blocklist".to_owned(),
         target_id: id,
-        target_label: None,
-        metadata: json!({ "id": id }),
+        target_label: Some(existing.pattern.clone()),
+        metadata: json!({
+            "id": id,
+            "pattern": existing.pattern,
+            "reason": existing.reason,
+            "created_by": existing.created_by.into_uuid(),
+        }),
     };
     state.storage.audit_log().create(audit).await?;
 
-    refresh_blocklist_snapshot(&state).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -293,6 +293,33 @@ fn add_operation_security(api_doc: &mut OpenApiDoc) {
         HttpMethod::Post,
         vec![session_and_csrf_requirement()],
     );
+    // Admin blocklist mutations (#42). All write endpoints sit behind the
+    // CSRF layer in build_full, so the OpenAPI spec must surface both
+    // requirements; reads (GET) only need the session cookie.
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/blocklist/ip",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/blocklist/ip/{id}",
+        HttpMethod::Delete,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/blocklist/url",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/admin/blocklist/url/{id}",
+        HttpMethod::Delete,
+        vec![session_and_csrf_requirement()],
+    );
 }
 
 fn session_requirement() -> SecurityRequirement {
@@ -434,6 +461,14 @@ pub fn build_with_state<S: AppStorage>(state: AppState<S>) -> Router {
 ///
 /// Integration tests that are not specifically exercising rate limits should
 /// pass a disabled config so they do not inherit production defaults.
+///
+/// **Middlewares NOT attached** (compared to [`build_full_with_rate_limit_state`]):
+/// * CSRF — see [`build_full`] / [`build_full_with_rate_limit_state`].
+/// * The blocklist layer ([`blocklist::blocklist_layer`]) — even if the
+///   caller wires `AppState::with_blocklist`, this builder does *not* mount
+///   the layer. Tests that need to assert on IP / URL blocking at the
+///   middleware level must boot through [`build_full_with_rate_limit_state`]
+///   instead (see `tests/blocklist.rs::ip_middleware_blocks_listed_ipv4_and_passes_others`).
 pub fn build_with_state_with_rate_limit<S: AppStorage>(
     state: AppState<S>,
     rate_limit_config: RateLimitConfig,

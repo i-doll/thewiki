@@ -1221,6 +1221,18 @@ pub trait IpBlocklistRepository: Send + Sync {
     fn list_all(&self)
     -> impl Future<Output = Result<Vec<IpBlocklistEntry>, StorageError>> + Send;
 
+    /// Fetch a single row by primary key.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the row didn't exist. Used by the admin
+    /// delete handler to capture the CIDR for the audit log before the row is
+    /// removed.
+    fn get_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> impl Future<Output = Result<IpBlocklistEntry, StorageError>> + Send;
+
     /// Delete a row by primary key.
     ///
     /// # Errors
@@ -1246,6 +1258,18 @@ pub trait UrlBlocklistRepository: Send + Sync {
     fn list_all(
         &self,
     ) -> impl Future<Output = Result<Vec<UrlBlocklistEntry>, StorageError>> + Send;
+
+    /// Fetch a single row by primary key.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the row didn't exist. Used by the admin
+    /// delete handler to capture the pattern for the audit log before the row
+    /// is removed.
+    fn get_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> impl Future<Output = Result<UrlBlocklistEntry, StorageError>> + Send;
 
     /// Delete a row by primary key.
     fn delete(&self, id: uuid::Uuid) -> impl Future<Output = Result<(), StorageError>> + Send;

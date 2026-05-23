@@ -526,6 +526,16 @@ async fn ip_middleware_blocks_listed_ipv4_and_passes_others() {
     .await;
     assert_eq!(status, StatusCode::OK, "/healthz must not be blocked");
 
+    // Readiness checks are also exempt — same contract as /healthz.
+    let status = run_with_peer(
+        router.clone(),
+        "GET",
+        "/readyz",
+        "203.0.113.42:1024".parse().unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "/readyz must not be blocked");
+
     // A different IP still gets through to the API.
     let status = run_with_peer(
         router,

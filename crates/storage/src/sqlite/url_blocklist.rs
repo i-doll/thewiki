@@ -77,6 +77,19 @@ impl UrlBlocklistRepository for SqliteUrlBlocklistRepository<'_> {
         rows.into_iter().map(row_to_entry).collect()
     }
 
+    async fn get_by_id(&self, id: Uuid) -> Result<UrlBlocklistEntry, StorageError> {
+        let id_bytes = uuid_bytes(id);
+        let row: Option<Row> = sqlx::query_as(
+            "SELECT id, pattern, reason, created_by, created_at \
+             FROM url_blocklist \
+             WHERE id = ?1",
+        )
+        .bind(id_bytes.as_slice())
+        .fetch_optional(self.pool)
+        .await?;
+        row.ok_or(StorageError::NotFound).and_then(row_to_entry)
+    }
+
     async fn delete(&self, id: Uuid) -> Result<(), StorageError> {
         let id_bytes = uuid_bytes(id);
         let result = sqlx::query("DELETE FROM url_blocklist WHERE id = ?1")

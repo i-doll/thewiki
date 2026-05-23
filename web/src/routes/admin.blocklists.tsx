@@ -117,8 +117,10 @@ function IpPanel() {
 	const deleteMutation = useMutation({
 		mutationFn: (id: string) => deleteIpBlocklistEntry(id),
 		onSuccess: () => {
+			setFormError(null);
 			void qc.invalidateQueries({ queryKey: ["admin-blocklist-ip"] });
 		},
+		onError: (err: ApiError) => setFormError(err.message),
 	});
 
 	const handleDelete = (entry: IpBlocklistEntry) => {
@@ -236,8 +238,10 @@ function UrlPanel() {
 	const deleteMutation = useMutation({
 		mutationFn: (id: string) => deleteUrlBlocklistEntry(id),
 		onSuccess: () => {
+			setFormError(null);
 			void qc.invalidateQueries({ queryKey: ["admin-blocklist-url"] });
 		},
+		onError: (err: ApiError) => setFormError(err.message),
 	});
 
 	const handleDelete = (entry: UrlBlocklistEntry) => {
