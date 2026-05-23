@@ -126,6 +126,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260523150000_watchlist",
         include_str!("../../../../migrations/20260523150000_watchlist.sql"),
     ),
+    (
+        "20260523180000_pending_revisions",
+        include_str!("../../../../migrations/20260523180000_pending_revisions.sql"),
+    ),
 ];
 
 /// Construction options for [`LibsqlStorage`].

@@ -176,6 +176,7 @@ async fn serve(args: cli::ServeArgs) -> anyhow::Result<()> {
 
     let mut app_state = thewiki_api::state::AppState::new(storage.clone(), config.auth.clone())
         .with_auth_state(auth_state.clone())
+        .with_moderation_config(config.moderation.clone())
         .with_search(indexer_handle)
         .with_searcher(searcher)
         .with_search_title_boost(config.search.title_boost)

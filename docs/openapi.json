@@ -1928,6 +1928,142 @@
         ]
       }
     },
+    "/api/v1/notifications": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "`GET /api/v1/notifications` — list the current user's notifications.",
+        "operationId": "list_notifications",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to\n[`thewiki_storage::repo::MAX_PAGE_SIZE`].",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Inbox listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/notifications/{id}/read": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "`POST /api/v1/notifications/{id}/read` — mark a notification read.",
+        "operationId": "mark_read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Notification id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notification marked read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Notification not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/pages": {
       "get": {
         "tags": [
@@ -2841,6 +2977,366 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/pending-revisions": {
+      "get": {
+        "tags": [
+          "pending-revisions"
+        ],
+        "summary": "`GET /api/v1/pending-revisions` — reviewer queue list.",
+        "operationId": "list_pending",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Restrict to one lifecycle status — `pending`, `approved`, or\n`rejected`. Defaults to `pending` so the reviewer queue stays\nuncluttered.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by a previous call.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Clamped to\n[`thewiki_storage::repo::MAX_PAGE_SIZE`].",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending revisions list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingRevisionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks REVIEW_EDITS / MANAGE_USERS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pending-revisions/{id}": {
+      "get": {
+        "tags": [
+          "pending-revisions"
+        ],
+        "summary": "`GET /api/v1/pending-revisions/{id}` — single row + parent body.",
+        "operationId": "get_pending",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pending revision id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending revision detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingRevisionDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks REVIEW_EDITS / MANAGE_USERS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Pending revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pending-revisions/{id}/approve": {
+      "post": {
+        "tags": [
+          "pending-revisions"
+        ],
+        "summary": "`POST /api/v1/pending-revisions/{id}/approve` — promote to a real\nrevision against the target page.",
+        "operationId": "approve_pending",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pending revision id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending revision approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingRevisionView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks REVIEW_EDITS / MANAGE_USERS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Pending revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Pending revision already decided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pending-revisions/{id}/reject": {
+      "post": {
+        "tags": [
+          "pending-revisions"
+        ],
+        "summary": "`POST /api/v1/pending-revisions/{id}/reject` — record a rejection.",
+        "operationId": "reject_pending",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pending revision id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectPendingRevisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Pending revision rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingRevisionView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks REVIEW_EDITS / MANAGE_USERS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Pending revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Pending revision already decided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "SessionCookie": []
+          }
+        ]
       }
     },
     "/api/v1/recent-changes": {
@@ -5147,6 +5643,81 @@
           }
         }
       },
+      "NotificationId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier for an in-app notification row (#40)."
+      },
+      "NotificationListResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/notifications`.",
+        "required": [
+          "items",
+          "unread"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationView"
+            },
+            "description": "Rows in this batch, newest first."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Token to fetch the next page, or `None` when the listing is\nexhausted."
+          },
+          "unread": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Count of unread rows in the current user's inbox.",
+            "minimum": 0
+          }
+        }
+      },
+      "NotificationView": {
+        "type": "object",
+        "description": "One row in `GET /api/v1/notifications`.",
+        "required": [
+          "id",
+          "user_id",
+          "kind",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the notification was produced."
+          },
+          "id": {
+            "$ref": "#/components/schemas/NotificationId",
+            "description": "Stable identifier."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Stable kind string (see [`thewiki_core::notification::kind`])."
+          },
+          "payload": {
+            "description": "Arbitrary structured payload, identical to what the producer\nattached."
+          },
+          "read_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "`None` while unread; the RFC3339 timestamp once the user opened\nthe row."
+          },
+          "user_id": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "Recipient."
+          }
+        }
+      },
       "PageId": {
         "type": "string",
         "format": "uuid",
@@ -5270,9 +5841,33 @@
             "type": "string",
             "description": "Slug of the namespace; joined in so clients don't need a second\nround trip just to render a breadcrumb."
           },
+          "pending_revision_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PendingRevisionId",
+                "description": "Identifier of the `pending_revisions` row, present only when\n[`Self::queued`] is `true`. Reviewers act on this id."
+              }
+            ]
+          },
           "protection_level": {
             "$ref": "#/components/schemas/ProtectionLevel",
             "description": "How protected this page is from edits. Drives the SPA's lock badge\nand is enforced server-side on every mutating handler (#34)."
+          },
+          "queue_position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Position of the queued edit in the FIFO pending queue at the moment\nthe row was written (1 = next to be reviewed). Present only when\n[`Self::queued`] is `true`.",
+            "minimum": 1
+          },
+          "queued": {
+            "type": "boolean",
+            "description": "Set to `true` on a `202 Accepted` response when the submitted edit\nlanded in the moderation queue (#40) instead of going live. The page\nfields above still describe the **previous** state (or, on a fresh\ncreate, the empty placeholder page that's now reserving the slug)."
           },
           "slug": {
             "type": "string",
@@ -5293,6 +5888,197 @@
             "type": "string",
             "format": "date-time",
             "description": "When the page row was last touched."
+          }
+        }
+      },
+      "PendingRevisionDetailResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PendingRevisionView",
+            "description": "List-shape metadata (id, status, page coordinates, …)."
+          },
+          {
+            "type": "object",
+            "required": [
+              "body",
+              "head_moved_since_proposal"
+            ],
+            "properties": {
+              "body": {
+                "type": "string",
+                "description": "Full proposed Markdown body."
+              },
+              "head_body": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Body of the page's *current* head revision at fetch time. Differs\nfrom `parent_body` when another edit landed on the page between the\nproposal and the reviewer opening it. `None` if the page still has\nno head."
+              },
+              "head_moved_since_proposal": {
+                "type": "boolean",
+                "description": "`true` if `head_body` differs from the proposal's parent (a\nconcurrent edit landed since this row was queued). The reviewer UI\nuses this to render a \"head has moved on\" warning so approving\ncan't silently clobber intermediate work."
+              },
+              "parent_body": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Body of the parent revision the edit was based on, joined in so the\nSPA can render a diff against it. `None` when the page didn't have\na head at queue time (the row proposes the initial revision)."
+              }
+            }
+          }
+        ],
+        "description": "Detail shape returned by `GET /api/v1/pending-revisions/{id}`.\n\nCarries the full proposed body so the reviewer's diff view can render\nwithout a second round trip."
+      },
+      "PendingRevisionId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier for a row in the `pending_revisions` (edit approval queue)\ntable (#40)."
+      },
+      "PendingRevisionListResponse": {
+        "type": "object",
+        "description": "Response from `GET /api/v1/pending-revisions`.",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingRevisionView"
+            },
+            "description": "Rows in this batch, newest first."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Token to fetch the next page, or `None` when the listing is\nexhausted."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total count of pending rows (matches the filter when `status` is\nprovided, otherwise counts everything). Useful for the reviewer\nUI's \"N pending\" badge.",
+            "minimum": 0
+          }
+        }
+      },
+      "PendingRevisionStatus": {
+        "type": "string",
+        "description": "Lifecycle states a pending-revision row can be in.\n\n`#[non_exhaustive]` so a future state (e.g. `Superseded`) is not a\nbreaking change for downstream matchers.",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected"
+        ]
+      },
+      "PendingRevisionView": {
+        "type": "object",
+        "description": "One row in the reviewer-facing pending list.\n\n`body` is intentionally omitted from the listing shape: the queue is\nusually long and the SPA fetches the full row through\n[`PendingRevisionDetailResponse`] when the reviewer opens an entry. The\npage slug + author label is joined in so the list can render without a\nsecond round trip.",
+        "required": [
+          "id",
+          "page_id",
+          "namespace_id",
+          "namespace_slug",
+          "page_slug",
+          "page_title",
+          "author_label",
+          "comment",
+          "status",
+          "created_at"
+        ],
+        "properties": {
+          "author_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "Authenticated author id, or `None` for anonymous edits."
+              }
+            ]
+          },
+          "author_label": {
+            "type": "string",
+            "description": "Username snapshot, joined in for anonymous-friendly display."
+          },
+          "comment": {
+            "type": "string",
+            "description": "Operator-visible comment / edit summary attached to the edit."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the row was queued."
+          },
+          "decided_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the reviewer acted, or `None` while pending."
+          },
+          "id": {
+            "$ref": "#/components/schemas/PendingRevisionId",
+            "description": "Stable identifier."
+          },
+          "namespace_id": {
+            "$ref": "#/components/schemas/NamespaceId",
+            "description": "Namespace the target page lives in (joined in)."
+          },
+          "namespace_slug": {
+            "type": "string",
+            "description": "Slug of the namespace (joined in)."
+          },
+          "page_id": {
+            "$ref": "#/components/schemas/PageId",
+            "description": "Page the edit targets."
+          },
+          "page_slug": {
+            "type": "string",
+            "description": "Slug of the page (joined in)."
+          },
+          "page_title": {
+            "type": "string",
+            "description": "Title of the page at queue time (joined in)."
+          },
+          "parent_revision_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RevisionId",
+                "description": "Parent revision id the edit was based on."
+              }
+            ]
+          },
+          "rejection_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Operator-visible note attached to a rejection."
+          },
+          "reviewer_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "Reviewer who decided the row, or `None` while pending."
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/PendingRevisionStatus",
+            "description": "Lifecycle state."
           }
         }
       },
@@ -5447,6 +6233,20 @@
           "username": {
             "type": "string",
             "description": "Desired login handle. Validated through [`Username`]."
+          }
+        }
+      },
+      "RejectPendingRevisionRequest": {
+        "type": "object",
+        "description": "Body of `POST /api/v1/pending-revisions/{id}/reject`.",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Operator-visible reason. Stored verbatim and echoed back to the\n(authenticated) author through the in-app inbox. Must be non-empty\nafter trimming — the handler returns 400 if the trimmed value is\nempty. The schema-level `minLength: 1` is a coarse pre-validation\nhint for OpenAPI consumers.",
+            "minLength": 1
           }
         }
       },
@@ -5969,6 +6769,14 @@
     {
       "name": "watchlist",
       "description": "Per-user page watchlist + Atom feed (#46)"
+    },
+    {
+      "name": "pending-revisions",
+      "description": "Edit approval queue (#40)"
+    },
+    {
+      "name": "notifications",
+      "description": "In-app inbox (#40)"
     }
   ]
 }

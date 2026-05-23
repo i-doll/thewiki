@@ -630,3 +630,164 @@ export const RECENT_CHANGES_ATOM_URL = "/api/v1/recent-changes.atom";
 export function namespaceAtomUrl(namespace: string): string {
 	return `/api/v1/recent-changes/${encodeURIComponent(namespace)}/atom`;
 }
+
+// ─── Approval queue (#40) ──────────────────────────────────────────────────
+
+/** Lifecycle states a pending revision can be in. */
+export type PendingRevisionStatus = "pending" | "approved" | "rejected";
+
+/**
+ * One row in the reviewer-facing pending list. Mirrors
+ * `PendingRevisionView` from `crates/api/src/pending_revisions/dto.rs`.
+ */
+export interface PendingRevisionView {
+	id: string;
+	page_id: string;
+	namespace_id: string;
+	namespace_slug: string;
+	page_slug: string;
+	page_title: string;
+	parent_revision_id: string | null;
+	author_id: string | null;
+	author_label: string;
+	comment: string;
+	status: PendingRevisionStatus;
+	reviewer_id: string | null;
+	decided_at: string | null;
+	rejection_reason: string | null;
+	created_at: string;
+}
+
+/** Response from `GET /api/v1/pending-revisions`. */
+export interface PendingRevisionListResponse {
+	items: PendingRevisionView[];
+	next_cursor: string | null;
+	total: number;
+}
+
+/** Response from `GET /api/v1/pending-revisions/{id}`. */
+export interface PendingRevisionDetailResponse extends PendingRevisionView {
+	body: string;
+	parent_body: string | null;
+	/**
+	 * Body of the page's current head revision at fetch time. Differs from
+	 * `parent_body` when another edit landed on the page between the
+	 * proposal being queued and the reviewer opening it.
+	 */
+	head_body: string | null;
+	/**
+	 * `true` if the head moved between proposal time and now — approving
+	 * will overwrite intermediate changes. The UI surfaces a warning when
+	 * this is set.
+	 */
+	head_moved_since_proposal: boolean;
+}
+
+/** List pending revisions, defaulting to `status=pending`. */
+export async function listPendingRevisions(options?: {
+	status?: PendingRevisionStatus;
+	cursor?: string | null;
+	limit?: number;
+}): Promise<PendingRevisionListResponse> {
+	const params = new URLSearchParams();
+	if (options?.status) {
+		params.set("status", options.status);
+	}
+	if (options?.cursor) {
+		params.set("cursor", options.cursor);
+	}
+	if (options?.limit !== undefined) {
+		params.set("limit", String(options.limit));
+	}
+	const query = params.toString();
+	const url =
+		query.length > 0
+			? `/api/v1/pending-revisions?${query}`
+			: "/api/v1/pending-revisions";
+	return jsonRequest<PendingRevisionListResponse>(url, { method: "GET" });
+}
+
+/** Fetch one pending revision with the full proposed body + parent body. */
+export async function fetchPendingRevision(
+	id: string,
+): Promise<PendingRevisionDetailResponse> {
+	return jsonRequest<PendingRevisionDetailResponse>(
+		`/api/v1/pending-revisions/${encodeURIComponent(id)}`,
+		{ method: "GET" },
+	);
+}
+
+/** Approve a pending revision. */
+export async function approvePendingRevision(id: string): Promise<PendingRevisionView> {
+	return jsonRequest<PendingRevisionView>(
+		`/api/v1/pending-revisions/${encodeURIComponent(id)}/approve`,
+		{ method: "POST", headers: authHeaders() },
+	);
+}
+
+/** Reject a pending revision with an operator-visible reason. */
+export async function rejectPendingRevision(
+	id: string,
+	reason: string,
+): Promise<PendingRevisionView> {
+	return jsonRequest<PendingRevisionView>(
+		`/api/v1/pending-revisions/${encodeURIComponent(id)}/reject`,
+		{
+			method: "POST",
+			headers: authHeaders(),
+			body: JSON.stringify({ reason }),
+		},
+	);
+}
+
+// ─── In-app inbox (#40) ────────────────────────────────────────────────────
+
+/** One notification row. Mirrors `NotificationView`. */
+export interface NotificationView {
+	id: string;
+	user_id: string;
+	kind: string;
+	payload: unknown;
+	read_at: string | null;
+	created_at: string;
+}
+
+/** Response from `GET /api/v1/notifications`. */
+export interface NotificationListResponse {
+	items: NotificationView[];
+	next_cursor: string | null;
+	unread: number;
+}
+
+/** List the current user's notifications. Returns `null` for anonymous callers. */
+export async function listNotifications(options?: {
+	cursor?: string | null;
+	limit?: number;
+}): Promise<NotificationListResponse | null> {
+	const params = new URLSearchParams();
+	if (options?.cursor) {
+		params.set("cursor", options.cursor);
+	}
+	if (options?.limit !== undefined) {
+		params.set("limit", String(options.limit));
+	}
+	const query = params.toString();
+	const url =
+		query.length > 0 ? `/api/v1/notifications?${query}` : "/api/v1/notifications";
+	const res = await fetch(url, { method: "GET", credentials: "same-origin" });
+	if (res.status === 401) {
+		return null;
+	}
+	if (!res.ok) {
+		throw new ApiError(res.status, await parseError(res));
+	}
+	return (await res.json()) as NotificationListResponse;
+}
+
+/** Mark a notification as read. */
+export async function markNotificationRead(id: string): Promise<NotificationView> {
+	return jsonRequest<NotificationView>(
+		`/api/v1/notifications/${encodeURIComponent(id)}/read`,
+		{ method: "POST", headers: authHeaders() },
+	);
+}

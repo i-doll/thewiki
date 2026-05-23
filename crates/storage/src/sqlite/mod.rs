@@ -60,9 +60,11 @@ mod codec;
 mod ip_blocklist;
 mod media;
 mod namespace;
+mod notification;
 mod page;
 mod page_audit;
 mod page_link;
+mod pending_revision;
 mod recent_changes;
 mod revision;
 mod role;
@@ -77,8 +79,10 @@ pub use category::SqliteCategoryRepository;
 pub use ip_blocklist::SqliteIpBlocklistRepository;
 pub use media::{SqliteMediaBlobRepository, SqliteMediaRepository, SqliteMediaVariantRepository};
 pub use namespace::SqliteNamespaceRepository;
+pub use notification::SqliteNotificationRepository;
 pub use page::SqlitePageRepository;
 pub use page_link::SqlitePageLinkRepository;
+pub use pending_revision::SqlitePendingRevisionRepository;
 pub use recent_changes::SqliteRecentChangesRepository;
 pub use revision::SqliteRevisionRepository;
 pub use role::SqliteRoleRepository;
@@ -293,6 +297,20 @@ impl SqliteStorage {
     #[must_use]
     pub fn watches(&self) -> SqliteWatchRepository<'_> {
         SqliteWatchRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`PendingRevisionRepository`](crate::repo::PendingRevisionRepository) (#40).
+    #[must_use]
+    pub fn pending_revisions(&self) -> SqlitePendingRevisionRepository<'_> {
+        SqlitePendingRevisionRepository::new(&self.pool)
+    }
+
+    /// Borrow this handle as a
+    /// [`NotificationRepository`](crate::repo::NotificationRepository) (#40).
+    #[must_use]
+    pub fn notifications(&self) -> SqliteNotificationRepository<'_> {
+        SqliteNotificationRepository::new(&self.pool)
     }
 
     /// Commit a page mutation together with its audit-log row.

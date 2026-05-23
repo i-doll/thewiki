@@ -24,13 +24,14 @@ use thewiki_storage::StorageError;
 use thewiki_storage::repo::{
     AuditLogRepository, CategoryRepository, IpBlocklistRepository, MediaBlobRepository,
     MediaRepository, MediaVariantRepository, NamespaceRepository, NewAuditLogEntry,
-    PageAuditMutation, PageLinkRepository, PageRepository, RecentChangesRepository,
-    RevisionRepository, TagRepository, UrlBlocklistRepository, UserRepository, WatchRepository,
+    NotificationRepository, PageAuditMutation, PageLinkRepository, PageRepository,
+    PendingRevisionRepository, RecentChangesRepository, RevisionRepository, TagRepository,
+    UrlBlocklistRepository, UserRepository, WatchRepository,
 };
 
 use crate::auth::AuthState;
 use crate::blocklist::BlocklistState;
-use crate::config::{AuthConfig, CaptchaConfig};
+use crate::config::{AuthConfig, CaptchaConfig, EffectiveApprovalPolicy, ModerationConfig};
 use crate::media::MediaBackend;
 
 /// A cloneable storage facade that hands out per-aggregate repositories.
@@ -102,6 +103,15 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     type Watches<'a>: WatchRepository + 'a
     where
         Self: 'a;
+    /// Pending-revision (edit approval queue) repository borrowed from this
+    /// handle (#40).
+    type PendingRevisions<'a>: PendingRevisionRepository + 'a
+    where
+        Self: 'a;
+    /// Notification (in-app inbox) repository borrowed from this handle (#40).
+    type Notifications<'a>: NotificationRepository + 'a
+    where
+        Self: 'a;
 
     /// Borrow a [`PageRepository`].
     fn pages(&self) -> Self::Pages<'_>;
@@ -133,6 +143,10 @@ pub trait AppStorage: Clone + Send + Sync + 'static {
     fn url_blocklist(&self) -> Self::UrlBlocklist<'_>;
     /// Borrow a [`WatchRepository`] (#46).
     fn watches(&self) -> Self::Watches<'_>;
+    /// Borrow a [`PendingRevisionRepository`] (#40).
+    fn pending_revisions(&self) -> Self::PendingRevisions<'_>;
+    /// Borrow a [`NotificationRepository`] (#40).
+    fn notifications(&self) -> Self::Notifications<'_>;
 
     /// Commit a page mutation and its required audit row atomically.
     fn commit_page_audit(
@@ -158,6 +172,8 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     type IpBlocklist<'a> = thewiki_storage::sqlite::SqliteIpBlocklistRepository<'a>;
     type UrlBlocklist<'a> = thewiki_storage::sqlite::SqliteUrlBlocklistRepository<'a>;
     type Watches<'a> = thewiki_storage::sqlite::SqliteWatchRepository<'a>;
+    type PendingRevisions<'a> = thewiki_storage::sqlite::SqlitePendingRevisionRepository<'a>;
+    type Notifications<'a> = thewiki_storage::sqlite::SqliteNotificationRepository<'a>;
 
     fn pages(&self) -> Self::Pages<'_> {
         Self::pages(self)
@@ -203,6 +219,12 @@ impl AppStorage for thewiki_storage::sqlite::SqliteStorage {
     }
     fn watches(&self) -> Self::Watches<'_> {
         Self::watches(self)
+    }
+    fn pending_revisions(&self) -> Self::PendingRevisions<'_> {
+        Self::pending_revisions(self)
+    }
+    fn notifications(&self) -> Self::Notifications<'_> {
+        Self::notifications(self)
     }
 
     fn commit_page_audit(
@@ -256,6 +278,8 @@ pub struct AppState<S: AppStorage> {
     pub route_config: RouteConfig,
     /// Snapshot of `Config::auth` — the configurable-auth wiring point (#14).
     pub auth_config: AuthConfig,
+    /// Snapshot of `Config::moderation` — the approval queue policy (#40).
+    pub moderation_config: ModerationConfig,
     /// Auth state shared with the auth router (cookies, hasher, session TTL).
     /// `None` in test fixtures that don't exercise the auth stack.
     pub auth_state: Option<AuthState>,
@@ -308,6 +332,7 @@ impl<S: AppStorage> AppState<S> {
             storage: Arc::new(storage),
             route_config: RouteConfig::default(),
             auth_config,
+            moderation_config: ModerationConfig::default(),
             auth_state: None,
             search: IndexerHandle::disabled(),
             searcher: Searcher::disabled(),
@@ -328,6 +353,38 @@ impl<S: AppStorage> AppState<S> {
         self.render_config = render;
         self
     }
+
+    /// Replace the [`ModerationConfig`] snapshot. Production wiring fills
+    /// this from `Config::moderation` so the approval queue handlers see
+    /// the operator's policy.
+    #[must_use]
+    pub fn with_moderation_config(mut self, moderation: ModerationConfig) -> Self {
+        self.moderation_config = moderation;
+        self
+    }
+
+    /// Compute the effective approval policy (merging the legacy
+    /// `auth.approval_required_for` field with the modern
+    /// `[moderation.approval]` section, see
+    /// [`crate::config::Config::effective_approval_policy`]).
+    #[must_use]
+    pub fn effective_approval_policy(&self) -> EffectiveApprovalPolicy {
+        let modern_scope = self
+            .moderation_config
+            .approval
+            .require_approval_for
+            .into_scope();
+        let scope = if matches!(modern_scope, crate::config::ApprovalScope::None) {
+            self.auth_config.approval_required_for
+        } else {
+            modern_scope
+        };
+        EffectiveApprovalPolicy {
+            scope,
+            new_user_threshold_days: self.moderation_config.approval.new_user_threshold_days,
+        }
+    }
+
 
     /// Replace the [`IndexerHandle`]. Production code calls this with a
     /// handle minted by [`thewiki_search::Indexer::spawn`]; tests typically
@@ -422,6 +479,7 @@ impl<S: AppStorage> Clone for AppState<S> {
             storage: Arc::clone(&self.storage),
             route_config: self.route_config,
             auth_config: self.auth_config.clone(),
+            moderation_config: self.moderation_config.clone(),
             auth_state: self.auth_state.clone(),
             search: self.search.clone(),
             searcher: self.searcher.clone(),

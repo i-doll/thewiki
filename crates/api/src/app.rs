@@ -52,7 +52,9 @@ use crate::feeds;
 use crate::graphql::{self, GraphQLState};
 use crate::media;
 use crate::namespaces;
+use crate::notifications;
 use crate::pages;
+use crate::pending_revisions;
 use crate::rate_limit::{self, RateLimitState};
 use crate::recent_changes;
 use crate::search;
@@ -102,6 +104,8 @@ const CSRF_TOKEN_SECURITY: &str = "CsrfToken";
         (name = "captcha", description = "CAPTCHA provider frontend config (#41)"),
         (name = "admin-blocklist", description = "IP / URL blocklists (#42)"),
         (name = "watchlist", description = "Per-user page watchlist + Atom feed (#46)"),
+        (name = "pending-revisions", description = "Edit approval queue (#40)"),
+        (name = "notifications", description = "In-app inbox (#40)"),
     )
 )]
 pub struct ApiDoc;
@@ -126,6 +130,11 @@ fn api_router<S: AppStorage>() -> OpenApiRouter<AppState<S>> {
         // (e.g. `/recent-changes.atom` is a sibling of `/recent-changes`,
         // not a child).
         .nest("/api/v1", feeds::router::<S>())
+        .nest(
+            "/api/v1/pending-revisions",
+            pending_revisions::router::<S>(),
+        )
+        .nest("/api/v1/notifications", notifications::router::<S>())
 }
 
 /// Generate the full public REST OpenAPI document.
@@ -354,6 +363,45 @@ fn add_operation_security(api_doc: &mut OpenApiDoc) {
         "/api/v1/watchlist.atom",
         HttpMethod::Get,
         vec![session_requirement()],
+    );
+    // Approval queue (#40). Reviewer endpoints require an authenticated
+    // session; the handler also enforces REVIEW_EDITS / MANAGE_USERS.
+    set_operation_security(
+        api_doc,
+        "/api/v1/pending-revisions",
+        HttpMethod::Get,
+        vec![session_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/pending-revisions/{id}",
+        HttpMethod::Get,
+        vec![session_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/pending-revisions/{id}/approve",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/pending-revisions/{id}/reject",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
+    );
+    // Inbox endpoints (#40). Both require a session — the inbox is per-user.
+    set_operation_security(
+        api_doc,
+        "/api/v1/notifications",
+        HttpMethod::Get,
+        vec![session_requirement()],
+    );
+    set_operation_security(
+        api_doc,
+        "/api/v1/notifications/{id}/read",
+        HttpMethod::Post,
+        vec![session_and_csrf_requirement()],
     );
 }
 

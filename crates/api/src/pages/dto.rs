@@ -7,7 +7,7 @@
 //! need a second round trip just to render a breadcrumb.
 
 use serde::{Deserialize, Serialize};
-use thewiki_core::{CategoryId, NamespaceId, PageId, ProtectionLevel, RevisionId};
+use thewiki_core::{CategoryId, NamespaceId, PageId, PendingRevisionId, ProtectionLevel, RevisionId};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
@@ -117,6 +117,22 @@ pub struct PageView {
     /// When the page row was last touched.
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
+    /// Set to `true` on a `202 Accepted` response when the submitted edit
+    /// landed in the moderation queue (#40) instead of going live. The page
+    /// fields above still describe the **previous** state (or, on a fresh
+    /// create, the empty placeholder page that's now reserving the slug).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queued: bool,
+    /// Identifier of the `pending_revisions` row, present only when
+    /// [`Self::queued`] is `true`. Reviewers act on this id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_revision_id: Option<PendingRevisionId>,
+    /// Position of the queued edit in the FIFO pending queue at the moment
+    /// the row was written (1 = next to be reviewed). Present only when
+    /// [`Self::queued`] is `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(minimum = 1)]
+    pub queue_position: Option<u64>,
 }
 
 /// Lighter representation of a page used inside [`PageListResponse`].

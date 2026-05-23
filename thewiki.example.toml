@@ -135,18 +135,21 @@ registration = "closed"
 # Which classes of edits land in the moderator approval queue. One of:
 #   "none"      — every edit goes live immediately
 #   "anonymous" — anonymous edits require approval; authenticated edits go live
-#   "new-users" — anonymous edits + edits from accounts younger than 24 hours
-#                 require approval
+#   "new-users" — anonymous edits + edits from accounts younger than the
+#                 configured `moderation.approval.new_user_threshold_days`
+#                 require approval (defaults to 7 days)
 #   "all"       — every edit requires approval
 # Default: "none".
 #
 # When an edit matches the configured scope, the API returns `202 Accepted`
-# instead of `201 Created` / `200 OK` and the page's current revision stays
-# pointed at the previous head until a moderator promotes the pending edit.
-# The moderator queue itself ships in M2 (#40) — for now the gate logs the
-# decision but does not yet persist a `pending_revisions` row, so configuring
-# anything other than `"none"` will *silently drop* edits. Only flip this
-# once #40 lands.
+# instead of `201 Created` / `200 OK`, persists the proposed body to the
+# `pending_revisions` table, and surfaces the row on the moderator queue
+# (`GET /api/v1/pending-revisions`). The page's current revision stays
+# pointed at the previous head until a reviewer approves the pending row.
+#
+# The modern shape for this knob lives under `[moderation.approval]` (see
+# below); the field here is kept for backwards-compatibility and is
+# consulted when the modern section is left at its default.
 approval_required_for = "none"
 
 # Session lifetime in hours. Sessions are stored in the DB (no JWT), so this
@@ -361,6 +364,31 @@ apply_to_anonymous_edits = false
 #
 # Must be > 0. Default: 20.
 max_recursion_depth = 20
+
+# ---------------------------------------------------------------------------
+# Moderation (#40).
+#
+# Drives the edit approval queue. The `require_approval_for` knob has the
+# same semantics as the legacy `auth.approval_required_for` field; when
+# this section is left at the documented default the legacy field is
+# used so existing config files keep working unchanged.
+#
+# The `new_user_threshold_days` knob tunes the
+# `"anon_and_new_users"` scope: edits from accounts younger than this
+# window count as "new user" edits and join anonymous edits in the queue.
+# ---------------------------------------------------------------------------
+[moderation.approval]
+# Which classes of edits land in the queue. One of:
+#   "none"             — every edit goes live immediately (default)
+#   "anon"             — anonymous edits require approval
+#   "anon_and_new_users" — anonymous edits + edits from accounts younger
+#                          than `new_user_threshold_days` require approval
+#   "all"              — every edit requires approval
+require_approval_for = "none"
+
+# Window in days during which a freshly-registered account counts as a
+# "new user" for the `anon_and_new_users` scope.
+new_user_threshold_days = 7
 
 # ---------------------------------------------------------------------------
 # Observability.
