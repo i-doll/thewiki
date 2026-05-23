@@ -217,6 +217,11 @@ impl LibsqlStorage {
                 .build()
                 .await
                 .map_err(codec::db_error)?,
+            // `Builder::new_local` creates the database file if it doesn't
+            // exist (libsql parity with `sqlite3_open_v2`'s
+            // `SQLITE_OPEN_CREATE`), so no `create_if_missing`-style toggle
+            // is needed here. The parent directory still has to exist; that
+            // is the operator's responsibility for libsql today.
             Mode::Local { path } => Builder::new_local(path)
                 .build()
                 .await

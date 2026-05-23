@@ -727,9 +727,10 @@ pub enum RateLimitBackendConfig {
 /// Full-text search (Tantivy) configuration (#26).
 ///
 /// `index_path` is where the Tantivy segments live on disk. The default
-/// (`./data/search/`) keeps the index next to the SQLite database for
-/// single-binary deploys. Operators running on a separate disk (or a
-/// network mount) typically override this.
+/// (`./search/`) is relative to the working directory — inside the official
+/// container image that's `/data/search/`, alongside the SQLite database.
+/// Operators running on a separate disk (or a network mount) typically
+/// override with an absolute path.
 ///
 /// `commit_interval_ms` / `batch_size` tune the async indexer worker —
 /// lowering either improves freshness at the cost of write amplification.
@@ -773,7 +774,7 @@ fn default_talk_boost() -> f32 {
 impl Default for SearchConfig {
     fn default() -> Self {
         Self {
-            index_path: PathBuf::from("data/search"),
+            index_path: PathBuf::from("search"),
             commit_interval_ms: 200,
             batch_size: 100,
             title_boost: default_title_boost(),
@@ -855,8 +856,9 @@ const ARGON2_MIN_PARALLELISM: u32 = 1;
 impl Config {
     /// Built-in defaults.
     ///
-    /// Tuned for an out-of-the-box small deploy: SQLite under `data/`, blobs in
-    /// the DB, registration closed, JSON logs.
+    /// Tuned for an out-of-the-box small deploy: SQLite in the current
+    /// working directory (which is `/data` inside the official container
+    /// image), blobs in the DB, registration closed, JSON logs.
     #[must_use]
     pub fn defaults() -> Self {
         Self {
@@ -868,7 +870,7 @@ impl Config {
             },
             database: DatabaseConfig {
                 driver: DatabaseDriver::Sqlite,
-                url: "sqlite://data/thewiki.db".to_string(),
+                url: "sqlite://thewiki.db".to_string(),
                 max_connections: 16,
                 acquire_timeout_secs: 10,
             },

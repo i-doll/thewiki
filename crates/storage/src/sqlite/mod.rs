@@ -54,6 +54,54 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 use crate::error::StorageError;
 
+/// Heuristic: does this sqlx URL designate an in-memory database?
+///
+/// sqlx accepts a handful of spellings for in-memory SQLite:
+///
+/// * `sqlite::memory:`
+/// * `sqlite://:memory:`
+/// * `file::memory:` (optionally followed by `?cache=shared` etc.)
+/// * any of the above plus a `mode=memory` query parameter
+///   (e.g. `sqlite:///foo.db?mode=memory`)
+///
+/// We can't just ask the parsed `SqliteConnectOptions` whether it's
+/// in-memory — its `in_memory` flag is `pub(crate)` — so we sniff the raw
+/// URL the caller passed before we try to materialize any parent
+/// directories on disk.
+///
+/// Per the SQLite docs (<https://sqlite.org/inmemorydb.html>), the
+/// `:memory:` filename is only special when it's exact — any extra text
+/// in the filename token makes it a (weirdly named) file-backed database.
+/// So we accept the in-memory sentinels only when they're either the
+/// whole URL or immediately followed by a `?` query string; URLs like
+/// `file::memory:backup.db` or `sqlite://:memory:backup.db` fall through
+/// to the file-backed path so the parent-dir guard still runs.
+///
+/// The query-string scan for `mode=memory` is deliberately narrow:
+/// matching it only as a `?…&`-delimited parameter avoids misclassifying
+/// file paths that happen to contain that substring (e.g.
+/// `sqlite:///tmp/mode=memory.db`).
+fn is_in_memory_sqlite_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    let is_exact_or_query_delimited = |prefix: &str| {
+        lower
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('?'))
+    };
+
+    if is_exact_or_query_delimited("sqlite::memory:")
+        || is_exact_or_query_delimited("sqlite://:memory:")
+        || is_exact_or_query_delimited("file::memory:")
+    {
+        return true;
+    }
+
+    lower
+        .split_once('?')
+        .map(|(_, query)| query.split('&').any(|param| param == "mode=memory"))
+        .unwrap_or(false)
+}
+
 mod audit_log;
 mod category;
 mod codec;
@@ -149,8 +197,38 @@ impl SqliteStorage {
             .parse()
             .map_err(|err: sqlx::Error| StorageError::invalid_input(err.to_string()))?;
         // Foreign keys are off in sqlx by default; the schema relies on FK
-        // cascades, so opt in explicitly.
-        let connect_opts = connect_opts.foreign_keys(opts.foreign_keys);
+        // cascades, so opt in explicitly. `create_if_missing` lets a fresh
+        // deploy boot against an empty `/data` volume without operators
+        // having to `touch` the file first.
+        let connect_opts = connect_opts
+            .foreign_keys(opts.foreign_keys)
+            .create_if_missing(true);
+
+        // For file-backed databases, make sure the parent directory exists.
+        // `sqlite:///data/nested/db.sqlite` is a perfectly reasonable thing
+        // for an operator to write, but sqlx will fail to open the file if
+        // `/data/nested` doesn't already exist. We sniff the original URL
+        // for the in-memory sentinels because the parsed options don't
+        // expose their `in_memory` flag.
+        if !is_in_memory_sqlite_url(url)
+            && let Some(parent) = connect_opts.get_filename().parent()
+            && !parent.as_os_str().is_empty()
+        {
+            match tokio::fs::create_dir_all(parent).await {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // `create_dir_all` normally treats AlreadyExists as
+                    // success; we still match it explicitly so that any
+                    // future tightening of its semantics doesn't surprise us.
+                }
+                Err(err) => {
+                    return Err(StorageError::invalid_input(format!(
+                        "creating sqlite parent dir {}: {err}",
+                        parent.display()
+                    )));
+                }
+            }
+        }
 
         let pool = SqlitePoolOptions::new()
             .max_connections(opts.max_connections)
@@ -339,5 +417,81 @@ impl SqliteStorage {
             .await
             .map_err(|err| StorageError::Migration(err.to_string()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_in_memory_sqlite_url;
+
+    #[test]
+    fn detects_sqlite_memory_scheme() {
+        assert!(is_in_memory_sqlite_url("sqlite::memory:"));
+    }
+
+    #[test]
+    fn detects_sqlite_authority_memory() {
+        assert!(is_in_memory_sqlite_url("sqlite://:memory:"));
+    }
+
+    #[test]
+    fn detects_file_memory_with_query() {
+        assert!(is_in_memory_sqlite_url("file::memory:?cache=shared"));
+    }
+
+    #[test]
+    fn detects_mode_memory_query_param() {
+        assert!(is_in_memory_sqlite_url(
+            "sqlite:///tmp/db.sqlite?mode=memory"
+        ));
+    }
+
+    #[test]
+    fn file_path_containing_mode_equals_memory_is_not_in_memory() {
+        // Regression: previously the naive `contains("mode=memory")` check
+        // classified this file path as in-memory and skipped the
+        // `create_dir_all` parent-dir guard in `SqliteStorage::new`.
+        assert!(!is_in_memory_sqlite_url("sqlite:///tmp/mode=memory.db"));
+    }
+
+    #[test]
+    fn file_path_with_mode_memory_substring_is_not_in_memory() {
+        assert!(!is_in_memory_sqlite_url(
+            "sqlite:///tmp/some_mode=memory_file.db"
+        ));
+    }
+
+    #[test]
+    fn plain_file_url_is_not_in_memory() {
+        assert!(!is_in_memory_sqlite_url("sqlite:///tmp/db.sqlite"));
+    }
+
+    #[test]
+    fn file_memory_with_trailing_filename_is_not_in_memory() {
+        // Regression: per https://sqlite.org/inmemorydb.html, `:memory:` is
+        // only special when the filename token is exactly `:memory:`. Extra
+        // text in the filename makes it a (weirdly named) file-backed db.
+        // The previous `starts_with("file::memory:")` check wrongly
+        // classified this as in-memory and skipped the parent-dir guard.
+        assert!(!is_in_memory_sqlite_url("file::memory:backup.db"));
+    }
+
+    #[test]
+    fn sqlite_authority_memory_with_trailing_filename_is_not_in_memory() {
+        // Regression: same issue as above — the previous
+        // `contains("://:memory:")` check matched this file-backed URL.
+        assert!(!is_in_memory_sqlite_url("sqlite://:memory:backup.db"));
+    }
+
+    #[test]
+    fn file_memory_with_query_string_is_in_memory() {
+        // Query-delimited form must keep working.
+        assert!(is_in_memory_sqlite_url("file::memory:?cache=shared"));
+    }
+
+    #[test]
+    fn sqlite_memory_scheme_with_query_string_is_in_memory() {
+        // Query-delimited form must keep working.
+        assert!(is_in_memory_sqlite_url("sqlite::memory:?cache=shared"));
     }
 }

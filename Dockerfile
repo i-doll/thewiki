@@ -120,6 +120,14 @@ RUN set -eux; \
     mkdir -p /out; \
     cp "target/$RUST_TARGET/release/thewiki" /out/thewiki
 
+# Seed an empty source tree that the runtime stage copies in as `/data/`,
+# the conventional writable data root. `COPY` from a build stage is the
+# only way to materialize a directory the `nonroot` user owns without
+# escalating to `root` in the distroless runtime image. We deliberately
+# park this under `/tmp` (which `cargo` / `cargo-chef` never touch) so the
+# layer above stays cache-friendly.
+RUN mkdir -p /tmp/empty-data
+
 ###############################################################################
 # Stage: web-build — builds the React frontend with pnpm.                     #
 ###############################################################################
@@ -161,8 +169,21 @@ LABEL org.opencontainers.image.title="thewiki" \
 #   /usr/local/bin/thewiki   — the server binary
 #   /srv/web/dist/           — built frontend (consumed by #16 once embedding
 #                              lands; ignored by the binary until then).
+#   /data/                   — the writable data root. Operators are expected
+#                              to bind-mount or named-volume mount this path
+#                              (`docker run -v thewiki-data:/data ...`); the
+#                              binary's compiled-in defaults resolve
+#                              `thewiki.db` and `search/` relative to it via
+#                              the runtime stage's `WORKDIR`.
 COPY --from=rust-build /out/thewiki /usr/local/bin/thewiki
 COPY --from=web-build  /web/dist    /srv/web/dist
+
+# Materialize `/data/` owned by uid:gid 65532 (distroless `nonroot`) so the
+# binary can write to it without an operator having to chown the volume.
+# Named/bind mounts shadow this directory at runtime; this is purely the
+# fallback so `docker run` without `-v` still boots.
+COPY --from=rust-build --chown=65532:65532 /tmp/empty-data/ /data/
+WORKDIR /data
 
 # Distroless `:nonroot` already sets USER nonroot (uid 65532). Restating it
 # keeps the contract explicit so an operator reading the Dockerfile doesn't

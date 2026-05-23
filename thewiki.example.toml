@@ -50,8 +50,11 @@ driver = "sqlite"
 #   postgres://user:pass@host:5432/database
 # Path is resolved relative to the working directory; absolute paths
 # (`sqlite:///var/lib/thewiki/thewiki.db`) are recommended for production.
-# Default: `sqlite://data/thewiki.db`.
-url = "sqlite://data/thewiki.db"
+# Inside the official container image the working directory is `/data`, so
+# this relative path resolves to `/data/thewiki.db` — mount a volume there
+# and the file is auto-created on first boot. For non-container deploys,
+# prefer an absolute path. Default: `sqlite://thewiki.db`.
+url = "sqlite://thewiki.db"
 
 # Maximum number of pooled connections. SQLite tolerates a low value;
 # Postgres deploys typically want this larger. Default: 16.
@@ -237,9 +240,11 @@ kind = "in-memory"
 # also be run manually after a schema change.
 # ---------------------------------------------------------------------------
 [search]
-# Directory the Tantivy segments live in. Created on first boot. Default:
-# `data/search`. Operators on a separate disk typically override this.
-index_path = "data/search"
+# Directory the Tantivy segments live in. Created on first boot. Resolved
+# relative to the working directory, so inside the official container image
+# (`WORKDIR /data`) this becomes `/data/search/`. Operators on a separate
+# disk typically override with an absolute path. Default: `search`.
+index_path = "search"
 
 # Commit cadence in milliseconds. Lower means fresher search at higher write
 # amplification. Default: 200 (i.e. the index is at most ~200 ms behind a

@@ -16,7 +16,7 @@ fn defaults_match_documented_values() {
     let cfg = Config::defaults();
 
     assert_eq!(cfg.server.bind, "0.0.0.0:8080");
-    assert_eq!(cfg.database.url, "sqlite://data/thewiki.db");
+    assert_eq!(cfg.database.url, "sqlite://thewiki.db");
     assert_eq!(cfg.database.max_connections, 16);
     assert!(!cfg.auth.anonymous_edits);
     assert_eq!(cfg.auth.registration, RegistrationPolicy::Closed);
@@ -214,7 +214,7 @@ fn env_alone_overrides_defaults_when_no_file_is_supplied() {
         let cfg = Config::load(None).expect("env-only load succeeds");
         assert_eq!(cfg.server.bind, "127.0.0.1:5555");
         // Untouched fields fall back to defaults.
-        assert_eq!(cfg.database.url, "sqlite://data/thewiki.db");
+        assert_eq!(cfg.database.url, "sqlite://thewiki.db");
         Ok(())
     });
 }
