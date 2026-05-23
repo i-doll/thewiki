@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import toast from "react-hot-toast";
+import { TalkThread } from "../components/TalkThread";
 import {
 	addToWatchlist,
 	ApiError,
@@ -150,6 +151,11 @@ function PageViewComponent() {
 					</header>
 					{page.content.trim().length === 0 ? (
 						<p className="text-sm italic text-neutral-500">This page is empty.</p>
+					) : page.is_talk === true ? (
+						// Talk-namespace pages (#43) render as a threaded
+						// discussion view; the API ships the body as plain
+						// markdown and the SPA owns the thread parsing.
+						<TalkThread body={page.content} />
 					) : (
 						<div
 							className="prose max-w-none"
@@ -218,6 +224,22 @@ function PageViewComponent() {
 							View history →
 						</Link>
 					</div>
+					{page.is_talk !== true && page._links?.talk != null && (
+						// "Discuss" / talk sidebar link (#43). The server ships the
+						// canonical SPA-route URL on `_links.talk` so we don't have
+						// to reconstruct `Talk_<ns>` client-side; that convention
+						// holds for the seeded `Main` partner but not after a
+						// rename. The talk-namespace SPA route renders the thread
+						// view automatically.
+						<div>
+							<a
+								href={page._links.talk}
+								className="inline-flex items-center gap-1 rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+							>
+								Discuss
+							</a>
+						</div>
+					)}
 					{canManageProtection && (
 						<div className="border-t border-neutral-200 pt-3">
 							<button

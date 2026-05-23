@@ -1,6 +1,6 @@
 //! Postgres [`NamespaceRepository`](crate::repo::NamespaceRepository) impl.
 
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use thewiki_core::{Namespace, NamespaceId, NamespaceSlug};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -15,6 +15,14 @@ const DEFAULT_NAMESPACE_SLUG: &str = "Main";
 /// Slug used for the implicit template namespace seeded at boot (#45).
 const TEMPLATE_NAMESPACE_SLUG: &str = "Template";
 
+/// Prefix prepended to a subject namespace slug to produce its discussion
+/// counterpart (#43).
+const TALK_SLUG_PREFIX: &str = "Talk_";
+
+/// Prefix prepended to a subject namespace's display name to produce the
+/// talk-side label.
+const TALK_DISPLAY_PREFIX: &str = "Talk: ";
+
 /// Postgres-backed namespace repository. Borrows the pool from
 /// [`PostgresStorage`](super::PostgresStorage).
 pub struct PostgresNamespaceRepository<'a> {
@@ -25,23 +33,43 @@ impl<'a> PostgresNamespaceRepository<'a> {
     pub(super) fn new(pool: &'a PgPool) -> Self {
         Self { pool }
     }
-}
 
-impl NamespaceRepository for PostgresNamespaceRepository<'_> {
-    async fn create(&self, namespace: &Namespace) -> Result<(), StorageError> {
-        // The schema demands a `created_at`; the domain `Namespace` doesn't
-        // expose one yet, so stamp "now" at insert time. When `Namespace`
-        // grows a `created_at` field, swap this for the carried value.
+    /// Build the matching talk-side namespace value for `subject`.
+    fn build_talk_pair(subject: &Namespace) -> Result<Namespace, StorageError> {
+        let talk_slug = format!("{TALK_SLUG_PREFIX}{}", subject.slug.as_str());
+        let slug = NamespaceSlug::new(&talk_slug).map_err(|err| {
+            StorageError::invalid_input(format!(
+                "could not derive talk slug from {:?}: {err}",
+                subject.slug.as_str()
+            ))
+        })?;
+        Ok(Namespace {
+            id: NamespaceId::new(),
+            slug,
+            display_name: format!("{TALK_DISPLAY_PREFIX}{}", subject.display_name),
+            is_talk: true,
+            paired_namespace_id: Some(subject.id),
+        })
+    }
+
+    async fn insert_row_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        namespace: &Namespace,
+    ) -> Result<(), StorageError> {
         let now = OffsetDateTime::now_utc();
+        let paired = namespace.paired_namespace_id.map(|p| p.into_uuid());
 
         let result = sqlx::query(
-            "INSERT INTO namespaces (id, slug, display_name, created_at) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO namespaces (id, slug, display_name, created_at, is_talk, paired_namespace_id) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(namespace.id.into_uuid())
         .bind(namespace.slug.as_str())
         .bind(&namespace.display_name)
         .bind(now)
-        .execute(self.pool)
+        .bind(namespace.is_talk)
+        .bind(paired)
+        .execute(&mut **tx)
         .await;
 
         match result {
@@ -50,41 +78,114 @@ impl NamespaceRepository for PostgresNamespaceRepository<'_> {
         }
     }
 
-    async fn get_by_id(&self, id: NamespaceId) -> Result<Namespace, StorageError> {
-        let row: Option<(Uuid, String, String)> =
-            sqlx::query_as("SELECT id, slug, display_name FROM namespaces WHERE id = $1")
-                .bind(id.into_uuid())
-                .fetch_optional(self.pool)
-                .await?;
+    async fn set_pair_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        id: NamespaceId,
+        paired_id: NamespaceId,
+    ) -> Result<(), StorageError> {
+        sqlx::query("UPDATE namespaces SET paired_namespace_id = $1 WHERE id = $2")
+            .bind(paired_id.into_uuid())
+            .bind(id.into_uuid())
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Lookup a namespace by slug inside the current transaction. Used by
+    /// `create()` so the "Talk_<slug> already exists" branch reads the
+    /// same view of the data the surrounding writes do.
+    async fn get_by_slug_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        slug: &NamespaceSlug,
+    ) -> Result<Namespace, StorageError> {
+        let row: Option<(Uuid, String, String, bool, Option<Uuid>)> = sqlx::query_as(
+            "SELECT id, slug, display_name, is_talk, paired_namespace_id FROM namespaces WHERE slug = $1",
+        )
+        .bind(slug.as_str())
+        .fetch_optional(&mut **tx)
+        .await?;
 
         match row {
-            Some((id, slug, display_name)) => namespace_from_row(id, slug, display_name),
+            Some((id, slug, display_name, is_talk, paired)) => {
+                namespace_from_row(id, slug, display_name, is_talk, paired)
+            }
+            None => Err(StorageError::NotFound),
+        }
+    }
+}
+
+impl NamespaceRepository for PostgresNamespaceRepository<'_> {
+    async fn create(&self, namespace: &Namespace) -> Result<(), StorageError> {
+        // The subject insert, the paired talk insert, and the bidirectional
+        // `paired_namespace_id` updates all run inside a single transaction
+        // so a failure on any later step rolls back the whole pairing
+        // graph (#43, coderabbit).
+        let mut tx = self.pool.begin().await?;
+        Self::insert_row_tx(&mut tx, namespace).await?;
+
+        if !namespace.is_talk && namespace.paired_namespace_id.is_none() {
+            let talk = Self::build_talk_pair(namespace)?;
+            match Self::insert_row_tx(&mut tx, &talk).await {
+                Ok(()) => {
+                    Self::set_pair_tx(&mut tx, namespace.id, talk.id).await?;
+                }
+                Err(StorageError::Conflict(_)) => {
+                    let existing = Self::get_by_slug_tx(&mut tx, &talk.slug).await?;
+                    if existing.paired_namespace_id.is_none() {
+                        Self::set_pair_tx(&mut tx, existing.id, namespace.id).await?;
+                    }
+                    Self::set_pair_tx(&mut tx, namespace.id, existing.id).await?;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn get_by_id(&self, id: NamespaceId) -> Result<Namespace, StorageError> {
+        let row: Option<(Uuid, String, String, bool, Option<Uuid>)> = sqlx::query_as(
+            "SELECT id, slug, display_name, is_talk, paired_namespace_id FROM namespaces WHERE id = $1",
+        )
+        .bind(id.into_uuid())
+        .fetch_optional(self.pool)
+        .await?;
+
+        match row {
+            Some((id, slug, display_name, is_talk, paired)) => {
+                namespace_from_row(id, slug, display_name, is_talk, paired)
+            }
             None => Err(StorageError::NotFound),
         }
     }
 
     async fn get_by_slug(&self, slug: &NamespaceSlug) -> Result<Namespace, StorageError> {
-        let row: Option<(Uuid, String, String)> =
-            sqlx::query_as("SELECT id, slug, display_name FROM namespaces WHERE slug = $1")
-                .bind(slug.as_str())
-                .fetch_optional(self.pool)
-                .await?;
+        let row: Option<(Uuid, String, String, bool, Option<Uuid>)> = sqlx::query_as(
+            "SELECT id, slug, display_name, is_talk, paired_namespace_id FROM namespaces WHERE slug = $1",
+        )
+        .bind(slug.as_str())
+        .fetch_optional(self.pool)
+        .await?;
 
         match row {
-            Some((id, slug, display_name)) => namespace_from_row(id, slug, display_name),
+            Some((id, slug, display_name, is_talk, paired)) => {
+                namespace_from_row(id, slug, display_name, is_talk, paired)
+            }
             None => Err(StorageError::NotFound),
         }
     }
 
     async fn list(&self) -> Result<Vec<Namespace>, StorageError> {
-        let rows: Vec<(Uuid, String, String)> = sqlx::query_as(
-            "SELECT id, slug, display_name FROM namespaces ORDER BY created_at ASC, id ASC",
+        let rows: Vec<(Uuid, String, String, bool, Option<Uuid>)> = sqlx::query_as(
+            "SELECT id, slug, display_name, is_talk, paired_namespace_id FROM namespaces ORDER BY created_at ASC, id ASC",
         )
         .fetch_all(self.pool)
         .await?;
 
         rows.into_iter()
-            .map(|(id, slug, display_name)| namespace_from_row(id, slug, display_name))
+            .map(|(id, slug, display_name, is_talk, paired)| {
+                namespace_from_row(id, slug, display_name, is_talk, paired)
+            })
             .collect()
     }
 
@@ -148,9 +249,11 @@ impl PostgresNamespaceRepository<'_> {
                     id: NamespaceId::new(),
                     slug,
                     display_name: slug_str.to_owned(),
+                    is_talk: false,
+                    paired_namespace_id: None,
                 };
                 match self.create(&ns).await {
-                    Ok(()) => Ok(ns),
+                    Ok(()) => self.get_by_id(ns.id).await,
                     Err(StorageError::Conflict(_)) => self.get_by_slug(&ns.slug).await,
                     Err(e) => Err(e),
                 }

@@ -77,6 +77,8 @@ async fn app_with_auth(auth_cfg: AuthConfig) -> (Router, UserId, SqliteStorage) 
         id: NamespaceId::new(),
         slug: NamespaceSlug::new("Main").expect("valid slug"),
         display_name: "Main".into(),
+        is_talk: false,
+        paired_namespace_id: None,
     };
     storage
         .namespaces()

@@ -13,6 +13,15 @@ pub struct NamespaceView {
     pub slug: String,
     /// Human-readable display label.
     pub display_name: String,
+    /// Whether this is a discussion ("talk") namespace paired with a
+    /// subject namespace (#43).
+    #[serde(default)]
+    pub is_talk: bool,
+    /// Identifier of the paired namespace, when one is wired up.
+    /// For a subject namespace this points at its `Talk_*` companion;
+    /// for a talk namespace it points back at the subject namespace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paired_namespace_id: Option<NamespaceId>,
 }
 
 impl From<Namespace> for NamespaceView {
@@ -21,6 +30,8 @@ impl From<Namespace> for NamespaceView {
             id: ns.id,
             slug: ns.slug.into_string(),
             display_name: ns.display_name,
+            is_talk: ns.is_talk,
+            paired_namespace_id: ns.paired_namespace_id,
         }
     }
 }

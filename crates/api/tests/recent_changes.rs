@@ -44,6 +44,8 @@ async fn fresh_app() -> (Router, UserId, String, SqliteStorage) {
         id: NamespaceId::new(),
         slug: NamespaceSlug::new("Main").expect("valid slug"),
         display_name: "Main".into(),
+        is_talk: false,
+        paired_namespace_id: None,
     };
     storage
         .namespaces()
@@ -109,6 +111,8 @@ async fn add_namespace(storage: &SqliteStorage, slug: &str) {
         id: NamespaceId::new(),
         slug: NamespaceSlug::new(slug).expect("valid slug"),
         display_name: slug.into(),
+        is_talk: false,
+        paired_namespace_id: None,
     };
     storage
         .namespaces()

@@ -56,6 +56,7 @@ pub async fn search<S: AppStorage>(
         limit,
         cursor: params.cursor.clone(),
         title_boost: state.search_title_boost,
+        talk_boost: state.search_talk_boost,
     };
 
     // The searcher is sync (Tantivy reads are cheap and don't yield), so

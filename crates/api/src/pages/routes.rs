@@ -31,7 +31,7 @@ use crate::extractors::EditorExtractor;
 use crate::pages::audit::page_event;
 use crate::pages::dto::{
     BacklinkItem, BacklinkListResponse, CreatePageRequest, ListBacklinksQuery, ListPagesQuery,
-    PageListItem, PageListResponse, PageView, UpdatePageRequest,
+    PageLinks, PageListItem, PageListResponse, PageView, SignatureConvention, UpdatePageRequest,
 };
 use crate::pages::protection::{EditorContext, check_protection};
 use crate::render as page_render;
@@ -271,6 +271,36 @@ pub(crate) async fn hydrate_page_view<S: AppStorage>(
         .into_iter()
         .map(|t| t.into_string())
         .collect();
+    // Fetch the namespace so we can surface `is_talk` and the `_links.talk`
+    // pointer (#43). A missing row here would mean the page's FK is
+    // dangling, which the schema makes impossible; treat the lookup as
+    // infallible from the API's perspective.
+    let namespace = state
+        .storage
+        .namespaces()
+        .get_by_id(page.namespace_id)
+        .await?;
+    // Build the talk URL: the navigable SPA route at the page's paired
+    // talk namespace (#43, coderabbit). Looking up the paired namespace
+    // by id is required because the talk slug is **not** guaranteed to
+    // be `Talk_<subject>` — the convention holds for the seeded `Main`
+    // partner but operators can rename namespaces independently. The
+    // server is the source of truth; clients that construct
+    // `Talk_<ns>` would mis-route after a rename. For talk-namespace
+    // pages we leave `_links.talk` empty — no "talk of a talk".
+    let links = match namespace.paired_namespace_id {
+        Some(paired_id) if !namespace.is_talk => {
+            let paired_ns = state.storage.namespaces().get_by_id(paired_id).await?;
+            PageLinks {
+                talk: Some(format!(
+                    "/wiki/{}/{}",
+                    paired_ns.slug.as_str(),
+                    page.slug,
+                )),
+            }
+        }
+        _ => PageLinks::default(),
+    };
     Ok(PageView {
         id: page.id,
         namespace_id: page.namespace_id,
@@ -288,6 +318,9 @@ pub(crate) async fn hydrate_page_view<S: AppStorage>(
         queued: false,
         pending_revision_id: None,
         queue_position: None,
+        is_talk: namespace.is_talk,
+        links,
+        signature_convention: SignatureConvention::default(),
     })
 }
 
@@ -295,10 +328,18 @@ pub(crate) async fn hydrate_page_view<S: AppStorage>(
 ///
 /// `tags` carries the page's resolved tag set (#29) so Tantivy's `tags`
 /// field is populated for the `?tag=…` filter the search endpoint passes
-/// through. The list is supplied by the caller (it has already been
-/// validated + atomically replaced via the tag repository) so the build
-/// step here is pure data-shovelling.
-fn build_search_doc(page: &Page, namespace_slug: &str, body: &str, tags: Vec<String>) -> PageDoc {
+/// through. `is_talk` propagates the namespace's discussion-side flag
+/// (#43) so the reader-side scorer can demote talk pages by default.
+/// The list is supplied by the caller (it has already been validated +
+/// atomically replaced via the tag repository) so the build step here is
+/// pure data-shovelling.
+fn build_search_doc(
+    page: &Page,
+    namespace_slug: &str,
+    body: &str,
+    tags: Vec<String>,
+    is_talk: bool,
+) -> PageDoc {
     PageDoc {
         page_id: page.id,
         namespace_id: page.namespace_id,
@@ -308,6 +349,7 @@ fn build_search_doc(page: &Page, namespace_slug: &str, body: &str, tags: Vec<Str
         body: body.to_owned(),
         tags,
         updated_at: page.updated_at,
+        is_talk,
     }
 }
 
@@ -464,6 +506,17 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();
 
+    // Sign-with-timestamp expansion (#43): for talk-namespace pages the
+    // server replaces `~~~~` with `[[User:<username>]] <RFC 3339 stamp>`
+    // before the revision is persisted. Subject pages keep the marker
+    // literal so authors can document the convention without it being
+    // eaten by the editor.
+    let content = if namespace.is_talk {
+        super::signature::expand_signatures(&req.content, &editor.username)
+    } else {
+        req.content
+    };
+
     let now = OffsetDateTime::now_utc();
     let mut page = Page {
         id: PageId::new(),
@@ -477,7 +530,7 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
         updated_at: now,
     };
 
-    let revision = Revision::new(page.id, None, editor.user_id, req.content, None);
+    let revision = Revision::new(page.id, None, editor.user_id, content, None);
     let live = !should_queue(&state, &editor);
 
     let status = if live {
@@ -567,6 +620,7 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
             namespace_label.as_str(),
             &live_revision_body,
             assigned_tags,
+            namespace.is_talk,
         ));
     }
 
@@ -658,7 +712,7 @@ pub async fn update_page<S: AppStorage>(
 /// `PUT /api/v1/wiki/{namespace}/{slug}`.
 pub(crate) async fn update_page_in_namespace<S: AppStorage>(
     state: AppState<S>,
-    _namespace_slug: NamespaceSlug,
+    namespace_slug: NamespaceSlug,
     slug: String,
     editor: EditorExtractor,
     req: UpdatePageRequest,
@@ -679,7 +733,6 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
     // body contains a URL that matches an operator-supplied pattern.
     ensure_body_passes_url_blocklist(&state, &req.content).await?;
 
-    let namespace_slug = parse_namespace_slug(None)?;
     let namespace = resolve_namespace(&state, &namespace_slug).await?;
     let namespace_label = namespace.slug.as_str().to_owned();
     let mut page = state
@@ -692,11 +745,18 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
     // 403 with the `page_protected` code before any revision row is built.
     check_protection(page.protection_level, editor_context(&editor))?;
 
+    // Sign-with-timestamp expansion (#43) — see [`create_page_in_namespace`].
+    let content = if namespace.is_talk {
+        super::signature::expand_signatures(&req.content, &editor.username)
+    } else {
+        req.content
+    };
+
     let revision = Revision::new(
         page.id,
         page.current_revision_id,
         editor.user_id,
-        req.content,
+        content,
         req.edit_summary.clone(),
     );
     let live = !should_queue(&state, &editor);
@@ -806,6 +866,7 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
             namespace_label.as_str(),
             &live_revision_body,
             indexable_tags,
+            namespace.is_talk,
         ));
     }
 

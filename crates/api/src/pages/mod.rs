@@ -13,6 +13,7 @@ pub mod protection;
 pub mod revert;
 pub mod revisions;
 pub mod routes;
+pub mod signature;
 
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;

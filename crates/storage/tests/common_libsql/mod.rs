@@ -30,6 +30,8 @@ pub fn make_namespace(slug: &str) -> Namespace {
         id: NamespaceId::new(),
         slug: NamespaceSlug::new(slug).expect("valid slug"),
         display_name: slug.to_string(),
+        is_talk: false,
+        paired_namespace_id: None,
     }
 }
 

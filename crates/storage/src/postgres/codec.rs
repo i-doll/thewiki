@@ -158,6 +158,8 @@ pub fn namespace_from_row(
     id: Uuid,
     slug: String,
     display_name: String,
+    is_talk: bool,
+    paired_namespace_id: Option<Uuid>,
 ) -> Result<Namespace, StorageError> {
     let slug = NamespaceSlug::new(slug)
         .map_err(|err| StorageError::invalid_input(format!("stored slug invalid: {err}")))?;
@@ -165,6 +167,8 @@ pub fn namespace_from_row(
         id: NamespaceId::from_uuid(id),
         slug,
         display_name,
+        is_talk,
+        paired_namespace_id: paired_namespace_id.map(NamespaceId::from_uuid),
     })
 }
 

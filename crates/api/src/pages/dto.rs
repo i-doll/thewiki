@@ -67,6 +67,47 @@ pub struct UpdatePageRequest {
     pub tags: Option<Vec<String>>,
 }
 
+/// Hypermedia-style link block surfaced alongside a [`PageView`] (#43).
+///
+/// Today the only field is `talk`, which the SPA uses to render the
+/// "Discuss" sidebar link. Adding new links here is additive — existing
+/// clients that ignore the `_links` block are unaffected.
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct PageLinks {
+    /// Navigable SPA-route URL of the discussion ("talk") page paired
+    /// with this page, in the form `/wiki/<talk_ns>/<slug>`. The server
+    /// is the source of truth so the client never has to reconstruct
+    /// `Talk_<ns>` itself — that convention can drift after a rename.
+    /// `None` for pages already in a talk namespace (no "talk of a
+    /// talk") or when the namespace has no paired partner.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub talk: Option<String>,
+}
+
+/// Sign-with-timestamp convention metadata (#43).
+///
+/// Mirrors the server-side `~~~~` expansion so the SPA can preview the
+/// rendered signature client-side without a round-trip. The marker is
+/// MediaWiki-compatible — operators familiar with `mw:Help:Signatures`
+/// won't have to retrain editors.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SignatureConvention {
+    /// Marker that triggers signature expansion. Always `"~~~~"`.
+    pub marker: String,
+    /// Format string describing the expansion. `{user}` is replaced with
+    /// `[[User:<username>]]`; `{timestamp}` with an ISO-8601 UTC timestamp.
+    pub format: String,
+}
+
+impl Default for SignatureConvention {
+    fn default() -> Self {
+        Self {
+            marker: "~~~~".to_owned(),
+            format: "[[User:{user}]] {timestamp}".to_owned(),
+        }
+    }
+}
+
 /// A single page returned by the read endpoints.
 ///
 /// `content` is the body of the current revision (joined in for
@@ -133,6 +174,22 @@ pub struct PageView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(minimum = 1)]
     pub queue_position: Option<u64>,
+    /// `true` if this page lives in a discussion ("talk") namespace (#43).
+    /// The SPA uses this to switch the body renderer to
+    /// `<TalkThread>` and to hide the "Discuss" sidebar link (talk pages
+    /// don't have their own talk page).
+    #[serde(default)]
+    pub is_talk: bool,
+    /// Hypermedia-style cross-references for this page. New surface added
+    /// in #43 — additive, so existing clients that ignore it are unaffected.
+    #[serde(default, rename = "_links")]
+    pub links: PageLinks,
+    /// Documentation of the signature-expansion convention (#43). Surfaced
+    /// on every read response so the SPA can render a `~~~~` preview
+    /// client-side. Independent of the page's namespace — the marker is
+    /// only *expanded* on save when the page lives in a talk namespace.
+    #[serde(default)]
+    pub signature_convention: SignatureConvention,
 }
 
 /// Lighter representation of a page used inside [`PageListResponse`].

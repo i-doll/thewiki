@@ -138,6 +138,7 @@ impl<S: AppStorage> Mutation<S> {
             body: body_snapshot,
             tags: Vec::new(),
             updated_at: page.updated_at,
+            is_talk: namespace.is_talk,
         });
 
         let view = crate::pages::routes::hydrate_page_view(state, page, ns_label)
@@ -230,6 +231,7 @@ impl<S: AppStorage> Mutation<S> {
             body: body_snapshot,
             tags: Vec::new(),
             updated_at: page.updated_at,
+            is_talk: namespace.is_talk,
         });
 
         let view = crate::pages::routes::hydrate_page_view(state, page, ns_label)
@@ -373,6 +375,7 @@ impl<S: AppStorage> Mutation<S> {
             body: body_snapshot,
             tags: Vec::new(),
             updated_at: page.updated_at,
+            is_talk: namespace.is_talk,
         });
 
         let view = crate::pages::routes::hydrate_page_view(state, page, ns_label)

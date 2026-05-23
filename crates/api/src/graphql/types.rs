@@ -109,6 +109,12 @@ pub struct Page {
     /// When the page row was last touched.
     #[graphql(name = "updatedAt")]
     pub updated_at: OffsetDateTime,
+    /// `true` if this page lives in a discussion namespace (#43).
+    #[graphql(name = "isTalk")]
+    pub is_talk: bool,
+    /// Talk-page URL when the namespace is paired, otherwise `None`.
+    #[graphql(name = "talkUrl")]
+    pub talk_url: Option<String>,
 }
 
 #[ComplexObject]
@@ -141,6 +147,8 @@ impl Page {
             protection_level: view.protection_level.as_str().to_owned(),
             created_at: view.created_at,
             updated_at: view.updated_at,
+            is_talk: view.is_talk,
+            talk_url: view.links.talk,
         }
     }
 
@@ -162,6 +170,8 @@ impl Page {
             protection_level: page.protection_level.as_str().to_owned(),
             created_at: page.created_at,
             updated_at: page.updated_at,
+            is_talk: false,
+            talk_url: None,
         }
     }
 }
@@ -313,6 +323,13 @@ pub struct Namespace {
     /// Human-readable label.
     #[graphql(name = "displayName")]
     pub display_name: String,
+    /// Whether this namespace holds discussion pages for another (#43).
+    #[graphql(name = "isTalk")]
+    pub is_talk: bool,
+    /// Paired namespace id — for a subject namespace this is the talk side
+    /// and vice-versa.
+    #[graphql(name = "pairedNamespaceId")]
+    pub paired_namespace_id: Option<ID>,
 }
 
 impl From<thewiki_core::Namespace> for Namespace {
@@ -321,6 +338,10 @@ impl From<thewiki_core::Namespace> for Namespace {
             id: ID(n.id.into_uuid().to_string()),
             slug: n.slug.into_string(),
             display_name: n.display_name,
+            is_talk: n.is_talk,
+            paired_namespace_id: n
+                .paired_namespace_id
+                .map(|id| ID(id.into_uuid().to_string())),
         }
     }
 }

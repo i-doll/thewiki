@@ -85,6 +85,22 @@ pub struct Namespace {
     pub slug: NamespaceSlug,
     /// Human-readable label.
     pub display_name: String,
+    /// `true` if this namespace is the discussion / talk side of another
+    /// namespace. Talk namespaces are auto-created when a subject namespace
+    /// is created (see #43); search ranks talk-namespace pages lower by
+    /// default; the SPA renders them with the threaded-reply view.
+    #[serde(default)]
+    pub is_talk: bool,
+    /// Cross-link to the paired namespace.
+    ///
+    /// - For a subject (non-talk) namespace, this points at its `Talk_*` companion.
+    /// - For a talk namespace, this points at the subject namespace it
+    ///   discusses.
+    /// - `None` for namespaces created before #43 that haven't been paired
+    ///   yet; the migration backfills the existing `Main` ↔ `Talk_Main`
+    ///   pair so this is only `None` in transient states.
+    #[serde(default)]
+    pub paired_namespace_id: Option<NamespaceId>,
 }
 
 #[cfg(test)]
@@ -139,9 +155,28 @@ mod tests {
             id: NamespaceId::new(),
             slug: NamespaceSlug::new("main").expect("slug"),
             display_name: "Main".into(),
+            is_talk: false,
+            paired_namespace_id: None,
         };
         let json = serde_json::to_string(&ns).expect("serialise");
         let parsed: Namespace = serde_json::from_str(&json).expect("deserialise");
         assert_eq!(parsed, ns);
+    }
+
+    #[test]
+    fn talk_namespace_round_trips_serde() {
+        let subject = NamespaceId::new();
+        let ns = Namespace {
+            id: NamespaceId::new(),
+            slug: NamespaceSlug::new("Talk_Main").expect("slug"),
+            display_name: "Talk: Main".into(),
+            is_talk: true,
+            paired_namespace_id: Some(subject),
+        };
+        let json = serde_json::to_string(&ns).expect("serialise");
+        let parsed: Namespace = serde_json::from_str(&json).expect("deserialise");
+        assert_eq!(parsed, ns);
+        assert!(parsed.is_talk);
+        assert_eq!(parsed.paired_namespace_id, Some(subject));
     }
 }

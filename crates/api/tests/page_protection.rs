@@ -90,6 +90,8 @@ async fn boot(anonymous_edits: bool) -> (Router, SqliteStorage) {
             id: NamespaceId::new(),
             slug: NamespaceSlug::new("Main").expect("valid slug"),
             display_name: "Main".into(),
+            is_talk: false,
+            paired_namespace_id: None,
         })
         .await
         .expect("seed Main namespace");

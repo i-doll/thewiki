@@ -52,6 +52,8 @@ async fn fresh_app() -> (Router, SqliteStorage, UserId, String) {
             id: NamespaceId::new(),
             slug: NamespaceSlug::new("Main").expect("valid slug"),
             display_name: "Main".into(),
+            is_talk: false,
+            paired_namespace_id: None,
         })
         .await
         .expect("seed Main");
@@ -382,6 +384,8 @@ async fn namespace_atom_feed_filters_to_namespace_only() {
             id: NamespaceId::new(),
             slug: NamespaceSlug::new("Help").expect("slug"),
             display_name: "Help".into(),
+            is_talk: false,
+            paired_namespace_id: None,
         })
         .await
         .expect("seed Help");
@@ -596,6 +600,8 @@ async fn empty_feed_uses_epoch_for_updated() {
             id: NamespaceId::new(),
             slug: NamespaceSlug::new("Empty").expect("slug"),
             display_name: "Empty".into(),
+            is_talk: false,
+            paired_namespace_id: None,
         })
         .await
         .expect("seed Empty");

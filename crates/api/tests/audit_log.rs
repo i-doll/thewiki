@@ -50,6 +50,8 @@ async fn fresh_app() -> TestApp {
             id: NamespaceId::new(),
             slug: NamespaceSlug::new("Main").expect("valid slug"),
             display_name: "Main".into(),
+            is_talk: false,
+            paired_namespace_id: None,
         })
         .await
         .expect("seed Main namespace");

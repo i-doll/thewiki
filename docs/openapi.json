@@ -4898,6 +4898,78 @@
           }
         }
       }
+    },
+    "/api/v1/wiki/{namespace}/{slug}/talk": {
+      "get": {
+        "tags": [
+          "wiki"
+        ],
+        "summary": "`GET /api/v1/wiki/{namespace}/{slug}/talk` — fetch the talk page for the\nsubject page identified by `(namespace, slug)` (#43).",
+        "description": "Resolution rules:\n\n- The path's `namespace` must resolve to a non-talk namespace that is\n  paired with a `Talk_*` companion. The handler returns `400` if the\n  path points at an unpaired namespace and `404` if the namespace\n  doesn't exist.\n- The talk page lives at `(paired_namespace_id, slug)`. If no such row\n  exists yet, the handler returns `404` — the SPA's \"Discuss\" button\n  uses this to switch between \"Create the talk page\" and \"Open the\n  existing discussion\".\n\nReads are open by design, exactly like the regular page reads.",
+        "operationId": "get_talk",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Subject namespace slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Page slug within the subject namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Talk page for the subject",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Namespace has no paired talk side",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Subject namespace, subject page, or talk page not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5637,6 +5709,21 @@
             "$ref": "#/components/schemas/NamespaceId",
             "description": "Stable identifier."
           },
+          "is_talk": {
+            "type": "boolean",
+            "description": "Whether this is a discussion (\"talk\") namespace paired with a\nsubject namespace (#43)."
+          },
+          "paired_namespace_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NamespaceId",
+                "description": "Identifier of the paired namespace, when one is wired up.\nFor a subject namespace this points at its `Talk_*` companion;\nfor a talk namespace it points back at the subject namespace."
+              }
+            ]
+          },
           "slug": {
             "type": "string",
             "description": "URL-safe slug. Forms the `<namespace>` segment of `/wiki/<namespace>/<slug>`."
@@ -5723,6 +5810,19 @@
         "format": "uuid",
         "description": "Identifier for a [`crate::page::Page`]."
       },
+      "PageLinks": {
+        "type": "object",
+        "description": "Hypermedia-style link block surfaced alongside a [`PageView`] (#43).\n\nToday the only field is `talk`, which the SPA uses to render the\n\"Discuss\" sidebar link. Adding new links here is additive — existing\nclients that ignore the `_links` block are unaffected.",
+        "properties": {
+          "talk": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Navigable SPA-route URL of the discussion (\"talk\") page paired\nwith this page, in the form `/wiki/<talk_ns>/<slug>`. The server\nis the source of truth so the client never has to reconstruct\n`Talk_<ns>` itself — that convention can drift after a rename.\n`None` for pages already in a talk namespace (no \"talk of a\ntalk\") or when the namespace has no paired partner."
+          }
+        }
+      },
       "PageListItem": {
         "type": "object",
         "description": "Lighter representation of a page used inside [`PageListResponse`].\n\nLacks `content` and `namespace_id`; clients listing a namespace already\nknow the namespace.",
@@ -5798,6 +5898,10 @@
           "updated_at"
         ],
         "properties": {
+          "_links": {
+            "$ref": "#/components/schemas/PageLinks",
+            "description": "Hypermedia-style cross-references for this page. New surface added\nin #43 — additive, so existing clients that ignore it are unaffected."
+          },
           "categories": {
             "type": "array",
             "items": {
@@ -5832,6 +5936,10 @@
           "id": {
             "$ref": "#/components/schemas/PageId",
             "description": "Stable identifier."
+          },
+          "is_talk": {
+            "type": "boolean",
+            "description": "`true` if this page lives in a discussion (\"talk\") namespace (#43).\nThe SPA uses this to switch the body renderer to\n`<TalkThread>` and to hide the \"Discuss\" sidebar link (talk pages\ndon't have their own talk page)."
           },
           "namespace_id": {
             "$ref": "#/components/schemas/NamespaceId",
@@ -5868,6 +5976,10 @@
           "queued": {
             "type": "boolean",
             "description": "Set to `true` on a `202 Accepted` response when the submitted edit\nlanded in the moderation queue (#40) instead of going live. The page\nfields above still describe the **previous** state (or, on a fresh\ncreate, the empty placeholder page that's now reserving the slug)."
+          },
+          "signature_convention": {
+            "$ref": "#/components/schemas/SignatureConvention",
+            "description": "Documentation of the signature-expansion convention (#43). Surfaced\non every read response so the SPA can render a `~~~~` preview\nclient-side. Independent of the page's namespace — the marker is\nonly *expanded* on save when the page lives in a talk namespace."
           },
           "slug": {
             "type": "string",
@@ -6424,6 +6536,24 @@
             "format": "int64",
             "description": "Best-effort estimate of the total matching document count.",
             "minimum": 0
+          }
+        }
+      },
+      "SignatureConvention": {
+        "type": "object",
+        "description": "Sign-with-timestamp convention metadata (#43).\n\nMirrors the server-side `~~~~` expansion so the SPA can preview the\nrendered signature client-side without a round-trip. The marker is\nMediaWiki-compatible — operators familiar with `mw:Help:Signatures`\nwon't have to retrain editors.",
+        "required": [
+          "marker",
+          "format"
+        ],
+        "properties": {
+          "format": {
+            "type": "string",
+            "description": "Format string describing the expansion. `{user}` is replaced with\n`[[User:<username>]]`; `{timestamp}` with an ISO-8601 UTC timestamp."
+          },
+          "marker": {
+            "type": "string",
+            "description": "Marker that triggers signature expansion. Always `\"~~~~\"`."
           }
         }
       },

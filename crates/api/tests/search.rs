@@ -52,6 +52,8 @@ async fn fresh_app_with_seeded_index() -> Fixture {
         id: NamespaceId::new(),
         slug: NamespaceSlug::new("Main").expect("valid slug"),
         display_name: "Main".into(),
+        is_talk: false,
+        paired_namespace_id: None,
     };
     storage.namespaces().create(&ns).await.expect("seed ns");
 
@@ -89,6 +91,7 @@ async fn fresh_app_with_seeded_index() -> Fixture {
             body: body.to_string(),
             tags: Vec::new(),
             updated_at: OffsetDateTime::now_utc(),
+            is_talk: false,
         };
         index.upsert_on(&writer, &doc).expect("upsert");
     }

@@ -296,6 +296,10 @@ pub struct AppState<S: AppStorage> {
     /// Title-field boost passed through to the Tantivy `QueryParser`.
     /// Pulled from [`crate::config::SearchConfig::title_boost`].
     pub search_title_boost: f32,
+    /// Multiplier applied to the BM25 score of pages that live in a
+    /// discussion / talk namespace (#43). Pulled from
+    /// [`crate::config::SearchConfig::talk_boost`] (default `0.5`).
+    pub search_talk_boost: f32,
     /// Tuning for the media upload endpoint (size cap, type allowlist).
     /// Pulled from [`crate::config::StorageConfig::media`].
     pub media_config: crate::config::MediaConfig,
@@ -337,6 +341,7 @@ impl<S: AppStorage> AppState<S> {
             search: IndexerHandle::disabled(),
             searcher: Searcher::disabled(),
             search_title_boost: 2.0,
+            search_talk_boost: 0.5,
             media_config: crate::config::MediaConfig::default(),
             media_backend: None,
             captcha: Arc::new(NoopCaptcha),
@@ -414,6 +419,14 @@ impl<S: AppStorage> AppState<S> {
         self
     }
 
+    /// Override the talk-namespace score multiplier (#43). Wired from
+    /// [`crate::config::SearchConfig::talk_boost`].
+    #[must_use]
+    pub fn with_search_talk_boost(mut self, boost: f32) -> Self {
+        self.search_talk_boost = boost;
+        self
+    }
+
     /// Convenience for tests: build a state with the built-in default
     /// [`AuthConfig`] (closed registration, no anonymous edits, no approval
     /// queue). Production wiring uses [`Self::new`] with the operator-supplied
@@ -484,6 +497,7 @@ impl<S: AppStorage> Clone for AppState<S> {
             search: self.search.clone(),
             searcher: self.searcher.clone(),
             search_title_boost: self.search_title_boost,
+            search_talk_boost: self.search_talk_boost,
             media_config: self.media_config.clone(),
             media_backend: self.media_backend.clone(),
             captcha: Arc::clone(&self.captcha),

@@ -103,6 +103,8 @@ async fn fresh_app_with_frontend(serve_frontend: bool) -> Router {
         id: NamespaceId::new(),
         slug: NamespaceSlug::new("Main").expect("valid slug"),
         display_name: "Main".into(),
+        is_talk: false,
+        paired_namespace_id: None,
     };
     storage
         .namespaces()
