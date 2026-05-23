@@ -29,9 +29,10 @@ use std::time::Duration;
 
 use serde_json::Value;
 use thewiki_core::{
-    AuditLogId, Category, CategoryId, Media, MediaId, Namespace, NamespaceId, NamespaceSlug, Page,
-    PageId, ProtectionLevel, Revision, RevisionId, Role, RoleId, RoleName, Session, SessionId, Tag,
-    User, UserId, Username,
+    AuditLogId, Category, CategoryId, Media, MediaId, Namespace, NamespaceId, NamespaceSlug,
+    NewNotification, Notification, NotificationId, Page, PageId, PendingRevision,
+    PendingRevisionId, PendingRevisionStatus, ProtectionLevel, Revision, RevisionId, Role, RoleId,
+    RoleName, Session, SessionId, Tag, User, UserId, Username,
 };
 use time::OffsetDateTime;
 
@@ -1387,4 +1388,176 @@ pub trait WatchRepository: Send + Sync {
         user_id: UserId,
         limit: u32,
     ) -> impl Future<Output = Result<Vec<WatchedPage>, StorageError>> + Send;
+}
+
+/// Filter passed to [`PendingRevisionRepository::list`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PendingRevisionFilter {
+    /// Restrict to one status — typically `Pending` for the reviewer UI.
+    /// `None` returns every row regardless of status.
+    pub status: Option<PendingRevisionStatus>,
+}
+
+/// Input for inserting a new pending revision row.
+///
+/// Kept separate from [`PendingRevision`] so producers don't have to mint a
+/// [`PendingRevisionId`] or stamp `created_at` themselves — the storage
+/// layer does both, and the row is always inserted with `status =
+/// pending`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewPendingRevision {
+    /// Page the edit targets.
+    pub page_id: PageId,
+    /// Head revision the editor based their change on, or `None` for a
+    /// brand-new page proposal.
+    pub parent_revision_id: Option<RevisionId>,
+    /// Proposed Markdown body — exactly what would become the revision's
+    /// body on approval.
+    pub body: String,
+    /// Authenticated author, or `None` for anonymous edits.
+    pub author_id: Option<UserId>,
+    /// Captured client IP for anonymous edits.
+    pub author_ip: Option<String>,
+    /// Short note attached to the edit (mirrors the revision's edit summary).
+    pub comment: String,
+}
+
+/// Persistence operations for the [`PendingRevision`] aggregate (#40).
+pub trait PendingRevisionRepository: Send + Sync {
+    /// Insert a fresh row in the `pending` state and return the stored row.
+    ///
+    /// The storage layer mints the [`PendingRevisionId`] and stamps
+    /// `created_at`. `status` is always `pending`; the decided columns are
+    /// `NULL`.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::Database`] if `page_id` doesn't resolve (FK
+    ///   violation) or on any driver failure.
+    fn create(
+        &self,
+        new: NewPendingRevision,
+    ) -> impl Future<Output = Result<PendingRevision, StorageError>> + Send;
+
+    /// Fetch a pending revision by primary key.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if no row matches.
+    fn get_by_id(
+        &self,
+        id: PendingRevisionId,
+    ) -> impl Future<Output = Result<PendingRevision, StorageError>> + Send;
+
+    /// List pending-revision rows, newest first, cursor paginated.
+    ///
+    /// Order is `(created_at DESC, id DESC)`. The cursor encodes the last
+    /// `(created_at, id)` pair returned.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::InvalidInput`] if `cursor` is malformed for this
+    /// backend.
+    fn list(
+        &self,
+        filter: PendingRevisionFilter,
+        cursor: Option<Cursor>,
+        limit: u32,
+    ) -> impl Future<Output = Result<PageSlice<PendingRevision>, StorageError>> + Send;
+
+    /// Count rows that match `filter`. Used by the queued-edit submission
+    /// path to surface a `queue_position` to the editor and by the reviewer
+    /// UI to render a "N pending" badge.
+    fn count(
+        &self,
+        filter: PendingRevisionFilter,
+    ) -> impl Future<Output = Result<u64, StorageError>> + Send;
+
+    /// Flip a pending row to `approved`, recording the reviewer and the
+    /// decision time. Returns the updated row.
+    ///
+    /// The promotion to a real [`Revision`] is **not** done here — the
+    /// caller is responsible for committing the revision against the page
+    /// (typically through [`AppStorage::commit_page_audit`]) inside the
+    /// same logical operation. Splitting the two keeps the page-mutation
+    /// transaction boundary clean.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::NotFound`] if no row matches `id`.
+    /// * [`StorageError::Conflict`] if the row was already decided (a
+    ///   double-approve / approve-after-reject race).
+    fn approve(
+        &self,
+        id: PendingRevisionId,
+        reviewer_id: UserId,
+        decided_at: OffsetDateTime,
+    ) -> impl Future<Output = Result<PendingRevision, StorageError>> + Send;
+
+    /// Flip a pending row to `rejected`, recording the reviewer, the
+    /// reason, and the decision time. Returns the updated row.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::NotFound`] if no row matches `id`.
+    /// * [`StorageError::Conflict`] if the row was already decided.
+    fn reject(
+        &self,
+        id: PendingRevisionId,
+        reviewer_id: UserId,
+        reason: &str,
+        decided_at: OffsetDateTime,
+    ) -> impl Future<Output = Result<PendingRevision, StorageError>> + Send;
+}
+
+/// Persistence operations for the [`Notification`] aggregate (#40).
+pub trait NotificationRepository: Send + Sync {
+    /// Insert a fresh notification row and return the stored row.
+    ///
+    /// The storage layer mints the [`NotificationId`] and stamps
+    /// `created_at`. `read_at` is implicitly `NULL`.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::Database`] if `user_id` doesn't resolve (FK
+    ///   violation) or on any driver failure.
+    fn create(
+        &self,
+        new: NewNotification,
+    ) -> impl Future<Output = Result<Notification, StorageError>> + Send;
+
+    /// List a user's notifications, newest first, cursor paginated.
+    ///
+    /// Order is `(created_at DESC, id DESC)`.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::InvalidInput`] if `cursor` is malformed for this
+    /// backend.
+    fn list_for_user(
+        &self,
+        user_id: UserId,
+        cursor: Option<Cursor>,
+        limit: u32,
+    ) -> impl Future<Output = Result<PageSlice<Notification>, StorageError>> + Send;
+
+    /// Count unread notifications for a user. Used by the inbox bell.
+    fn count_unread(
+        &self,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<u64, StorageError>> + Send;
+
+    /// Stamp `read_at = now` on `id`, idempotent (re-marking is a no-op).
+    /// Returns the updated row.
+    ///
+    /// # Errors
+    ///
+    /// * [`StorageError::NotFound`] if no row matches or it belongs to a
+    ///   different user.
+    fn mark_read(
+        &self,
+        id: NotificationId,
+        user_id: UserId,
+        read_at: OffsetDateTime,
+    ) -> impl Future<Output = Result<Notification, StorageError>> + Send;
 }

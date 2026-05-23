@@ -47,6 +47,8 @@ bitflags! {
         const VIEW_AUDIT_LOG    = 1 << 9;
         /// Manage the IP / URL blocklists (#42).
         const MANAGE_BLOCKLIST  = 1 << 10;
+        /// Review and decide on queued edits in the approval queue (#40).
+        const REVIEW_EDITS      = 1 << 11;
     }
 }
 
@@ -122,6 +124,7 @@ mod tests {
             Permissions::MANAGE_NAMESPACES,
             Permissions::VIEW_AUDIT_LOG,
             Permissions::MANAGE_BLOCKLIST,
+            Permissions::REVIEW_EDITS,
         ] {
             assert!(all.contains(flag), "missing {flag:?}");
         }

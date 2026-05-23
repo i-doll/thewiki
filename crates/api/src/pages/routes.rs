@@ -54,21 +54,19 @@ fn editor_context(editor: &EditorExtractor) -> EditorContext {
 /// continue to resolve against this slug.
 pub(super) const DEFAULT_NAMESPACE: &str = "Main";
 
-/// Window (in seconds) during which a freshly-registered account is treated
-/// as "new" for [`ApprovalScope::NewUsers`] gating. 24h matches the spec in
-/// `thewiki.example.toml` and is short enough to throttle bot signups without
-/// punishing genuine new editors for longer than necessary.
-const NEW_USER_WINDOW_SECS: i64 = 24 * 60 * 60;
+/// Default window (in seconds) during which a freshly-registered account is
+/// treated as "new" for [`ApprovalScope::NewUsers`] gating when no operator
+/// config supplies one. Mirrors the previous hard-coded 24h fallback.
+const NEW_USER_WINDOW_SECS_DEFAULT: i64 = 24 * 60 * 60;
 
 /// Decide whether a revision should land in the approval queue rather than
 /// going live immediately. Pure function — no I/O, no async — so each branch
 /// can be exhaustively unit-tested.
-///
-/// TODO(#40): when the queue lands, this function will also drive the
-/// `revisions.status` column. For now the decision is observed via
-/// [`queue_or_publish`] which logs a `tracing::info!` instead of persisting
-/// the pending revision row.
-fn needs_approval(scope: ApprovalScope, editor: &EditorExtractor) -> bool {
+fn needs_approval(
+    scope: ApprovalScope,
+    editor: &EditorExtractor,
+    new_user_window_secs: i64,
+) -> bool {
     match scope {
         ApprovalScope::None => false,
         ApprovalScope::Anonymous => editor.is_anonymous,
@@ -79,7 +77,7 @@ fn needs_approval(scope: ApprovalScope, editor: &EditorExtractor) -> bool {
             match editor.user_created_at {
                 Some(created_at) => {
                     let age = OffsetDateTime::now_utc() - created_at;
-                    age.whole_seconds() < NEW_USER_WINDOW_SECS
+                    age.whole_seconds() < new_user_window_secs
                 }
                 // No `created_at` on an authenticated session is impossible
                 // (the User row always has one) but be defensive — treating
@@ -91,39 +89,75 @@ fn needs_approval(scope: ApprovalScope, editor: &EditorExtractor) -> bool {
     }
 }
 
-/// Decide whether a revision should publish live or land in the approval queue
-/// (M2 — currently a no-op stub).
-///
-/// Returns `true` when the revision should be committed live and the caller should
-/// proceed to flip `pages.current_revision_id`; `false` when it landed in
-/// the (stubbed) approval queue and the page should keep its existing head.
-///
-/// TODO(#40): replace the `create_pending` branch with a real queue write —
-/// today this only emits a structured `tracing::info!` so operators (and the
-/// tests) can verify the gating works without us having to ship the queue
-/// schema before its tracking issue.
-async fn queue_or_publish<S: AppStorage>(
+/// Decide whether the proposed edit should publish live or land in the
+/// moderation queue (#40). Pure (no I/O) — the actual `pending_revisions`
+/// write happens via [`persist_pending`] once the page row is in place.
+fn should_queue<S: AppStorage>(state: &AppState<S>, editor: &EditorExtractor) -> bool {
+    let policy = state.effective_approval_policy();
+    let new_user_window_secs: i64 = i64::from(policy.new_user_threshold_days) * 24 * 60 * 60;
+    let window = if new_user_window_secs > 0 {
+        new_user_window_secs
+    } else {
+        NEW_USER_WINDOW_SECS_DEFAULT
+    };
+    needs_approval(policy.scope, editor, window)
+}
+
+/// Outcome of [`persist_pending`]: the row + its 1-based queue position.
+#[derive(Debug, Clone)]
+pub(crate) struct QueuedEdit {
+    /// The minted pending-revision row.
+    pub pending: thewiki_core::PendingRevision,
+    /// 1-based queue position the editor can show "you are #N in line".
+    pub queue_position: u64,
+}
+
+/// Persist a pending-revision row for `revision`. Called after the page
+/// row exists in storage (otherwise the FK fails).
+async fn persist_pending<S: AppStorage>(
     state: &AppState<S>,
     revision: &Revision,
     editor: &EditorExtractor,
-) -> Result<bool, ApiError> {
-    if needs_approval(state.auth_config.approval_required_for, editor) {
-        // TODO(#40): persist the revision to a `pending_revisions` table and
-        // surface it on the moderator approval queue. For the wiring-only PR
-        // we log the decision and return `false` so the caller does not
-        // promote the revision to head.
-        tracing::info!(
-            page_id = %revision.page_id,
-            revision_id = %revision.id,
-            author_id = %revision.author_id,
-            anonymous = editor.is_anonymous,
-            approval_scope = ?state.auth_config.approval_required_for,
-            "would queue revision for approval (TODO #40)"
-        );
-        Ok(false)
-    } else {
-        Ok(true)
-    }
+    comment: Option<&str>,
+) -> Result<QueuedEdit, ApiError> {
+    use thewiki_storage::repo::{
+        NewPendingRevision, PendingRevisionFilter, PendingRevisionRepository,
+    };
+
+    let new_row = NewPendingRevision {
+        page_id: revision.page_id,
+        parent_revision_id: revision.parent_id,
+        body: revision.body.clone(),
+        author_id: if editor.is_anonymous {
+            None
+        } else {
+            Some(editor.user_id)
+        },
+        author_ip: None,
+        comment: comment.unwrap_or("").to_owned(),
+    };
+    let pending = state.storage.pending_revisions().create(new_row).await?;
+
+    let queue_position = state
+        .storage
+        .pending_revisions()
+        .count(PendingRevisionFilter {
+            status: Some(thewiki_core::PendingRevisionStatus::Pending),
+        })
+        .await?;
+
+    tracing::info!(
+        page_id = %revision.page_id,
+        pending_id = %pending.id,
+        anonymous = editor.is_anonymous,
+        queue_position,
+        "queued revision for approval",
+    );
+
+    Ok(QueuedEdit {
+        pending,
+        queue_position,
+    })
 }
 
 /// Reject the edit if any URL in `body` matches the URL blocklist (#42).
@@ -251,6 +285,9 @@ pub(crate) async fn hydrate_page_view<S: AppStorage>(
         tags,
         created_at: page.created_at,
         updated_at: page.updated_at,
+        queued: false,
+        pending_revision_id: None,
+        queue_position: None,
     })
 }
 
@@ -441,7 +478,7 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
     };
 
     let revision = Revision::new(page.id, None, editor.user_id, req.content, None);
-    let live = queue_or_publish(&state, &revision, &editor).await?;
+    let live = !should_queue(&state, &editor);
 
     let status = if live {
         page.current_revision_id = Some(revision.id);
@@ -454,11 +491,14 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
         StatusCode::ACCEPTED
     };
 
-    let mut metadata = json!({
+    let metadata = json!({
         "namespace": namespace_label,
         "slug": page.slug.as_str(),
         "live": live,
     });
+    let live_revision_body = revision.body.clone();
+    let revision_for_audit = if live { Some(revision.clone()) } else { None };
+    let mut metadata = metadata;
     if live {
         metadata["revision_id"] = json!(revision.id.into_uuid());
     }
@@ -470,17 +510,25 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
         format!("{namespace_label}/{}", page.slug),
         metadata,
     );
-    let live_revision_body = revision.body.clone();
     state
         .storage
         .commit_page_audit(
             PageAuditMutation::CreatePage {
                 page: page.clone(),
-                live_revision: live.then_some(revision),
+                live_revision: revision_for_audit,
             },
             audit,
         )
         .await?;
+
+    // Now that the page row exists, the FK on `pending_revisions.page_id`
+    // resolves. Persist the pending row on the queued branch and surface
+    // the position back to the caller.
+    let queued = if !live {
+        Some(persist_pending(&state, &revision, &editor, None).await?)
+    } else {
+        None
+    };
 
     // Replace the outbound wikilink set for this page. We do this only on
     // the live-publish branch — queued edits don't change the page's
@@ -522,7 +570,12 @@ pub(crate) async fn create_page_in_namespace<S: AppStorage>(
         ));
     }
 
-    let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
+    let mut view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
+    if let Some(q) = queued {
+        view.queued = true;
+        view.pending_revision_id = Some(q.pending.id);
+        view.queue_position = Some(q.queue_position);
+    }
     Ok((status, Json(view)))
 }
 
@@ -644,9 +697,9 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
         page.current_revision_id,
         editor.user_id,
         req.content,
-        req.edit_summary,
+        req.edit_summary.clone(),
     );
-    let live = queue_or_publish(&state, &revision, &editor).await?;
+    let live = !should_queue(&state, &editor);
     let title_changed = live
         && new_title
             .as_deref()
@@ -681,6 +734,8 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
         metadata,
     );
     let live_revision_body = revision.body.clone();
+    let revision_for_queue = if live { None } else { Some(revision.clone()) };
+    let edit_summary_for_queue = req.edit_summary.clone();
     let mutation = if live {
         PageAuditMutation::CommitRevision {
             page: page.clone(),
@@ -690,6 +745,22 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
         PageAuditMutation::AuditOnly
     };
     state.storage.commit_page_audit(mutation, audit).await?;
+
+    // Queued branch: write the `pending_revisions` row now that any audit
+    // bookkeeping is done. The FK on `pending_revisions.page_id` already
+    // resolves — the page row was created when the user first ran the
+    // create handler, and the head we're proposing to update will stay at
+    // the current `current_revision_id` until a reviewer promotes us.
+    let queued = if !live {
+        match revision_for_queue {
+            Some(rev) => Some(
+                persist_pending(&state, &rev, &editor, edit_summary_for_queue.as_deref()).await?,
+            ),
+            None => None,
+        }
+    } else {
+        None
+    };
 
     // Refresh the outbound wikilink set whenever the page is republished
     // live. Queued edits keep the old set until they're promoted.
@@ -738,7 +809,12 @@ pub(crate) async fn update_page_in_namespace<S: AppStorage>(
         ));
     }
 
-    let view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
+    let mut view = hydrate_page_view(&state, page, namespace.slug.into_string()).await?;
+    if let Some(q) = queued {
+        view.queued = true;
+        view.pending_revision_id = Some(q.pending.id);
+        view.queue_position = Some(q.queue_position);
+    }
     Ok((status, Json(view)))
 }
 
@@ -957,16 +1033,26 @@ mod tests {
         }
     }
 
+    // Test window mirrors the documented default (24h) so the new-users
+    // boundary checks below stay readable.
+    const TEST_WINDOW_SECS: i64 = NEW_USER_WINDOW_SECS_DEFAULT;
+
     #[test]
     fn needs_approval_scope_none_is_always_false() {
-        assert!(!needs_approval(ApprovalScope::None, &editor(true, None)));
         assert!(!needs_approval(
             ApprovalScope::None,
-            &editor(false, Some(0))
+            &editor(true, None),
+            TEST_WINDOW_SECS
         ));
         assert!(!needs_approval(
             ApprovalScope::None,
-            &editor(false, Some(NEW_USER_WINDOW_SECS * 10))
+            &editor(false, Some(0)),
+            TEST_WINDOW_SECS
+        ));
+        assert!(!needs_approval(
+            ApprovalScope::None,
+            &editor(false, Some(TEST_WINDOW_SECS * 10)),
+            TEST_WINDOW_SECS
         ));
     }
 
@@ -974,36 +1060,49 @@ mod tests {
     fn needs_approval_scope_anonymous_only_gates_anonymous() {
         assert!(needs_approval(
             ApprovalScope::Anonymous,
-            &editor(true, None)
+            &editor(true, None),
+            TEST_WINDOW_SECS
         ));
         assert!(!needs_approval(
             ApprovalScope::Anonymous,
-            &editor(false, Some(0))
+            &editor(false, Some(0)),
+            TEST_WINDOW_SECS
         ));
     }
 
     #[test]
     fn needs_approval_scope_new_users_gates_fresh_accounts() {
         // Anonymous → always queued.
-        assert!(needs_approval(ApprovalScope::NewUsers, &editor(true, None)));
+        assert!(needs_approval(
+            ApprovalScope::NewUsers,
+            &editor(true, None),
+            TEST_WINDOW_SECS
+        ));
         // 5-minute-old account → queued.
         assert!(needs_approval(
             ApprovalScope::NewUsers,
-            &editor(false, Some(5 * 60))
+            &editor(false, Some(5 * 60)),
+            TEST_WINDOW_SECS
         ));
         // 48-hour-old account → not queued.
         assert!(!needs_approval(
             ApprovalScope::NewUsers,
-            &editor(false, Some(NEW_USER_WINDOW_SECS * 2))
+            &editor(false, Some(TEST_WINDOW_SECS * 2)),
+            TEST_WINDOW_SECS
         ));
     }
 
     #[test]
     fn needs_approval_scope_all_is_always_true() {
-        assert!(needs_approval(ApprovalScope::All, &editor(true, None)));
         assert!(needs_approval(
             ApprovalScope::All,
-            &editor(false, Some(NEW_USER_WINDOW_SECS * 10))
+            &editor(true, None),
+            TEST_WINDOW_SECS
+        ));
+        assert!(needs_approval(
+            ApprovalScope::All,
+            &editor(false, Some(TEST_WINDOW_SECS * 10)),
+            TEST_WINDOW_SECS
         ));
     }
 }

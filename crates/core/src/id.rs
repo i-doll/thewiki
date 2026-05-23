@@ -132,6 +132,17 @@ define_id! {
     CategoryId
 }
 
+define_id! {
+    /// Identifier for a row in the `pending_revisions` (edit approval queue)
+    /// table (#40).
+    PendingRevisionId
+}
+
+define_id! {
+    /// Identifier for an in-app notification row (#40).
+    NotificationId
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, reason = "ergonomic tests")]
 mod tests {

@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, Link, Outlet } from "@tanstack/react-router";
 import { Toaster } from "react-hot-toast";
+import { InboxBell } from "../components/InboxBell";
 import { SearchBox } from "../components/SearchBox";
 
 interface RouterContext {
@@ -27,6 +28,14 @@ function RootComponent() {
 						<Link to="/watchlist" className="hover:text-neutral-900">
 							Watchlist
 						</Link>
+						<Link
+							to="/admin/approval-queue"
+							search={{ status: "pending", selected: "" }}
+							className="hover:text-neutral-900"
+						>
+							Queue
+						</Link>
+						<InboxBell />
 						<Link to="/login" className="hover:text-neutral-900">
 							Login
 						</Link>

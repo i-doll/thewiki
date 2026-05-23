@@ -61,6 +61,9 @@ pub struct Config {
     /// Renderer tuning (#45 templates, future Markdown knobs).
     #[serde(default)]
     pub render: RenderConfig,
+    /// Moderation policy — drives the edit approval queue (#40).
+    #[serde(default)]
+    pub moderation: ModerationConfig,
 }
 
 /// Renderer tuning. Today exposes only the template subsection (#45); other
@@ -495,6 +498,134 @@ pub enum ApprovalScope {
     All,
 }
 
+/// Moderation policy — currently scopes the edit approval queue (#40).
+///
+/// Carved out of [`AuthConfig`] because the approval-queue is a
+/// moderation concern; auth covers "who can sign in" and the moderation
+/// section covers "which classes of edit need a human review before
+/// going live". The two interact (anonymous edits typically map to the
+/// "anonymous" approval scope) but they configure different teams in
+/// practice.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModerationConfig {
+    /// Edit approval queue policy.
+    #[serde(default)]
+    pub approval: ApprovalConfig,
+}
+
+/// Approval queue knobs surfaced under `[moderation.approval]` in the
+/// TOML file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApprovalConfig {
+    /// Which class of edits the moderator queue gates. The legacy
+    /// [`AuthConfig::approval_required_for`] field is consulted as a
+    /// fallback so existing config files keep working — the
+    /// `moderation.approval.require_approval_for` knob is the new home
+    /// for the same policy.
+    #[serde(default = "default_require_approval_for")]
+    pub require_approval_for: ApprovalRequirement,
+    /// Window in days during which a freshly-registered account counts
+    /// as a "new user" for the
+    /// [`ApprovalRequirement::AnonAndNewUsers`] scope. Defaults to 7.
+    #[serde(default = "default_new_user_threshold_days")]
+    pub new_user_threshold_days: u32,
+}
+
+impl Default for ApprovalConfig {
+    fn default() -> Self {
+        Self {
+            require_approval_for: default_require_approval_for(),
+            new_user_threshold_days: default_new_user_threshold_days(),
+        }
+    }
+}
+
+fn default_require_approval_for() -> ApprovalRequirement {
+    ApprovalRequirement::None
+}
+
+fn default_new_user_threshold_days() -> u32 {
+    7
+}
+
+/// Approval-queue scope expressed as wire-form strings (mirrors what
+/// operators write in `thewiki.toml`).
+///
+/// This is the public, version-stable shape used by
+/// [`ApprovalConfig::require_approval_for`]. The legacy
+/// [`ApprovalScope`] enum stays as the internal currency the page
+/// handlers consume — [`ApprovalRequirement`] is converted to it via
+/// [`ApprovalRequirement::into_scope`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ApprovalRequirement {
+    /// Every edit goes live immediately.
+    None,
+    /// Anonymous edits require approval; signed-in edits go live.
+    Anon,
+    /// Anonymous edits + edits from accounts younger than
+    /// [`ApprovalConfig::new_user_threshold_days`] require approval.
+    AnonAndNewUsers,
+    /// Every edit requires approval.
+    All,
+}
+
+impl ApprovalRequirement {
+    /// Map the operator-facing string form to the internal
+    /// [`ApprovalScope`] consumed by the page handlers.
+    #[must_use]
+    pub const fn into_scope(self) -> ApprovalScope {
+        match self {
+            Self::None => ApprovalScope::None,
+            Self::Anon => ApprovalScope::Anonymous,
+            Self::AnonAndNewUsers => ApprovalScope::NewUsers,
+            Self::All => ApprovalScope::All,
+        }
+    }
+}
+
+/// Snapshot of the effective approval policy after merging the legacy
+/// [`AuthConfig::approval_required_for`] field and the new
+/// [`ModerationConfig::approval`] section.
+///
+/// The merge rule is: if the operator set the modern `[moderation.approval]`
+/// section to anything other than the default, use it; otherwise fall back
+/// to the legacy [`AuthConfig::approval_required_for`]. This keeps existing
+/// configs (and the matching integration tests) working unchanged while
+/// letting new deploys configure the queue through the documented path.
+#[derive(Debug, Clone, Copy)]
+pub struct EffectiveApprovalPolicy {
+    /// Which class of edits should land in the queue.
+    pub scope: ApprovalScope,
+    /// Days after registration during which an account counts as "new"
+    /// for [`ApprovalScope::NewUsers`].
+    pub new_user_threshold_days: u32,
+}
+
+impl Config {
+    /// Compute the effective approval policy a request handler should
+    /// consult. See [`EffectiveApprovalPolicy`] for the merge rule.
+    #[must_use]
+    pub fn effective_approval_policy(&self) -> EffectiveApprovalPolicy {
+        let modern_scope = self.moderation.approval.require_approval_for.into_scope();
+        let scope = if matches!(modern_scope, ApprovalScope::None) {
+            // Modern config left as the default — defer to the legacy field
+            // so existing configs keep working. Once the legacy field is
+            // retired this branch collapses to `modern_scope`.
+            self.auth.approval_required_for
+        } else {
+            modern_scope
+        };
+        EffectiveApprovalPolicy {
+            scope,
+            new_user_threshold_days: self.moderation.approval.new_user_threshold_days,
+        }
+    }
+}
+
 /// Argon2id tuning. Defaults target a sensible production posture
 /// (64 MiB / 3 iterations / 1 lane).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -793,6 +924,7 @@ impl Config {
             captcha: CaptchaConfig::default(),
             security: SecurityConfig::default(),
             render: RenderConfig::default(),
+            moderation: ModerationConfig::default(),
         }
     }
 

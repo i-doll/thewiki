@@ -76,7 +76,9 @@ pub mod content_format;
 pub mod id;
 pub mod media;
 pub mod namespace;
+pub mod notification;
 pub mod page;
+pub mod pending_revision;
 pub mod permissions;
 pub mod protection;
 pub mod render;
@@ -91,11 +93,14 @@ pub use captcha::{CaptchaError, CaptchaFrontendConfig, CaptchaProvider, NoopCapt
 pub use category::Category;
 pub use content_format::ContentFormat;
 pub use id::{
-    AuditLogId, CategoryId, MediaId, NamespaceId, PageId, RevisionId, RoleId, SessionId, UserId,
+    AuditLogId, CategoryId, MediaId, NamespaceId, NotificationId, PageId, PendingRevisionId,
+    RevisionId, RoleId, SessionId, UserId,
 };
 pub use media::{CONTENT_HASH_BYTES, Media};
 pub use namespace::{NAMESPACE_SLUG_MAX_BYTES, Namespace, NamespaceSlug};
+pub use notification::{NewNotification, Notification};
 pub use page::Page;
+pub use pending_revision::{PendingRevision, PendingRevisionStatus};
 pub use permissions::Permissions;
 pub use protection::ProtectionLevel;
 pub use render::{
